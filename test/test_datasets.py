@@ -2,7 +2,7 @@
 import sys
 sys.path.append("..")
 # use k562_cut0.04 as an example.
-from datasets.dataset import build_dataset
+from dataset.dataset import build_dataset
 # simulate an arugment parser
 import argparse
 args = argparse.Namespace(
