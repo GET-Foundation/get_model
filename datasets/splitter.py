@@ -2,7 +2,7 @@ from typing import Tuple, List, Dict
 
 import pandas as pd
 
-def cell_splitter(celltype_metadata: str, leave_out_celltypes: str, datatypes: str, is_train: bool = True, is_pretrain: bool = False) -> Tuple[List[str], Dict[str, str], Dict[str, str]]:
+def cell_splitter(celltype_metadata: pd.DataFrame, leave_out_celltypes: str, datatypes: str, is_train: bool = True, is_pretrain: bool = False) -> Tuple[List[str], Dict[str, str], Dict[str, str]]:
     """
     Process data based on given parameters.
 
@@ -21,9 +21,6 @@ def cell_splitter(celltype_metadata: str, leave_out_celltypes: str, datatypes: s
         AssertionError: If the length of file_list, cluster_list, datatype_list, and expression_list is not equal.
 
     """
-    # Read cell type metadata
-    celltype_metadata = pd.read_csv(celltype_metadata, sep=",")
-
     # Convert leave_out_celltypes, datatypes, and leave_out_chromosomes to lists
     leave_out_celltypes = leave_out_celltypes.split(",")
     datatypes = datatypes.split(",")

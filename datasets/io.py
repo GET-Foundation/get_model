@@ -75,7 +75,8 @@ def generate_paths(file_id: int, data_path: str, data_type: str, use_natac: bool
     seq_npz_path = os.path.join(data_path, data_type, str(file_id) + ".seq.slop_100.npz")
     celltype_annot = os.path.join(data_path, data_type, file_id + ".csv")
 
-    paths_dict[file_id] = {
+    paths_dict = {
+        "file_id": file_id,
         "peak_npz": peak_npz_path,
         "target_npy": target_npy_path,
         "tssidx_npy": tssidx_npy_path,
@@ -85,19 +86,19 @@ def generate_paths(file_id: int, data_path: str, data_type: str, use_natac: bool
     return paths_dict
 
 
-def prepare_sequence_idx(celltype_annot: pd.DataFrame, num_region_per_sample: int = 200) -> pd.DataFrame:
+def prepare_sequence_idx(celltype_annot: pd.DataFrame, slop: int = 100) -> pd.DataFrame:
     """
     Prepares sequence indices for the celltype annotation data.
 
     Args:
         celltype_annot (pd.DataFrame): Celltype annotation data.
-        num_region_per_sample (int, optional): Number of regions per sample. Defaults to 200.
+        slop (int, optional): Extended sequence size on both sides per sample. Defaults to 100.
 
     Returns:
         pd.DataFrame: Updated celltype annotation data with sequence indices.
     """
     celltype_annot["SeqLength"] = (
-        celltype_annot["End"] - celltype_annot["Start"] + num_region_per_sample
+        celltype_annot["End"] - celltype_annot["Start"] + slop * 2
     )
     celltype_annot["SeqLengthCumulative"] = celltype_annot["SeqLength"].cumsum()
     celltype_annot["SeqStartIdx"] = [0] + celltype_annot[

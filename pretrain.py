@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import utils
-from datasets import build_dataset
+from datasets.dataset import build_dataset
 from engine import pretrain_one_epoch as train_one_epoch
 from model.optim import create_optimizer
 from timm.models import create_model
