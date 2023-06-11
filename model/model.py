@@ -4,16 +4,17 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import sys 
+sys.path.append("..")
 import yaml
 from timm.models.layers import trunc_normal_
 from timm.models.registry import register_model
-from rotary_embedding_torch import RotaryEmbedding
+# from rotary_embedding_torch import RotaryEmbedding
 from position_encoding import CTCFPositionalEncoding, AbsolutePositionalEncoding
-from ..datasets.io import parse_meme_file
+from dataset.io import parse_meme_file
 from transformer import GETTransformer
 hyperparams = {
     "num_regions": 200,
-    "dna_len": 2000,
     "num_res_block": 0,
     "motif_prior": True,
     "num_motif": 637,
@@ -39,10 +40,9 @@ class SequenceEncoder(nn.Module):
     """
 
     def __init__(
-        self, num_region, dna_len, num_motif=637, num_res_block=3, motif_prior=False
+        self, num_region, num_motif=637, num_res_block=3, motif_prior=False
     ):
         super().__init__()
-        self.dna_len = dna_len
         self.num_region = num_region
         self.num_motif = num_motif
         self.num_res_block = num_res_block
@@ -98,7 +98,8 @@ class SequenceEncoder(nn.Module):
         return nn.ModuleList(res_blocks)
 
     def forward(self, x):
-        x = x.reshape(-1, self.dna_len, 4).permute(
+        B, N, L, _ = x.shape
+        x = x.reshape(B * N, L, 4).permute(
             0, 2, 1
         )  # (BATCH_SIZE * NUM_REGION, 4, SEQ_LEN)
         x = self.motif(x)
@@ -144,21 +145,19 @@ class GETPretrain(nn.Module):
     def __init__(
         self,
         num_regions=200,
-        dna_len=2000,
         num_motif=637,
         num_res_block=0,
         motif_prior=False,
         embed_dim=768,
-        num_layers=8,
+        num_layers=12,
         d_model=768,
-        nhead=8,
+        nhead=12,
         dropout=0.1,
         output_dim=1,
         pos_emb_components=["CTCF", "Rotary", "Absolute"],
     ):
         super().__init__()
         self.num_regions = num_regions
-        self.dna_len = dna_len
         self.num_motif = num_motif
         self.num_res_block = num_res_block
         self.motif_prior = motif_prior
@@ -170,11 +169,11 @@ class GETPretrain(nn.Module):
         self.output_dim = output_dim
         self.pos_emb_components = pos_emb_components
         self.motif = SequenceEncoder(
-            num_regions, dna_len, num_motif, num_res_block, motif_prior
+            num_regions, num_motif, num_res_block, motif_prior
         )
         self.region_embed = RegionEmbed(num_regions, num_motif, embed_dim)
         self.pos_embed = []
-        if "CTCF" in self.pos_emb_components:
+        if "CTCF" in self.pos_emb_components: 
             self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
         if "Rotary" in self.pos_emb_components:
             self.pos_embed.append(RotaryEmbedding(embed_dim))
@@ -224,8 +223,8 @@ class GETPretrain(nn.Module):
             else:
                 x = pos_emb_component(x)
 
-        x, _ = self.encoder(x, mask=mask)
-        x_masked = self.head_mask(x)
+        x, _ = self.encoder(x, mask=mask) # (N, D)
+        x_masked = self.head_mask(x) # (N, Motif)
         x_masked = x_masked[mask].reshape(B, -1, C)
         atac = F.softplus(self.head_atac(x.permute(0, 2, 1)).permute(0, 2, 1))
 
@@ -265,7 +264,6 @@ class GETFinetune(GETPretrain):
     def __init__(
         self,
         num_regions=200,
-        dna_len=2000,
         num_motif=637,
         num_res_block=0,
         motif_prior=False,
@@ -280,7 +278,6 @@ class GETFinetune(GETPretrain):
     ):
         super().__init__(
             num_regions,
-            dna_len,
             num_motif,
             num_res_block,
             motif_prior,
@@ -330,7 +327,6 @@ class GETFinetune(GETPretrain):
 def get_pretraine_motif(pretrained=False, **kwargs):
     model = GETPretrain(
         num_regions=200,
-        dna_len=2000,
         num_motif=637,
         num_res_block=1,
         motif_prior=True,
@@ -352,9 +348,8 @@ def get_pretraine_motif(pretrained=False, **kwargs):
 def get_finetune_motif(pretrained=False, **kwargs):
     model = GETFinetune(
         num_regions=200,
-        dna_len=2000,
         num_motif=637,
-        num_res_block=1,
+        num_res_block=3,
         motif_prior=True,
         embed_dim=768,
         num_layers=8,
@@ -370,20 +365,20 @@ def get_finetune_motif(pretrained=False, **kwargs):
 
 
 # %%
-# from timm import create_model
-# m = create_model('get_finetune_motif', pretrained=False).cuda()
+from timm import create_model
+m = create_model('get_finetune_motif', pretrained=False).cuda()
 
-# # %%
-# # random generate one hot encoding of DNA sequence in size (batch_size, num_region, dna_len, 4)
-# batch_size = 4
-# num_region = 200
-# dna_len = 2000
-# input = torch.randint(0, 2, (batch_size, num_region, dna_len, 4)).cuda().float()
-# # %%
+# %%
+# random generate one hot encoding of DNA sequence in size (batch_size, num_region, dna_len, 4)
+batch_size = 2
+num_region = 200
+dna_len = 2000
+input = torch.randint(0, 2, (batch_size, num_region, dna_len, 4)).cuda().float()
+# %%
 
-# # %%
-# for i in range(16):
-#     output, atac, exp = m(input, torch.zeros((batch_size, num_region)).bool().cuda(), torch.randint(0, 1, (batch_size, num_region, 3)).cuda())
-#     print(output.shape, atac.shape, exp.shape)
-#     output.mean().backward()
-# # %%
+# %%
+for i in range(16):
+    output, atac, exp = m(input, torch.zeros((batch_size, num_region)).bool().cuda(), torch.randint(0, 1, (batch_size, num_region, 3)).cuda())
+    print(output.shape, atac.shape, exp.shape)
+    output.mean().backward()
+# %%

@@ -4,7 +4,7 @@ from typing import Any, Callable, Optional, Tuple, List, Dict
 
 import numpy as np
 import pandas as pd
-from datasets.augmentation import (
+from dataset.augmentation import (
     ATACSample,
     DataAugmentationForGETPeak,
     DataAugmentationForGETSequence,
@@ -12,8 +12,8 @@ from datasets.augmentation import (
     DataAugmentationForGETPeakFinetune,
     DataAugmentationForGETSequenceFinetune,
 )
-from datasets.io import generate_paths, get_hierachical_ctcf_pos, prepare_sequence_idx
-from datasets.splitter import cell_splitter, chromosome_splitter
+from dataset.io import generate_paths, get_hierachical_ctcf_pos, prepare_sequence_idx
+from dataset.splitter import cell_splitter, chromosome_splitter
 from scipy.sparse import coo_matrix, load_npz
 from torch.utils.data import Dataset
 from tqdm import tqdm
