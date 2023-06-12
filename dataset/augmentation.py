@@ -1,45 +1,45 @@
 from torchvision import transforms
 import numpy as np
 
-class ATACSample(object):
-    """Object contains peak motif vector and peak sequence of a single sample."""
-    def __init__(self, peak_motif, peak_sequence=None):
-        self.peak_motif = peak_motif
-        self.peak_sequence = peak_sequence
+# class ATACSample(object):
+#     """Object contains peak motif vector and peak sequence of a single sample."""
+#     def __init__(self, peak_motif, peak_sequence=None):
+#         self.peak_motif = peak_motif
+#         self.peak_sequence = peak_sequence
 
-    def __repr__(self):
-        return f'ATACSample(Number of peaks: {self.peak_motif.shape[0]})'
+#     def __repr__(self):
+#         return f'ATACSample(Number of peaks: {self.peak_motif.shape[0]})'
     
-    def __len__(self):
-        return self.peak_motif.shape[0]
+#     def __len__(self):
+#         return self.peak_motif.shape[0]
 
 
-class PeaksSequence(object):
-    """A tuple containing a concatenated sequence and segmentation idx for NUM_PEAKS peaks."""
+# class PeaksSequence(object):
+#     """A tuple containing a concatenated sequence and segmentation idx for NUM_PEAKS peaks."""
 
-    def __init__(self, sequence, region):
-        """
-        Initialize PeaksSequence.
+#     def __init__(self, sequence, region):
+#         """
+#         Initialize PeaksSequence.
 
-        Args:
-            sequence: The concatenated sequence.
-            region: The region containing segmentation indices.
-        """
-        self.sequence = sequence # (N,4) N = num_region_per_sample * region_len
-        self.starts = region["SeqStartIdx"].tolist() - region["SeqStartIdx"].min()
-        self.ends = region["SeqEndIdx"].tolist() - region["SeqStartIdx"].min()
-        self.region = region
+#         Args:
+#             sequence: The concatenated sequence.
+#             region: The region containing segmentation indices.
+#         """
+#         self.sequence = sequence # (N,4) N = num_region_per_sample * region_len
+#         self.starts = region["SeqStartIdx"].tolist() - region["SeqStartIdx"].min()
+#         self.ends = region["SeqEndIdx"].tolist() - region["SeqStartIdx"].min()
+#         self.region = region
 
-    def __getitem__(self, index):
-        start = self.starts[index]
-        end = self.ends[index]
-        return self.sequence[start:end]
+#     def __getitem__(self, index):
+#         start = self.starts[index]
+#         end = self.ends[index]
+#         return self.sequence[start:end]
 
-    def __len__(self):
-        return len(self.starts)
+#     def __len__(self):
+#         return len(self.starts)
 
-    def __repr__(self):
-        return self.region.__repr__()
+#     def __repr__(self):
+#         return self.region.__repr__()
     
 
 class RandomMaskingGenerator:
@@ -76,53 +76,53 @@ class TSSMaskingGenerator:
         return tss_pos
 
 
-class SequenceGenerator(object):
-    """
-    A callable class that samples sequences from a given peaks sequence. The sampled sequences are centered around the peak
-    and have a target sequence length. If the length of the sequence is less than the target sequence length, it is padded
-    with zeros. The class takes a peaks sequence as input and returns a numpy array of sampled sequences.
+# class SequenceGenerator(object):
+#     """
+#     A callable class that samples sequences from a given peaks sequence. The sampled sequences are centered around the peak
+#     and have a target sequence length. If the length of the sequence is less than the target sequence length, it is padded
+#     with zeros. The class takes a peaks sequence as input and returns a numpy array of sampled sequences.
 
-    Args:
-    target_sequence_length (int): The target length of the sampled sequences.
+#     Args:
+#     target_sequence_length (int): The target length of the sampled sequences.
 
-    Returns:
-    numpy.ndarray: A numpy array of sampled sequences.
-    """
+#     Returns:
+#     numpy.ndarray: A numpy array of sampled sequences.
+#     """
 
-    def __init__(self, target_sequence_length=2000, shift=100):
-        self.target_sequence_length = target_sequence_length
-        self.shift = shift
+#     def __init__(self, target_sequence_length=2000, shift=100):
+#         self.target_sequence_length = target_sequence_length
+#         self.shift = shift
 
-    def __call__(self, peaks_sequence: PeaksSequence):
-        results = []
-        for i in range(len(peaks_sequence)):
-            sequence = peaks_sequence[i].toarray()
-            shift = np.random.randint(-100, 100)
-            sequence_len = sequence.shape[0]
-            if sequence_len >= self.target_sequence_length:
-                center = sequence_len // 2
-                start = max(0, center - self.target_sequence_length // 2 + shift)
-                end = min(start + self.target_sequence_length, sequence_len)
-                sequence_i = sequence[start:end]
-            else:
-                sequence_i = sequence
-            sequence_len = sequence_i.shape[0]
-            high = self.target_sequence_length - sequence_len
-            if high <= 0:
-                pad_left = 0
-            else:
-                pad_left = np.random.randint(0, high)
-            pad_right = self.target_sequence_length - sequence_len - pad_left
-            # pad axis 0 
-            sequence_i = np.pad(sequence_i, ((pad_left, pad_right), (0, 0)), "constant", constant_values=(0, 0))
-            results.append(sequence_i)
-        return np.stack(results, axis=0)
+#     def __call__(self, peaks_sequence: PeaksSequence):
+#         results = []
+#         for i in range(len(peaks_sequence)):
+#             sequence = peaks_sequence[i].toarray()
+#             shift = np.random.randint(-100, 100)
+#             sequence_len = sequence.shape[0]
+#             if sequence_len >= self.target_sequence_length:
+#                 center = sequence_len // 2
+#                 start = max(0, center - self.target_sequence_length // 2 + shift)
+#                 end = min(start + self.target_sequence_length, sequence_len)
+#                 sequence_i = sequence[start:end]
+#             else:
+#                 sequence_i = sequence
+#             sequence_len = sequence_i.shape[0]
+#             high = self.target_sequence_length - sequence_len
+#             if high <= 0:
+#                 pad_left = 0
+#             else:
+#                 pad_left = np.random.randint(0, high)
+#             pad_right = self.target_sequence_length - sequence_len - pad_left
+#             # pad axis 0 
+#             sequence_i = np.pad(sequence_i, ((pad_left, pad_right), (0, 0)), "constant", constant_values=(0, 0))
+#             results.append(sequence_i)
+#         return np.stack(results, axis=0)
 
-    def __repr__(self):
-        repr_str = "Target sequence length: {}bp\nShift size: {}bp".format(
-            self.target_sequence_length, self.shift
-        )
-        return repr_str
+#     def __repr__(self):
+#         repr_str = "Target sequence length: {}bp\nShift size: {}bp".format(
+#             self.target_sequence_length, self.shift
+#         )
+#         return repr_str
 
 
 class DataAugmentationForGETPeak(object):
@@ -136,12 +136,15 @@ class DataAugmentationForGETPeak(object):
             args.num_region_per_sample, args.mask_ratio
         )
 
-    def __call__(self, input):
-        region = input.peak_motif.toarray()
-        return self.transform(region), self.masked_position_generator()
+    def __call__(self, region, sequence):
+        if sequence is not None:
+            sequence = self.transform(sequence)
+        region = self.transform(region)
+        mask = self.masked_position_generator()
+        return region, sequence, mask
 
     def __repr__(self):
-        repr = "(DataAugmentationForGeneFormer,\n"
+        repr = "(DataAugmentationForGETPeak,\n"
         repr += "  transform = %s,\n" % str(self.transform)
         repr += "  Masked position generator = %s,\n" % str(
             self.masked_position_generator
@@ -149,36 +152,6 @@ class DataAugmentationForGETPeak(object):
         repr += ")"
         return repr
 
-
-class DataAugmentationForGETSequence(object):
-    def __init__(self, args):
-        self.transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-            ]
-        )
-        self.sequence_sampler = SequenceGenerator(args.target_sequence_length, args.shift)
-        self.masked_position_generator = RandomMaskingGenerator(
-            args.num_region_per_sample, args.mask_ratio
-        )
-
-    def __call__(self, input: ATACSample):
-        region = input.peak_motif.toarray()
-        peaks_sequence = input.peak_sequence
-        return (
-            self.transform(region),
-            self.sequence_sampler(peaks_sequence),
-            self.masked_position_generator(),
-        )
-
-    def __repr__(self):
-        repr = "(DataAugmentationForGETSequence,\n"
-        repr += "  transform = %s,\n" % str(self.transform)
-        repr += "  Masked position generator = %s,\n" % str(
-            self.masked_position_generator
-        )
-        repr += ")"
-        return repr
 
 
 class DataAugmentationForGETPeakFinetune(DataAugmentationForGETPeak):
@@ -186,9 +159,12 @@ class DataAugmentationForGETPeakFinetune(DataAugmentationForGETPeak):
         super().__init__(args)
         self.masked_position_generator = TSSMaskingGenerator(args.mask_tss)
 
-    def __call__(self, input: ATACSample, tss_idx):
-        region = input.peak_motif.toarray()
-        return self.transform(region), self.masked_position_generator(tss_idx)
+    def __call__(self, region, sequence, tss_idx):
+        region = self.transform(region)
+        if sequence is not None:
+            sequence = self.transform(sequence)
+        mask = self.masked_position_generator(tss_idx)
+        return region, sequence, mask
 
     def __repr__(self):
         repr = "(DataAugmentationForGETPeakFinetune,\n"
@@ -199,25 +175,3 @@ class DataAugmentationForGETPeakFinetune(DataAugmentationForGETPeak):
         repr += ")"
         return repr
 
-class DataAugmentationForGETSequenceFinetune(DataAugmentationForGETSequence):
-    def __init__(self, args):
-        super().__init__(args)
-        self.masked_position_generator = TSSMaskingGenerator(args.mask_tss)
-
-    def __call__(self, input: ATACSample, tss_idx):
-        region = input.peak_motif.toarray()
-        peaks_sequence = input.peak_sequence
-        return (
-            self.transform(region),
-            self.sequence_sampler(peaks_sequence),
-            self.masked_position_generator(tss_idx),
-        )
-
-    def __repr__(self):
-        repr = "(DataAugmentationForGETSequenceFinetune,\n"
-        repr += "  transform = %s,\n" % str(self.transform)
-        repr += "  Masked position generator = %s,\n" % str(
-            self.masked_position_generator
-        )
-        repr += ")"
-        return repr

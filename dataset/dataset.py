@@ -5,16 +5,13 @@ from typing import Any, Callable, Optional, Tuple, List, Dict
 import numpy as np
 import pandas as pd
 from dataset.augmentation import (
-    ATACSample,
     DataAugmentationForGETPeak,
-    DataAugmentationForGETSequence,
-    PeaksSequence,
     DataAugmentationForGETPeakFinetune,
-    DataAugmentationForGETSequenceFinetune,
 )
 from dataset.io import generate_paths, get_hierachical_ctcf_pos, prepare_sequence_idx
 from dataset.splitter import cell_splitter, chromosome_splitter
 from scipy.sparse import coo_matrix, load_npz
+import zarr
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
@@ -45,7 +42,6 @@ class PretrainDataset(Dataset):
 
         self.root = root
         self.transform = transform
-        self.use_seq = args.use_seq
 
         celltype_metadata_path = os.path.join(
             self.root, "data/cell_type_pretrain_human_bingren_shendure_apr2023.txt"
@@ -64,7 +60,8 @@ class PretrainDataset(Dataset):
         # 4	chr1	778637	778892	83	0.0	1.0
 
         (
-            samples,
+            peaks,
+            seqs,
             cells,
             _,
             _,
@@ -84,16 +81,20 @@ class PretrainDataset(Dataset):
             args.sampling_step,
         )
 
-        if len(samples) == 0:
+        if seqs is not None:
+            self.use_seq = True
+
+        if len(peaks) == 0:
             msg = "Found 0 files in subfolders of: {}\n".format(self.root)
             raise RuntimeError(msg)
 
         if is_train:
-            print("total train samples:", len(samples))
+            print("total train samples:", len(peaks))
         else:
-            print("total test samples:", len(samples))
+            print("total test samples:", len(peaks))
 
-        self.samples = samples
+        self.peaks = peaks
+        self.seqs = seqs
         self.cells = cells
         self.ctcf_pos = ctcf_pos
 
@@ -105,25 +106,24 @@ class PretrainDataset(Dataset):
         Returns:
             tuple: (sample, target) where target is cell_index of the target cell.
         """
-        sample = self.samples[index]
+        peak = self.peaks[index]
+        if self.use_seq:
+            seq = self.seqs[index]
+        else:
+            seq = None
         cell = self.cells[index]
         ctcf_pos = self.ctcf_pos[index]
 
         if self.transform is not None:
-            sample = self.transform(sample)
+            peak, seq, mask = self.transform(peak, seq)
 
         # if sample.shape[0] == 1:
         # sample = sample.squeeze(0)
 
-        if self.use_seq:
-            peak, seq, mask = sample
-            return peak, seq, mask, ctcf_pos
-        else:
-            peak, mask = sample
-            return peak, mask, ctcf_pos
+        return peak, seq, mask, ctcf_pos
 
     def __len__(self) -> int:
-        return len(self.samples)
+        return len(self.peaks)
 
 
 class ExpressionDataset(Dataset):
@@ -152,7 +152,6 @@ class ExpressionDataset(Dataset):
 
         self.root = root
         self.transform = transform
-        self.use_seq = args.use_seq
 
         celltype_metadata_path = os.path.join(
             self.root, "data/cell_type_pretrain_human_bingren_shendure_apr2023.txt"
@@ -171,7 +170,8 @@ class ExpressionDataset(Dataset):
         # 4	chr1	778637	778892	83	0.0	1.0
 
         (
-            samples,
+            peaks,
+            seqs,
             cells,
             targets,
             tssidx,
@@ -190,17 +190,23 @@ class ExpressionDataset(Dataset):
             ctcf,
             args.sampling_step,
         )
+        if seqs is not None:
+            self.use_seq = True
+        else:
+            self.use_seq = False
 
-        if len(samples) == 0:
+
+        if len(peaks) == 0:
             msg = "Found 0 files in subfolders of: {}\n".format(self.root)
             raise RuntimeError(msg)
 
         if is_train:
-            print("total train samples:", len(samples))
+            print("total train samples:", len(peaks))
         else:
-            print("total test samples:", len(samples))
+            print("total test samples:", len(peaks))
 
-        self.samples = samples
+        self.peaks = peaks
+        self.seqs = seqs
         # self.cells = cells
         self.targets = targets
         self.ctcf_pos = ctcf_pos
@@ -215,7 +221,11 @@ class ExpressionDataset(Dataset):
         Returns:
             tuple: (sample, target) where target is cell_index of the target cell.
         """
-        sample = self.samples[index] 
+        peak = self.peaks[index] 
+        if self.use_seq:
+            seq = self.seqs[index]
+        else:
+            seq = None
         target = self.targets[index] 
         tssidx = self.tssidxs[index] 
 
@@ -223,27 +233,19 @@ class ExpressionDataset(Dataset):
         ctcf_pos = self.ctcf_pos[index]
 
         if self.transform is not None:
-            sample = self.transform(sample, tssidx)
+            peak, seq, mask = self.transform(peak, seq, tssidx)
 
         # if sample.shape[0] == 1:
         # sample = sample.squeeze(0)
-        if self.use_seq:
-            peak, seq, mask = sample
-            return peak, seq, mask, target, ctcf_pos
-        else:
-            peak, mask = sample
-            return peak, mask, target, ctcf_pos
+        return peak, seq, mask, target, ctcf_pos
 
     def __len__(self) -> int:
-        return len(self.samples)
+        return len(self.peaks)
 
 
 def build_dataset(is_train, args):
     if args.data_set == "Pretrain":
-        if args.use_seq:
-            transform = DataAugmentationForGETSequence(args)
-        else:
-            transform = DataAugmentationForGETPeak(args)
+        transform = DataAugmentationForGETPeak(args)
         print("Data Aug = %s" % str(transform))
         dataset = PretrainDataset(
             args.data_path,
@@ -254,10 +256,7 @@ def build_dataset(is_train, args):
         )
 
     elif args.data_set == "Expression":
-        if args.use_seq:
-            transform = DataAugmentationForGETSequenceFinetune(args)
-        else:
-            transform = DataAugmentationForGETPeakFinetune(args)
+        transform = DataAugmentationForGETPeakFinetune(args)
         dataset = ExpressionDataset(
             args.data_path,
             num_region_per_sample=args.num_region_per_sample,
@@ -286,7 +285,7 @@ def make_dataset(
     ctcf: pd.DataFrame,
     step: int = 50,
 ) -> Tuple[
-    List[ATACSample], List[str], List[coo_matrix], List[np.ndarray], List[np.ndarray]
+    List[coo_matrix], List[np.ndarray], List[str], List[coo_matrix], List[np.ndarray], List[np.ndarray]
 ]:
     """
     Generates a dataset for training or testing.
@@ -334,7 +333,7 @@ def make_dataset(
         if use_seq:
             if not os.path.exists(paths_dict["seq_npz"]):
                 continue
-            seq_data = load_npz(paths_dict["seq_npz"])
+            seq_data = zarr.load(paths_dict["seq_npz"])['arr_0']
             celltype_annot = prepare_sequence_idx(celltype_annot, num_region_per_sample)
 
         # Compute sample specific CTCF position segmentation
@@ -361,7 +360,11 @@ def make_dataset(
             all_chromosomes, leave_out_chromosomes, is_train=is_train
         )
 
-        sample_list = []
+        peak_list = []
+        if use_seq:
+            seq_list = []
+        else:
+            seq_list = None
         cell_list = []
         if not is_pretrain:
             target_list = []
@@ -373,35 +376,35 @@ def make_dataset(
 
         # Generate sample list
         for chromosome in input_chromosomes:
-            idx_sample_list = celltype_annot.index[
+            idx_peak_list = celltype_annot.index[
                 celltype_annot["Chromosome"] == chromosome
             ].tolist()
-            idx_sample_start = idx_sample_list[0]
-            idx_sample_end = idx_sample_list[-1]
+            idx_peak_start = idx_peak_list[0]
+            idx_peak_end = idx_peak_list[-1]
             # NOTE: overlapping split chrom
-            for i in range(idx_sample_start, idx_sample_end, step):
+            for i in range(idx_peak_start, idx_peak_end, step):
                 start_index = i
                 end_index = i + num_region_per_sample
 
-                sample_data_i = coo_matrix(peak_data[start_index:end_index])
+                peak_data_i = coo_matrix(peak_data[start_index:end_index])
                 if use_seq:
-                    celltype_annot_i = celltype_annot.iloc[start_index:end_index, :]
-                    seq_start_idx = celltype_annot_i["SeqStartIdx"].min()
-                    seq_end_idx = celltype_annot_i["SeqEndIdx"].max()
-                    seq_data_i = PeaksSequence(
-                        seq_data[seq_start_idx:seq_end_idx, :], celltype_annot_i
-                    )
-                else:
-                    seq_data_i = None
-                sample_data_i = ATACSample(sample_data_i, seq_data_i)
+                    # old loading mechanism when using sparse npz
+                    # celltype_annot_i = celltype_annot.iloc[start_index:end_index, :]
+                    # seq_start_idx = celltype_annot_i["SeqStartIdx"].min()
+                    # seq_end_idx = celltype_annot_i["SeqEndIdx"].max()
+                    seq_data_i = seq_data[start_index:end_index]
+                # sample_data_i = ATACSample(sample_data_i, seq_data_i)
+
                 ctcf_pos_i = ctcf_pos[start_index:end_index]
                 ctcf_pos_i = ctcf_pos_i - ctcf_pos_i.min(0, keepdims=True)  # (200,5)
                 if not is_pretrain:
                     target_i = coo_matrix(target_data[start_index:end_index])
                     tssidx_i = tssidx_data[start_index:end_index]
 
-                if len(sample_data_i) == num_region_per_sample:
-                    sample_list.append(sample_data_i)
+                if len(peak_data_i) == num_region_per_sample:
+                    peak_list.append(peak_data_i)
+                    if use_seq:
+                        seq_list.append(seq_data_i)
                     cell_list.append(cell_label)
                     if not is_pretrain:
                         target_list.append(target_i)
@@ -411,4 +414,4 @@ def make_dataset(
                 else:
                     continue
 
-    return sample_list, cell_list, target_list, tssidx_list, ctcf_pos_list
+    return peak_list, seq_list, cell_list, target_list, tssidx_list, ctcf_pos_list
