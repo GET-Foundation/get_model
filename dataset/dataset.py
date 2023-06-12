@@ -10,7 +10,7 @@ from dataset.augmentation import (
 )
 from dataset.io import generate_paths, get_hierachical_ctcf_pos, prepare_sequence_idx
 from dataset.splitter import cell_splitter, chromosome_splitter
-from scipy.sparse import coo_matrix, load_npz
+from scipy.sparse import coo_matrix, load_npz, vstack
 import zarr
 from torch.utils.data import Dataset
 from tqdm import tqdm
@@ -283,7 +283,7 @@ def make_dataset(
     use_seq: bool,
     is_train: bool,
     ctcf: pd.DataFrame,
-    step: int = 50,
+    step: int = 200,
 ) -> Tuple[
     List[coo_matrix], List[np.ndarray], List[str], List[coo_matrix], List[np.ndarray], List[np.ndarray]
 ]:
@@ -302,7 +302,7 @@ def make_dataset(
         use_seq (bool): Whether to use sequence data.
         is_train (bool): Whether it is a training dataset.
         ctcf (pd.DataFrame): CTCF data.
-        step (int, optional): Step size for generating samples. Defaults to 50.
+        step (int, optional): Step size for generating samples. Defaults to 200.
 
     Returns:
         Tuple[List[ATACSample], List[str], List[coo_matrix], List[np.ndarray], List[np.ndarray]]: A tuple containing the generated dataset,
@@ -383,13 +383,24 @@ def make_dataset(
             idx_peak_end = idx_peak_list[-1]
             # NOTE: overlapping split chrom
             for i in range(idx_peak_start, idx_peak_end, step):
-                start_index = i
-                end_index = i + num_region_per_sample
+                # add some randomization
+                shift = np.random.randint(-step//2, step//2)
+                start_index = i + shift
+                end_index = start_index + num_region_per_sample
+                # sanity check
+                celltype_annot_i = celltype_annot.iloc[start_index:end_index, :]
+                if celltype_annot_i.iloc[-1].End - celltype_annot_i.iloc[0].Start > 5000000:
+                    # change end_index to avoid too large region
+                    # find the region that is < 5000000 apart from the start
+                    end_index = celltype_annot_i[celltype_annot_i.End - celltype_annot_i.Start < 5000000].index[-1]
 
+                if celltype_annot_i["Start"].min() < 0:
+                    continue
+                # data generation
                 peak_data_i = coo_matrix(peak_data[start_index:end_index])
+
                 if use_seq:
                     # old loading mechanism when using sparse npz
-                    # celltype_annot_i = celltype_annot.iloc[start_index:end_index, :]
                     # seq_start_idx = celltype_annot_i["SeqStartIdx"].min()
                     # seq_end_idx = celltype_annot_i["SeqEndIdx"].max()
                     seq_data_i = seq_data[start_index:end_index]
@@ -412,6 +423,18 @@ def make_dataset(
                     ctcf_pos_list.append(ctcf_pos_i)
 
                 else:
+                    # TODO: add padding
                     continue
-
+                    # padding to make sure the length is the same
+                    # pad_len = num_region_per_sample - len(peak_data_i)
+                    # peak_data_i = vstack(
+                    #     [peak_data_i, coo_matrix((pad_len, peak_data_i.shape[1]))]
+                    # )
+                    # if use_seq:
+                    #     seq_data_i = np.vstack(
+                    #         [seq_data_i, np.zeros((pad_len, seq_data_i.shape[1]))]
+                    #     )
+                    # ctcf_pos_i = np.vstack(
+                    #     [ctcf_pos_i, np.zeros((pad_len, ctcf_pos_i.shape[1]))])
+                    
     return peak_list, seq_list, cell_list, target_list, tssidx_list, ctcf_pos_list
