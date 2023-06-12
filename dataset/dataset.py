@@ -83,6 +83,8 @@ class PretrainDataset(Dataset):
 
         if seqs is not None:
             self.use_seq = True
+        else:
+            self.use_seq = False
 
         if len(peaks) == 0:
             msg = "Found 0 files in subfolders of: {}\n".format(self.root)
@@ -319,6 +321,21 @@ def make_dataset(
         is_pretrain=is_pretrain,
     )
 
+    # initialize lists
+    peak_list = []
+    if use_seq:
+        seq_list = []
+    else:
+        seq_list = None
+    cell_list = []
+    if not is_pretrain:
+        target_list = []
+        tssidx_list = []
+    else:
+        target_list = None
+        tssidx_list = None
+    ctcf_pos_list = []
+
     for file_id in tqdm(file_id_list):
         cell_label = cell_dict[file_id]
         data_type = datatype_dict[file_id]
@@ -360,19 +377,6 @@ def make_dataset(
             all_chromosomes, leave_out_chromosomes, is_train=is_train
         )
 
-        peak_list = []
-        if use_seq:
-            seq_list = []
-        else:
-            seq_list = None
-        cell_list = []
-        if not is_pretrain:
-            target_list = []
-            tssidx_list = []
-        else:
-            target_list = None
-            tssidx_list = None
-        ctcf_pos_list = []
 
         # Generate sample list
         for chromosome in input_chromosomes:
@@ -385,17 +389,20 @@ def make_dataset(
             for i in range(idx_peak_start, idx_peak_end, step):
                 # add some randomization
                 shift = np.random.randint(-step//2, step//2)
-                start_index = i + shift
+                start_index = max(0, i + shift)
                 end_index = start_index + num_region_per_sample
+
                 # sanity check
+                if end_index > idx_peak_end:
+                    continue
                 celltype_annot_i = celltype_annot.iloc[start_index:end_index, :]
                 if celltype_annot_i.iloc[-1].End - celltype_annot_i.iloc[0].Start > 5000000:
                     # change end_index to avoid too large region
                     # find the region that is < 5000000 apart from the start
                     end_index = celltype_annot_i[celltype_annot_i.End - celltype_annot_i.Start < 5000000].index[-1]
-
                 if celltype_annot_i["Start"].min() < 0:
                     continue
+
                 # data generation
                 peak_data_i = coo_matrix(peak_data[start_index:end_index])
 
@@ -412,7 +419,7 @@ def make_dataset(
                     target_i = coo_matrix(target_data[start_index:end_index])
                     tssidx_i = tssidx_data[start_index:end_index]
 
-                if len(peak_data_i) == num_region_per_sample:
+                if peak_data_i.shape[0] == num_region_per_sample:
                     peak_list.append(peak_data_i)
                     if use_seq:
                         seq_list.append(seq_data_i)

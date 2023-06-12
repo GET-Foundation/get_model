@@ -1,2 +1,4 @@
 data
 __pycache__
+run_pretrain_k562_cut.sh
+consensus_pwms.meme

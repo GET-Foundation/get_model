@@ -44,7 +44,7 @@ def pretrain_one_epoch(
 
     loss_func = nn.MSELoss()
 
-    for step, (batch, _) in enumerate(
+    for step, (batch) in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
     ):
         # assign learning rate & weight decay for each step
@@ -56,7 +56,7 @@ def pretrain_one_epoch(
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
 
-        regions, bool_masked_pos, ctcf_pos = batch
+        regions, seq, bool_masked_pos, ctcf_pos = batch
         regions = regions.to(device, non_blocking=True)
         regions = regions.float()
         bool_masked_pos = (

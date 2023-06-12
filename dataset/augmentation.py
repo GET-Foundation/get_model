@@ -1,5 +1,6 @@
 from torchvision import transforms
 import numpy as np
+import scipy
 
 # class ATACSample(object):
 #     """Object contains peak motif vector and peak sequence of a single sample."""
@@ -139,6 +140,8 @@ class DataAugmentationForGETPeak(object):
     def __call__(self, region, sequence):
         if sequence is not None:
             sequence = self.transform(sequence)
+        if isinstance(region, scipy.sparse.coo_matrix):
+            region = region.toarray()
         region = self.transform(region)
         mask = self.masked_position_generator()
         return region, sequence, mask

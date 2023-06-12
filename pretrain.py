@@ -224,7 +224,11 @@ def get_args_parser():
     parser.add_argument(
         "--dist_url", default="env://", help="url used to set up distributed training"
     )
-
+    parser.add_argument("--data_set", default="Pretrain", type=str)
+    parser.add_argument("--leave_out_celltypes", default="", type=str)
+    parser.add_argument("--leave_out_chromosomes", default="", type=str)
+    parser.add_argument("--use_seq", default=False, action="store_true")
+    parser.add_argument("--sampling_step", default=100, type=int)
     return parser
 
 
@@ -264,7 +268,7 @@ def main(args):
     args.region_size = num_region_per_sample
 
     # get dataset
-    dataset_train = build_dataset(args)
+    dataset_train = build_dataset(is_train=True, args=args)
 
     if args.distributed:
         num_tasks = utils.get_world_size()
