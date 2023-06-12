@@ -89,7 +89,7 @@ def get_ctcf_pos(celltype_annot: pd.DataFrame, ctcf: pd.DataFrame) -> np.ndarray
 
 
 def get_hierachical_ctcf_pos(
-    celltype_annot: pd.DataFrame, ctcf: pd.DataFrame, cut=[10, 20, 50, 100, 200]
+    celltype_annot: pd.DataFrame, ctcf: pd.DataFrame, cut=[50, 100, 200]
 ) -> np.ndarray:
     """
     Segment the regions by multi-level CTCF binding sites, filter ctcf by num_celltype with cut
