@@ -259,7 +259,7 @@ def main(args):
     cudnn.benchmark = True
 
     model = get_model(args)
-    num_region_per_sample = args.number_region_per_sample
+    num_region_per_sample = args.num_region_per_sample
     print("Region size = %s" % str(num_region_per_sample))
     args.region_size = num_region_per_sample
 
