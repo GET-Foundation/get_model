@@ -303,7 +303,7 @@ class GETFinetune(GETPretrain):
 
 
 @register_model
-def get_pretraine_motif(pretrained=False, **kwargs):
+def get_pretrain_motif(pretrained=False, **kwargs):
     model = GETPretrain(
         num_regions=200,
         num_motif=637,
