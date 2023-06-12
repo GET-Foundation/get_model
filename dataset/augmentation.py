@@ -1,4 +1,5 @@
 from torchvision import transforms
+import torch
 import numpy as np
 import scipy
 
@@ -139,7 +140,7 @@ class DataAugmentationForGETPeak(object):
 
     def __call__(self, region, sequence):
         if sequence is not None:
-            sequence = self.transform(sequence)
+            sequence = torch.Tensor(sequence)
         if isinstance(region, scipy.sparse.coo_matrix):
             region = region.toarray()
         region = self.transform(region)

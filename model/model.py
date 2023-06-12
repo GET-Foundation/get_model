@@ -184,14 +184,17 @@ class GETPretrain(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, mask, ctcf_pos):
+    def forward(self, peak, seq, mask, ctcf_pos):
         """forward function with hooks to return embedding or attention weights."""
-        x = self.motif(
-            x
-        )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
+        if seq is not None:
+            x = self.motif(
+                seq
+            )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
+        else:
+            x = peak
         x = self.region_embed(x)
 
-        B, N, C = x.shape
+        B, N, C = peak.shape
         mask_token = self.mask_token.expand(B, N, -1)
         w = mask.unsqueeze(-1).type_as(mask_token)
         x = x * (1 - w) + mask_token * w
@@ -205,7 +208,7 @@ class GETPretrain(nn.Module):
         x, _ = self.encoder(x, mask=mask) # (N, D)
         x_masked = self.head_mask(x) # (N, Motif)
         x_masked = x_masked[mask].reshape(B, -1, C)
-        atac = F.softplus(self.head_atac(x.permute(0, 2, 1)).permute(0, 2, 1))
+        atac = F.softplus(self.head_atac(x.permute(0, 2, 1)).permute(0, 2, 1).squeeze(-1))
 
         return x_masked, atac
 
@@ -280,8 +283,9 @@ class GETFinetune(GETPretrain):
         x = self.motif(
             x
         )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
-        x = self.region_embed(x)
         # B, N, C = x.shape
+        x = self.region_embed(x)
+
 
         for pos_emb_component in self.pos_embed:
             if isinstance(pos_emb_component, CTCFPositionalEncoding):
@@ -314,7 +318,7 @@ def get_pretrain_motif(pretrained=False, **kwargs):
         d_model=768,
         nhead=8,
         dropout=0.1,
-        output_dim=282,
+        output_dim=283,
         pos_emb_components=["CTCF"],
     )
     if pretrained:

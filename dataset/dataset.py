@@ -119,8 +119,8 @@ class PretrainDataset(Dataset):
         if self.transform is not None:
             peak, seq, mask = self.transform(peak, seq)
 
-        # if sample.shape[0] == 1:
-        # sample = sample.squeeze(0)
+        if peak.shape[0] == 1:
+            peak = peak.squeeze(0)
 
         return peak, seq, mask, ctcf_pos
 
@@ -236,9 +236,9 @@ class ExpressionDataset(Dataset):
 
         if self.transform is not None:
             peak, seq, mask = self.transform(peak, seq, tssidx)
-
-        # if sample.shape[0] == 1:
-        # sample = sample.squeeze(0)
+        print(seq.shape)
+        if peak.shape[0] == 1:
+            peak = peak.squeeze(0)
         return peak, seq, mask, target, ctcf_pos
 
     def __len__(self) -> int:
@@ -405,7 +405,6 @@ def make_dataset(
 
                 # data generation
                 peak_data_i = coo_matrix(peak_data[start_index:end_index])
-
                 if use_seq:
                     # old loading mechanism when using sparse npz
                     # seq_start_idx = celltype_annot_i["SeqStartIdx"].min()

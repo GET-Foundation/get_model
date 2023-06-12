@@ -42,7 +42,8 @@ def pretrain_one_epoch(
     header = "Epoch: [{}]".format(epoch)
     print_freq = 10
 
-    loss_func = nn.MSELoss()
+    loss_masked = nn.MSELoss()
+    loss_atac = nn.PoissonNLLLoss(log_input=False, reduction="mean")
 
     for step, (batch) in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
@@ -65,7 +66,7 @@ def pretrain_one_epoch(
 
         with torch.no_grad():
             unnorm_regions = regions
-
+            labels_atac = unnorm_regions[:,:,-1]
             if normlize_target:
                 regions_squeeze = unnorm_regions
                 regions_norm = (
@@ -80,10 +81,14 @@ def pretrain_one_epoch(
                 regions_embed = unnorm_regions
 
             B, _, C = regions_embed.shape
-            labels = regions_embed[bool_masked_pos].reshape(B, -1, C)
+            labels_masked = regions_embed[bool_masked_pos].reshape(B, -1, C)
 
-        outputs = model(regions, bool_masked_pos)
-        loss = loss_func(input=outputs, target=labels)
+
+        output_masked, atac = model(regions, seq, bool_masked_pos, ctcf_pos)
+        loss_masked_value = loss_masked(input=output_masked, target=labels_masked)
+        loss_atac_value = loss_atac(atac, labels_atac)
+        # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss
+        loss = loss_masked_value + loss_atac_value * 5
 
         loss_value = loss.item()
 
