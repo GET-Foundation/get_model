@@ -1,4 +1,5 @@
 # %%
+import torch
 hyperparams = {
     "num_regions": 200,
     "num_res_block": 0,

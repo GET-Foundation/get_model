@@ -1,5 +1,4 @@
 # simplified GET model
-# %%
 import os
 import torch
 import torch.nn as nn
@@ -7,9 +6,9 @@ import torch.nn.functional as F
 from timm.models.layers import trunc_normal_
 from timm.models.registry import register_model
 # from rotary_embedding_torch import RotaryEmbedding
-from position_encoding import CTCFPositionalEncoding, AbsolutePositionalEncoding
-from motif import parse_meme_file
-from transformer import GETTransformer
+from model.position_encoding import CTCFPositionalEncoding, AbsolutePositionalEncoding
+from model.motif import parse_meme_file
+from model.transformer import GETTransformer
 
 class SequenceEncoder(nn.Module):
     """A sequence encoder based on Conv1D.
@@ -342,3 +341,5 @@ def get_finetune_motif(pretrained=False, **kwargs):
         checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
         model.load_state_dict(checkpoint["model"])
     return model
+
+# %%

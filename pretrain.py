@@ -1,3 +1,4 @@
+#%%
 import argparse
 import datetime
 import json
@@ -15,8 +16,8 @@ from model.optim import create_optimizer
 from timm.models import create_model
 from utils import NativeScalerWithGradNormCount as NativeScaler
 
-import model
-
+import model.model
+#%%
 
 def get_args_parser():
     parser = argparse.ArgumentParser("GeneFormer pre-training script", add_help=False)
@@ -258,7 +259,7 @@ def main(args):
     cudnn.benchmark = True
 
     model = get_model(args)
-    num_region_per_sample = model.encoder.region_embed.num_region_per_sample
+    num_region_per_sample = args.number_region_per_sample
     print("Region size = %s" % str(num_region_per_sample))
     args.region_size = num_region_per_sample
 
@@ -372,7 +373,6 @@ def main(args):
             start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values,
             wd_schedule_values=wd_schedule_values,
-            region_size=num_region_per_sample,
             normlize_target=args.normlize_target,
         )
         if args.output_dir:
