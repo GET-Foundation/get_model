@@ -59,10 +59,12 @@ def pretrain_one_epoch(
 
         regions, seq, bool_masked_pos, ctcf_pos = batch
         regions = regions.to(device, non_blocking=True)
+        seq = seq.to(device, non_blocking=True)
         regions = regions.float()
         bool_masked_pos = (
-            bool_masked_pos.to(device, non_blocking=True).flatten(1).to(torch.bool)
+            bool_masked_pos.to(device, non_blocking=True).bool()
         )
+        ctcf_pos = ctcf_pos.to(device, non_blocking=True).bool()
 
         with torch.no_grad():
             unnorm_regions = regions
@@ -147,10 +149,13 @@ def pretrain_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def train_class_batch(model, samples, target, criterion):
-    outputs = model(samples)
-    loss = criterion(outputs, target)
-    return loss, outputs
+def train_class_batch(model, peak, seq, mask, ctcf_pos, atac_target, exp_target, criterion):
+    atac, exp = model(peak, seq, mask, ctcf_pos)
+    loss_atac = criterion(atac, atac_target)
+    loss_exp = criterion(exp, exp_target)
+    loss = loss_atac + loss_exp
+    print(loss_atac, loss_exp)
+    return loss, atac, exp
 
 
 def finetune_train_one_epoch(
@@ -188,7 +193,7 @@ def finetune_train_one_epoch(
     else:
         optimizer.zero_grad()
 
-    for data_iter_step, (samples, targets, cells) in enumerate(
+    for data_iter_step, (peaks, seq, mask, exp_targets, ctcf_pos) in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
     ):
         step = data_iter_step // update_freq
@@ -207,19 +212,20 @@ def finetune_train_one_epoch(
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
 
-        samples = samples.to(device, non_blocking=True)
-        samples = samples.float()
-        targets = targets.to(device, non_blocking=True)
-        targets = targets.float()
-
-        if mixup_fn is not None:
-            samples, targets = mixup_fn(samples, targets)
+        peaks = peaks.to(device, non_blocking=True)
+        peaks = peaks.float()
+        seq = seq.to(device, non_blocking=True)
+        mask = mask.to(device, non_blocking=True).bool()
+        exp_targets = exp_targets.to(device, non_blocking=True)
+        exp_targets = exp_targets.float()
+        ctcf_pos = ctcf_pos.to(device, non_blocking=True).bool()
+        atac_targets = peaks[:, :, -1]
 
         if loss_scaler is None:
-            samples = samples.half()
-            loss, output = train_class_batch(model, samples, targets, criterion)
+            peaks = peaks.half()
+            loss, atac, exp = train_class_batch(model, peaks, seq, mask, atac_targets, exp_targets, ctcf_pos, criterion)
         else:
-            loss, output = train_class_batch(model, samples, targets, criterion)
+            loss, atac, exp = train_class_batch(model, peaks, seq, mask, atac_targets, exp_targets, ctcf_pos, criterion)
 
         loss_value = loss.item()
 
@@ -322,41 +328,7 @@ def finetune_train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-@torch.no_grad()
-def evaluate_all(data_loader, model, device, args, epoch=0, printlog=True):
-    criterion = torch.nn.MSELoss()
-
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    header = "Test:"
-
-    # switch to evaluation mode
-    model.eval()
-
-    preds = []
-    obs = []
-
-    for batch in data_loader:
-        samples = batch[0].float()
-        target = batch[1].float()
-        samples = samples.to(device, non_blocking=True)
-        target = target.to(device, non_blocking=True)
-
-        # compute output
-        with torch.amp.autocast("cuda" if args.cuda else "cpu"):
-            output = model(samples)
-            loss = criterion(output, target)
-            # print("loss:", loss)
-
-        preds.append(output.reshape(-1).detach().cpu().numpy())
-        obs.append(target.reshape(-1).detach().cpu().numpy())
-
-        metric_logger.update(loss=loss.item())
-
-    preds = np.concatenate(preds, axis=0).reshape(-1)
-    obs = np.concatenate(obs, axis=0).reshape(-1)
-
-    print("preds:", preds.shape)
-    print("obs:", obs.shape)
+def cal_score_stats(preds, obs, data_loader, args):
 
     if args.eval_nonzero:
         r2score = score_r2(preds[obs > 0], obs[obs > 0])
@@ -390,6 +362,61 @@ def evaluate_all(data_loader, model, device, args, epoch=0, printlog=True):
             # spearmanr_score = np.mean([score_spearmanr(preds[i], obs[i]) for i in range(len(preds))])
             # pearsonr_score = np.mean([score_pearsonr(preds[i], obs[i]) for i in range(len(preds))])
 
+    return r2score, spearmanr_score, pearsonr_score
+
+
+@torch.no_grad()
+def evaluate_all(data_loader, model, device, args, epoch=0, printlog=True):
+    criterion = torch.nn.MSELoss()
+
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = "Test:"
+
+    # switch to evaluation mode
+    model.eval()
+
+    preds = []
+    obs = []
+    preds_atac = []
+    obs_atac = []
+
+    for (peaks, seq, mask, exp_targets, ctcf_pos) in data_loader:
+        peaks = peaks.to(device, non_blocking=True)
+        peaks = peaks.float()
+        seq = seq.to(device, non_blocking=True)
+        mask = mask.to(device, non_blocking=True).bool()
+        exp_targets = exp_targets.to(device, non_blocking=True)
+        exp_targets = exp_targets.float()
+        ctcf_pos = ctcf_pos.to(device, non_blocking=True).bool()
+        atac_targets = peaks[:, :, -1]
+        # compute output
+        with torch.amp.autocast("cuda" if args.cuda else "cpu"):
+            atac, exp = model(peaks, seq, mask, ctcf_pos)
+            loss_atac = criterion(atac, atac_targets)
+            loss_exp = criterion(exp, exp_targets)
+            loss = loss_atac + loss_exp
+            # print("loss:", loss)
+
+        preds.append(exp.reshape(-1).detach().cpu().numpy())
+        obs.append(exp_targets.reshape(-1).detach().cpu().numpy())
+        preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
+        obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
+
+        metric_logger.update(loss=loss.item())
+
+    preds = np.concatenate(preds, axis=0).reshape(-1)
+    obs = np.concatenate(obs, axis=0).reshape(-1)
+    preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
+    obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
+
+    print("preds:", preds.shape)
+    print("obs:", obs.shape)
+    print("preds_atac:", preds_atac.shape)
+    print("obs_atac:", obs_atac.shape)
+
+    r2score, pearsonr_score, spearmanr_score = cal_score_stats(preds, obs, data_loader, args)
+    r2score_atac, pearsonr_score_atac, spearmanr_score_atac = cal_score_stats(preds_atac, obs_atac, data_loader, args)
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
 
@@ -397,12 +424,19 @@ def evaluate_all(data_loader, model, device, args, epoch=0, printlog=True):
     metric_logger.meters["pearsonr_score"].update(pearsonr_score, n=1)
     metric_logger.meters["spearmanr_score"].update(spearmanr_score, n=1)
 
+    metric_logger.meters["r2score_atac"].update(r2score_atac, n=1)
+    metric_logger.meters["pearsonr_score_atac"].update(pearsonr_score_atac, n=1)
+    metric_logger.meters["spearmanr_score_atac"].update(spearmanr_score_atac, n=1)
+
     if printlog:
         print(
-            "* Score@R2 {r2:.3f} Score@pearsonr {pearson:.3f} Score@spearmanr {spearman:.3f} loss {losses.global_avg:.3f}".format(
+            "* Score@R2 {r2:.3f} Score@pearsonr {pearson:.3f} Score@spearmanr {spearman:.3f} Score@R2_atac {r2_atac:.3f} Score@pearsonr_atac {pearson_atac:.3f} Score@spearmanr_atac {spearman_atac:.3f} loss {losses.global_avg:.3f}".format(
                 r2=r2score,
                 pearson=pearsonr_score,
                 spearman=spearmanr_score,
+                r2_atac=r2score_atac,
+                pearson_atac=pearsonr_score_atac,
+                spearman_atac=spearmanr_score_atac,
                 losses=metric_logger.loss,
             )
         )

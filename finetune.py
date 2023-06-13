@@ -10,9 +10,10 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import utils
-from dataset import build_dataset, sparse_batch_collate
+from dataset.dataset import build_dataset
+from dataset.collate import sparse_batch_collate
 from engine import evaluate_all, finetune_train_one_epoch as train_one_epoch
-from optim import (
+from model.optim import (
     LayerDecayValueAssigner,
     create_optimizer,
     get_parameter_groups,
@@ -295,6 +296,12 @@ def get_args():
         help="number of regions for each sample",
     )
     parser.add_argument(
+        "--mask_ratio",
+        default=0.75,
+        type=float,
+        help="ratio of the visual tokens/patches need be masked",
+    )
+    parser.add_argument(
         "--imagenet_default_mean_and_std", default=True, action="store_true"
     )
 
@@ -392,6 +399,7 @@ def get_args():
             "fetal_adult,lymph,pbmc,GBM,TCGA,TFAtlas",
             "fetal_adult",
             "fetal_adult,k562",
+            "k562_cut"
         ],
         type=str,
         help="dataset type",
@@ -399,8 +407,14 @@ def get_args():
     # parser.add_argument('--spike_in', default=1, type=float, help='spike in ratio')
     parser.add_argument("--plot_scatter", action="store_true", default=False)
     parser.add_argument("--use_natac", action="store_true", default=False)
+    parser.add_argument("--mask_tss", action="store_true", default=False)
     parser.add_argument("--leave_out_celltypes", default="Astrocytes", type=str)
     parser.add_argument("--leave_out_chromosomes", default="chr4", type=str)
+
+    parser.add_argument("--use_seq", default=False, action="store_true")
+    parser.add_argument("--sampling_step", default=100, type=int)
+    parser.add_argument("--target_sequence_length", default=200, type=int)
+    parser.add_argument("--shift", default=100, type=int)
 
     known_args, _ = parser.parse_known_args()
 
@@ -817,12 +831,19 @@ def main(args, ds_init):
                 data_loader_val, model, device, args, epoch, printlog=True
             )
             print(
-                f"R2, Pearson, Spearmanr Score of the network on the {len(dataset_val)} test images: {test_stats['r2score']:.1f}, {test_stats['pearsonr_score']:.1f}, {test_stats['spearmanr_score']:.1f}"
+                f"R2, Pearson, Spearmanr Score of the network on the {len(dataset_val)} test expression: {test_stats['r2score']:.1f}, {test_stats['pearsonr_score']:.1f}, {test_stats['spearmanr_score']:.1f}"
+            )
+            print(
+                f"R2, Pearson, Spearmanr Score of the network on the {len(dataset_val)} test atac: {test_stats['r2score_atac']:.1f}, {test_stats['pearsonr_score_atac']:.1f}, {test_stats['spearmanr_score_atac']:.1f}"
             )
             if max_r2score < test_stats["r2score"]:
                 max_r2score = test_stats["r2score"]
                 max_pearsonr_score = test_stats["pearsonr_score"]
                 max_spearmanr_score = test_stats["spearmanr_score"]
+
+                max_r2score_atac = test_stats["r2score_atac"]
+                max_pearsonr_score_atac = test_stats["pearsonr_score_atac"]
+                max_spearmanr_score_atac = test_stats["spearmanr_score_atac"]
 
                 if args.output_dir and args.save_ckpt:
                     utils.save_model(
@@ -838,6 +859,9 @@ def main(args, ds_init):
             print(
                 f"Max r2score: {max_r2score:.3f}, Max pearsonr_score: {max_pearsonr_score:.3f}, Max spearmanr_score: {max_spearmanr_score:.3f}"
             )
+            print(
+                f"Max r2score atac: {max_r2score_atac:.3f}, Max pearsonr_score atac: {max_pearsonr_score_atac:.3f}, Max spearmanr_score atac: {max_spearmanr_score_atac:.3f}"
+            )
             if log_writer is not None:
                 log_writer.update(
                     test_r2score=test_stats["r2score"], head="perf", step=epoch
@@ -849,6 +873,19 @@ def main(args, ds_init):
                 )
                 log_writer.update(
                     test_spearmanr_score=test_stats["spearmanr_score"],
+                    head="perf",
+                    step=epoch,
+                )
+                log_writer.update(
+                    test_r2score_atac=test_stats["r2score_atac"], head="perf", step=epoch
+                )
+                log_writer.update(
+                    test_spearmanr_score_atac=test_stats["pearsonr_score_atac"],
+                    head="perf",
+                    step=epoch,
+                )
+                log_writer.update(
+                    test_spearmanr_score_atac=test_stats["spearmanr_score_atac"],
                     head="perf",
                     step=epoch,
                 )

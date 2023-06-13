@@ -373,9 +373,11 @@ def make_dataset(
 
         # Get input chromosomes
         all_chromosomes = celltype_annot["Chromosome"].unique().tolist()
+        print('all_chromosomes:', all_chromosomes)
         input_chromosomes = chromosome_splitter(
             all_chromosomes, leave_out_chromosomes, is_train=is_train
         )
+        print('input_chromosomes:', input_chromosomes)
 
 
         # Generate sample list
@@ -383,6 +385,7 @@ def make_dataset(
             idx_peak_list = celltype_annot.index[
                 celltype_annot["Chromosome"] == chromosome
             ].tolist()
+            print('idx_peak_list:', idx_peak_list)
             idx_peak_start = idx_peak_list[0]
             idx_peak_end = idx_peak_list[-1]
             # NOTE: overlapping split chrom

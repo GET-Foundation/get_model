@@ -271,18 +271,21 @@ class GETFinetune(GETPretrain):
             output_dim,
             pos_emb_components,
         )
-        self.head = nn.Conv1d(self.embed_dim, 1, 1)
+        self.head_atac = nn.Conv1d(self.embed_dim, 1, 1)
         self.head_exp = (
             ExpressionHead(embed_dim, output_dim, use_atac)
             if output_dim > 0
             else nn.Identity()
         )
 
-    def forward(self, x, tss_mask, ctcf_pos):
+    def forward(self, peak, seq, tss_mask, ctcf_pos):
         """forward function with hooks to return embedding or attention weights."""
-        x = self.motif(
-            x
-        )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
+        if seq is not None:
+            x = self.motif(
+                seq
+            )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
+        else:
+            x = peak
         # B, N, C = x.shape
         x = self.region_embed(x)
 
@@ -294,10 +297,10 @@ class GETFinetune(GETPretrain):
                 x = pos_emb_component(x)
 
         x, _ = self.encoder(x, mask=tss_mask)
-        atac = F.softplus(self.head(x.permute(0, 2, 1)).permute(0, 2, 1))
+        atac = F.softplus(self.head_atac(x.permute(0, 2, 1))).permute(0, 2, 1).squeeze(-1)
         exp = F.softplus(self.head_exp(x, atac))
 
-        return x, atac, exp
+        return atac, exp
 
     def reset_head(self, output_dim):
         self.output_dim = output_dim
@@ -312,7 +315,7 @@ def get_pretrain_motif(pretrained=False, **kwargs):
         num_regions=200,
         num_motif=637,
         num_res_block=1,
-        motif_prior=True,
+        motif_prior=False,
         embed_dim=768,
         num_layers=8,
         d_model=768,
@@ -345,5 +348,3 @@ def get_finetune_motif(pretrained=False, **kwargs):
         checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
         model.load_state_dict(checkpoint["model"])
     return model
-
-# %%
