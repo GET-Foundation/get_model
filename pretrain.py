@@ -12,7 +12,7 @@ import torch.backends.cudnn as cudnn
 import utils
 from dataset.dataset import build_dataset
 from engine import pretrain_one_epoch as train_one_epoch
-from get.get_model.optim import create_optimizer
+from optim import create_optimizer
 from timm.models import create_model
 from utils import NativeScalerWithGradNormCount as NativeScaler
 
