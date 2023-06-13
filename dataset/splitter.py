@@ -91,7 +91,7 @@ def chromosome_splitter(all_chromosomes: List[str], leave_out_chromosomes: List[
     """
     # Copy the all_chromosomes list to input_chromosomes
     input_chromosomes = all_chromosomes.copy()
-
+    leave_out_chromosomes = leave_out_chromosomes.split(",")
     if is_train:
         for leave_out_chromosome in leave_out_chromosomes:
             if leave_out_chromosome in all_chromosomes:
@@ -102,5 +102,9 @@ def chromosome_splitter(all_chromosomes: List[str], leave_out_chromosomes: List[
         else:
             input_chromosomes = leave_out_chromosomes
 
+    if isinstance(input_chromosomes, str):
+        input_chromosomes = [input_chromosomes]
+    
+    print("input chromosomes: ", input_chromosomes)
     return input_chromosomes
 

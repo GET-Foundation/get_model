@@ -12,7 +12,7 @@ import torch.backends.cudnn as cudnn
 import utils
 from dataset.dataset import build_dataset
 from engine import pretrain_one_epoch as train_one_epoch
-from model.optim import create_optimizer
+from get.get_model.optim import create_optimizer
 from timm.models import create_model
 from utils import NativeScalerWithGradNormCount as NativeScaler
 
@@ -35,18 +35,20 @@ def get_args_parser():
     )
 
     parser.add_argument(
+        "--num_region_per_sample",
+        default=200,
+        type=int,
+        help="number of regions for each sample",
+    )
+
+    parser.add_argument(
         "--mask_ratio",
         default=0.75,
         type=float,
         help="ratio of the visual tokens/patches need be masked",
     )
 
-    parser.add_argument(
-        "--spike_in",
-        default=0.01,
-        type=float,
-        help="ratio of spike unsupervised pretraining",
-    )
+
 
     parser.add_argument(
         "--input_dim", default=111, type=int, help="input dimension size for backbone"
@@ -153,21 +155,6 @@ def get_args_parser():
         help="epochs to warmup LR, if scheduler supports",
     )
 
-    # Augmentation parameters
-    parser.add_argument(
-        "--color_jitter",
-        type=float,
-        default=0.0,
-        metavar="PCT",
-        help="Color jitter factor (default: 0.4)",
-    )
-    parser.add_argument(
-        "--train_interpolation",
-        type=str,
-        default="bicubic",
-        help='Training interpolation (random, bilinear, bicubic default: "bicubic")',
-    )
-
     # Dataset parameters
     parser.add_argument(
         "--data_path",
@@ -178,17 +165,19 @@ def get_args_parser():
     parser.add_argument("--hic_data_path", type=str, help="hic dataset path")
     parser.add_argument("--data_type", default="fetal", type=str, help="dataset type")
     parser.add_argument("--use_natac", action="store_true", default=False)
-
+    parser.add_argument("--data_set", default="Pretrain", type=str)
+    parser.add_argument("--leave_out_celltypes", default="", type=str)
+    parser.add_argument("--leave_out_chromosomes", default="", type=str)
+    parser.add_argument("--use_seq", default=False, action="store_true")
+    parser.add_argument("--sampling_step", default=100, type=int)
     parser.add_argument(
-        "--num_region_per_sample",
-        default=600,
-        type=int,
-        help="number of regions for each sample",
-    )
-    parser.add_argument(
-        "--imagenet_default_mean_and_std", default=True, action="store_true"
+        "--spike_in",
+        default=0.01,
+        type=float,
+        help="ratio of spike unsupervised pretraining",
     )
 
+    # engine
     parser.add_argument(
         "--output_dir", default="", help="path where to save, empty for no saving"
     )
@@ -224,11 +213,7 @@ def get_args_parser():
     parser.add_argument(
         "--dist_url", default="env://", help="url used to set up distributed training"
     )
-    parser.add_argument("--data_set", default="Pretrain", type=str)
-    parser.add_argument("--leave_out_celltypes", default="", type=str)
-    parser.add_argument("--leave_out_chromosomes", default="", type=str)
-    parser.add_argument("--use_seq", default=False, action="store_true")
-    parser.add_argument("--sampling_step", default=100, type=int)
+
     return parser
 
 

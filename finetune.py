@@ -10,10 +10,9 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import utils
-from dataset.dataset import build_dataset
-from dataset.collate import sparse_batch_collate
+from dataset.dataset import build_dataset#, sparse_batch_collate
 from engine import evaluate_all, finetune_train_one_epoch as train_one_epoch
-from model.optim import (
+from optim import (
     LayerDecayValueAssigner,
     create_optimizer,
     get_parameter_groups,
@@ -23,7 +22,7 @@ from timm.models import create_model
 from timm.utils import ModelEma
 from utils import NativeScalerWithGradNormCount as NativeScaler
 
-from model import model
+import model.model
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -185,13 +184,7 @@ def get_args():
         metavar="PCT",
         help="Color jitter factor (default: 0.4)",
     )
-    parser.add_argument(
-        "--aa",
-        type=str,
-        default="rand-m9-mstd0.5-inc1",
-        metavar="NAME",
-        help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)',
-    ),
+
     parser.add_argument(
         "--smoothing", type=float, default=0.1, help="Label smoothing (default: 0.1)"
     )
@@ -236,39 +229,6 @@ def get_args():
         help="Do not random erase first (clean) augmentation split",
     )
 
-    # * Mixup params
-    parser.add_argument(
-        "--mixup", type=float, default=0.0, help="mixup alpha, mixup enabled if > 0."
-    )
-    parser.add_argument(
-        "--cutmix", type=float, default=0.0, help="cutmix alpha, cutmix enabled if > 0."
-    )
-    parser.add_argument(
-        "--cutmix_minmax",
-        type=float,
-        nargs="+",
-        default=None,
-        help="cutmix min/max ratio, overrides alpha and enables cutmix if set (default: None)",
-    )
-    parser.add_argument(
-        "--mixup_prob",
-        type=float,
-        default=0.0,
-        help="Probability of performing mixup or cutmix when either/both is enabled",
-    )
-    parser.add_argument(
-        "--mixup_switch_prob",
-        type=float,
-        default=0.5,
-        help="Probability of switching to cutmix when both mixup and cutmix enabled",
-    )
-    parser.add_argument(
-        "--mixup_mode",
-        type=str,
-        default="batch",
-        help='How to apply mixup/cutmix params. Per "batch", "pair", or "elem"',
-    )
-
     # * Finetuning params
     parser.add_argument("--finetune", default="", help="finetune from checkpoint")
     parser.add_argument("--model_key", default="model|module", type=str)
@@ -294,15 +254,6 @@ def get_args():
         default=600,
         type=int,
         help="number of regions for each sample",
-    )
-    parser.add_argument(
-        "--mask_ratio",
-        default=0.75,
-        type=float,
-        help="ratio of the visual tokens/patches need be masked",
-    )
-    parser.add_argument(
-        "--imagenet_default_mean_and_std", default=True, action="store_true"
     )
 
     parser.add_argument(
@@ -383,24 +334,6 @@ def get_args():
     parser.add_argument(
         "--data_type",
         default="fetal",
-        choices=[
-            "bulk",
-            "multiome",
-            "fetal",
-            "k562",
-            "all",
-            "pretrain_fetal",
-            "pretrain_exp",
-            "pretrain_exp_hbs",
-            "TCGA",
-            "TFAtlas",
-            "fetal_adult,lymph,pbmc,GBM,k562,TCGA,TFAtlas",
-            "fetal_adult,lymph,pbmc,GBM,k562,TFAtlas",
-            "fetal_adult,lymph,pbmc,GBM,TCGA,TFAtlas",
-            "fetal_adult",
-            "fetal_adult,k562",
-            "k562_cut"
-        ],
         type=str,
         help="dataset type",
     )
@@ -410,12 +343,9 @@ def get_args():
     parser.add_argument("--mask_tss", action="store_true", default=False)
     parser.add_argument("--leave_out_celltypes", default="Astrocytes", type=str)
     parser.add_argument("--leave_out_chromosomes", default="chr4", type=str)
-
     parser.add_argument("--use_seq", default=False, action="store_true")
     parser.add_argument("--sampling_step", default=100, type=int)
     parser.add_argument("--target_sequence_length", default=200, type=int)
-    parser.add_argument("--shift", default=100, type=int)
-
     known_args, _ = parser.parse_known_args()
 
     if known_args.enable_deepspeed:
@@ -493,7 +423,7 @@ def main(args, ds_init):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        collate_fn=sparse_batch_collate,
+        # collate_fn=sparse_batch_collate,
     )
 
     if dataset_val is not None:
@@ -504,25 +434,25 @@ def main(args, ds_init):
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
             drop_last=False,
-            collate_fn=sparse_batch_collate,
+            # collate_fn=sparse_batch_collate,
         )
     else:
         data_loader_val = None
 
     mixup_fn = None
-    mixup_active = args.mixup > 0 or args.cutmix > 0.0 or args.cutmix_minmax is not None
-    if mixup_active:
-        print("Mixup is activated!")
-        mixup_fn = Mixup(
-            mixup_alpha=args.mixup,
-            cutmix_alpha=args.cutmix,
-            cutmix_minmax=args.cutmix_minmax,
-            prob=args.mixup_prob,
-            switch_prob=args.mixup_switch_prob,
-            mode=args.mixup_mode,
-            label_smoothing=args.smoothing,
-            num_classes=args.nb_classes,
-        )
+    # mixup_active = args.mixup > 0 or args.cutmix > 0.0 or args.cutmix_minmax is not None
+    # if mixup_active:
+    #     print("Mixup is activated!")
+    #     mixup_fn = Mixup(
+    #         mixup_alpha=args.mixup,
+    #         cutmix_alpha=args.cutmix,
+    #         cutmix_minmax=args.cutmix_minmax,
+    #         prob=args.mixup_prob,
+    #         switch_prob=args.mixup_switch_prob,
+    #         mode=args.mixup_mode,
+    #         label_smoothing=args.smoothing,
+    #         num_classes=args.nb_classes,
+    #     )
 
     model = create_model(
         args.model,
@@ -538,9 +468,8 @@ def main(args, ds_init):
         setting=args.setting,
     )
 
-    num_region_per_sample = model.region_embed.num_region_per_sample
+    num_region_per_sample = args.num_region_per_sample
     print("Region size = %s" % str(num_region_per_sample))
-    args.region_size = num_region_per_sample
 
     if args.finetune:
         if args.finetune.startswith("https"):
@@ -580,36 +509,36 @@ def main(args, ds_init):
         checkpoint_model = new_dict
 
         # interpolate position embedding
-        if "pos_embed" in checkpoint_model:
-            pos_embed_checkpoint = checkpoint_model["pos_embed"]
-            embedding_size = pos_embed_checkpoint.shape[-1]
-            num_patches = model.patch_embed.num_patches
-            num_extra_tokens = model.pos_embed.shape[-2] - num_patches
-            # height (== width) for the checkpoint position embedding
-            orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
-            # height (== width) for the new position embedding
-            new_size = int(num_patches**0.5)
-            # class_token and dist_token are kept unchanged
-            if orig_size != new_size:
-                print(
-                    "Position interpolate from %dx%d to %dx%d"
-                    % (orig_size, orig_size, new_size, new_size)
-                )
-                extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
-                # only the position tokens are interpolated
-                pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
-                pos_tokens = pos_tokens.reshape(
-                    -1, orig_size, orig_size, embedding_size
-                ).permute(0, 3, 1, 2)
-                pos_tokens = torch.nn.functional.interpolate(
-                    pos_tokens,
-                    size=(new_size, new_size),
-                    mode="bicubic",
-                    align_corners=False,
-                )
-                pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
-                new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
-                checkpoint_model["pos_embed"] = new_pos_embed
+        # if "pos_embed" in checkpoint_model:
+        #     pos_embed_checkpoint = checkpoint_model["pos_embed"]
+        #     embedding_size = pos_embed_checkpoint.shape[-1]
+        #     num_patches = model.patch_embed.num_patches
+        #     num_extra_tokens = model.pos_embed.shape[-2] - num_patches
+        #     # height (== width) for the checkpoint position embedding
+        #     orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
+        #     # height (== width) for the new position embedding
+        #     new_size = int(num_patches**0.5)
+        #     # class_token and dist_token are kept unchanged
+        #     if orig_size != new_size:
+        #         print(
+        #             "Position interpolate from %dx%d to %dx%d"
+        #             % (orig_size, orig_size, new_size, new_size)
+        #         )
+        #         extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
+        #         # only the position tokens are interpolated
+        #         pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
+        #         pos_tokens = pos_tokens.reshape(
+        #             -1, orig_size, orig_size, embedding_size
+        #         ).permute(0, 3, 1, 2)
+        #         pos_tokens = torch.nn.functional.interpolate(
+        #             pos_tokens,
+        #             size=(new_size, new_size),
+        #             mode="bicubic",
+        #             align_corners=False,
+        #         )
+        #         pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
+        #         new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
+        #         checkpoint_model["pos_embed"] = new_pos_embed
 
         utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
         if args.last_layer:
@@ -655,7 +584,7 @@ def main(args, ds_init):
     if dataset_val is not None:
         print("Number of testing examples = %d" % len(dataset_val))
 
-    num_layers = model_without_ddp.get_num_layers()
+    num_layers = model_without_ddp.num_layers
     if args.layer_decay < 1.0:
         assigner = LayerDecayValueAssigner(
             list(
@@ -696,7 +625,8 @@ def main(args, ds_init):
         if args.distributed:
             # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
             model = torch.nn.parallel.DistributedDataParallel(
-                model, device_ids=[args.gpu]
+                model, device_ids=[args.gpu],
+                find_unused_parameters=True,
             )
             model_without_ddp = model.module
         print("Complete DistributedDataParallel!")
@@ -749,7 +679,7 @@ def main(args, ds_init):
     )
 
     if args.eval:
-        test_stats = evaluate_all(data_loader_val, model, device, args)
+        test_stats = evaluate_all(data_loader_val, model, device, criterion, args)
         max_r2score = test_stats["r2score"]
         max_pearsonr_score = test_stats["pearsonr_score"]
         max_spearmanr_score = test_stats["spearmanr_score"]
@@ -828,7 +758,7 @@ def main(args, ds_init):
             and (epoch + 1) % args.eval_freq == 0
         ):
             test_stats = evaluate_all(
-                data_loader_val, model, device, args, epoch, printlog=True
+                data_loader_val, model, device, criterion, args, epoch, printlog=True
             )
             print(
                 f"R2, Pearson, Spearmanr Score of the network on the {len(dataset_val)} test expression: {test_stats['r2score']:.1f}, {test_stats['pearsonr_score']:.1f}, {test_stats['spearmanr_score']:.1f}"

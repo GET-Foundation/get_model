@@ -235,11 +235,10 @@ class ExpressionDataset(Dataset):
         ctcf_pos = self.ctcf_pos[index]
 
         if self.transform is not None:
-            peak, seq, mask = self.transform(peak, seq, tssidx)
-        print(seq.shape)
+            peak, seq, mask, target = self.transform(peak, seq, tssidx, target)
         if peak.shape[0] == 1:
             peak = peak.squeeze(0)
-        return peak, seq, mask, target, ctcf_pos
+        return peak, seq, mask, ctcf_pos, target
 
     def __len__(self) -> int:
         return len(self.peaks)
@@ -373,7 +372,6 @@ def make_dataset(
 
         # Get input chromosomes
         all_chromosomes = celltype_annot["Chromosome"].unique().tolist()
-        print('all_chromosomes:', all_chromosomes)
         input_chromosomes = chromosome_splitter(
             all_chromosomes, leave_out_chromosomes, is_train=is_train
         )
@@ -385,7 +383,6 @@ def make_dataset(
             idx_peak_list = celltype_annot.index[
                 celltype_annot["Chromosome"] == chromosome
             ].tolist()
-            print('idx_peak_list:', idx_peak_list)
             idx_peak_start = idx_peak_list[0]
             idx_peak_end = idx_peak_list[-1]
             # NOTE: overlapping split chrom

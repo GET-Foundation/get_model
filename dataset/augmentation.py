@@ -158,17 +158,24 @@ class DataAugmentationForGETPeak(object):
 
 
 
-class DataAugmentationForGETPeakFinetune(DataAugmentationForGETPeak):
+class DataAugmentationForGETPeakFinetune(object):
     def __init__(self, args):
-        super().__init__(args)
+        self.transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+            ]
+        )
         self.masked_position_generator = TSSMaskingGenerator(args.mask_tss)
 
-    def __call__(self, region, sequence, tss_idx):
-        region = self.transform(region)
+    def __call__(self, region, sequence, target, tss_idx):
         if sequence is not None:
-            sequence = self.transform(sequence)
+            sequence = torch.Tensor(sequence)
+        if isinstance(region, scipy.sparse.coo_matrix):
+            region = region.toarray()
+        region = self.transform(region)
         mask = self.masked_position_generator(tss_idx)
-        return region, sequence, mask
+        target = torch.Tensor(target)
+        return region, sequence, mask, target
 
     def __repr__(self):
         repr = "(DataAugmentationForGETPeakFinetune,\n"

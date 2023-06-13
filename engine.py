@@ -154,7 +154,6 @@ def train_class_batch(model, peak, seq, mask, ctcf_pos, atac_target, exp_target,
     loss_atac = criterion(atac, atac_target)
     loss_exp = criterion(exp, exp_target)
     loss = loss_atac + loss_exp
-    print(loss_atac, loss_exp)
     return loss, atac, exp
 
 
@@ -193,7 +192,7 @@ def finetune_train_one_epoch(
     else:
         optimizer.zero_grad()
 
-    for data_iter_step, (peaks, seq, mask, exp_targets, ctcf_pos) in enumerate(
+    for data_iter_step, (peaks, seq, mask, ctcf_pos, exp_targets) in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
     ):
         step = data_iter_step // update_freq
@@ -215,7 +214,7 @@ def finetune_train_one_epoch(
         peaks = peaks.to(device, non_blocking=True)
         peaks = peaks.float()
         seq = seq.to(device, non_blocking=True)
-        mask = mask.to(device, non_blocking=True).bool()
+        mask = mask.to(device, non_blocking=True).bool().squeeze(-1)
         exp_targets = exp_targets.to(device, non_blocking=True)
         exp_targets = exp_targets.float()
         ctcf_pos = ctcf_pos.to(device, non_blocking=True).bool()
@@ -223,9 +222,9 @@ def finetune_train_one_epoch(
 
         if loss_scaler is None:
             peaks = peaks.half()
-            loss, atac, exp = train_class_batch(model, peaks, seq, mask, atac_targets, exp_targets, ctcf_pos, criterion)
+            loss, atac, exp = train_class_batch(model, peaks, seq, mask, ctcf_pos, atac_targets, exp_targets, criterion)
         else:
-            loss, atac, exp = train_class_batch(model, peaks, seq, mask, atac_targets, exp_targets, ctcf_pos, criterion)
+            loss, atac, exp = train_class_batch(model, peaks, seq, mask, ctcf_pos, atac_targets, exp_targets, criterion)
 
         loss_value = loss.item()
 
@@ -271,7 +270,7 @@ def finetune_train_one_epoch(
 
         if (data_iter_step + 1) % update_freq == 0 and args.eval_each_step:
             test_stats = evaluate_all(
-                data_loader_val, model, device, args, printlog=False
+                data_loader_val, model, device, criterion, args, printlog=False
             )
         else:
             test_stats = None
@@ -366,9 +365,7 @@ def cal_score_stats(preds, obs, data_loader, args):
 
 
 @torch.no_grad()
-def evaluate_all(data_loader, model, device, args, epoch=0, printlog=True):
-    criterion = torch.nn.MSELoss()
-
+def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=True):
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Test:"
 
@@ -380,17 +377,17 @@ def evaluate_all(data_loader, model, device, args, epoch=0, printlog=True):
     preds_atac = []
     obs_atac = []
 
-    for (peaks, seq, mask, exp_targets, ctcf_pos) in data_loader:
+    for (peaks, seq, mask, ctcf_pos, exp_targets) in data_loader:
         peaks = peaks.to(device, non_blocking=True)
         peaks = peaks.float()
         seq = seq.to(device, non_blocking=True)
-        mask = mask.to(device, non_blocking=True).bool()
+        mask = mask.to(device, non_blocking=True).bool().squeeze(-1)
         exp_targets = exp_targets.to(device, non_blocking=True)
         exp_targets = exp_targets.float()
         ctcf_pos = ctcf_pos.to(device, non_blocking=True).bool()
         atac_targets = peaks[:, :, -1]
         # compute output
-        with torch.amp.autocast("cuda" if args.cuda else "cpu"):
+        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
             atac, exp = model(peaks, seq, mask, ctcf_pos)
             loss_atac = criterion(atac, atac_targets)
             loss_exp = criterion(exp, exp_targets)
@@ -408,11 +405,6 @@ def evaluate_all(data_loader, model, device, args, epoch=0, printlog=True):
     obs = np.concatenate(obs, axis=0).reshape(-1)
     preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
     obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
-
-    print("preds:", preds.shape)
-    print("obs:", obs.shape)
-    print("preds_atac:", preds_atac.shape)
-    print("obs_atac:", obs_atac.shape)
 
     r2score, pearsonr_score, spearmanr_score = cal_score_stats(preds, obs, data_loader, args)
     r2score_atac, pearsonr_score_atac, spearmanr_score_atac = cal_score_stats(preds_atac, obs_atac, data_loader, args)

@@ -223,6 +223,80 @@ class GETPretrain(nn.Module):
         return {"pos_embed", "cls_token"}
 
 
+class GETPretrainDecompose(GETPretrain):
+    """A GET model for pretraining using mask and prediction. Decompose local and global features.
+    Baseline ATAC should be able to be predicted by local features. To disentangle the global features,
+    we can shuffle the minibatch to break the correlation between regions.
+    """
+    def __init__(
+        self,
+        num_regions=200,
+        num_motif=637,
+        num_res_block=0,
+        motif_prior=False,
+        embed_dim=768,
+        num_layers=12,
+        d_model=768,
+        nhead=12,
+        dropout=0.1,
+        output_dim=1,
+        pos_emb_components=["CTCF", "Rotary", "Absolute"],
+    ):
+        super().__init__(
+        num_regions=num_regions,
+        num_motif=num_motif,
+        num_res_block=num_res_block,
+        motif_prior=motif_prior,
+        embed_dim=embed_dim,
+        num_layers=num_layers,
+        d_model=d_model,
+        nhead=nhead,
+        dropout=dropout,
+        output_dim=output_dim,
+        pos_emb_components=pos_emb_components,
+        )
+        self.head_atac_local = nn.Conv1d(d_model, 1, 1)
+
+    def forward(self, peak, seq, mask, ctcf_pos):
+        """forward function with hooks to return embedding or attention weights."""
+        if seq is not None:
+            x = self.motif(
+                seq
+            )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
+        else:
+            x = peak
+        x = self.region_embed(x)
+        local_atac = F.softplus(self.head_atac_local(x.permute(0, 2, 1)).permute(0, 2, 1).squeeze(-1))
+
+        B, N, C = peak.shape
+        mask_token = self.mask_token.expand(B, N, -1)
+        w = mask.unsqueeze(-1).type_as(mask_token)
+        x = x * (1 - w) + mask_token * w
+
+        for pos_emb_component in self.pos_embed:
+            if isinstance(pos_emb_component, CTCFPositionalEncoding):
+                x = pos_emb_component(x, ctcf_pos)
+            else:
+                x = pos_emb_component(x)
+
+        x, _ = self.encoder(x, mask=mask) # (N, D)
+        x_masked = self.head_mask(x) # (N, Motif)
+        x_masked = x_masked[mask].reshape(B, -1, C)
+        atac = local_atac + F.softplus(self.head_atac(x.permute(0, 2, 1)).permute(0, 2, 1).squeeze(-1))
+
+        return x_masked, atac, local_atac
+
+    def reset_head(self, output_dim, global_pool=""):
+        self.output_dim = output_dim
+        self.head = (
+            nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
+        )
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {"pos_embed", "cls_token"}
+
+
 class ExpressionHead(nn.Module):
     """Expression head"""
 
@@ -236,7 +310,7 @@ class ExpressionHead(nn.Module):
 
     def forward(self, x, atac=None):
         if self.use_atac:
-            x = torch.cat([x, atac], dim=-1)
+            x = torch.cat([x, atac.unsqueeze(-1)], dim=-1)
         return self.head(x)
 
 
@@ -299,7 +373,6 @@ class GETFinetune(GETPretrain):
         x, _ = self.encoder(x, mask=tss_mask)
         atac = F.softplus(self.head_atac(x.permute(0, 2, 1))).permute(0, 2, 1).squeeze(-1)
         exp = F.softplus(self.head_exp(x, atac))
-
         return atac, exp
 
     def reset_head(self, output_dim):
@@ -335,11 +408,11 @@ def get_finetune_motif(pretrained=False, **kwargs):
     model = GETFinetune(
         num_regions=200,
         num_motif=637,
-        num_res_block=3,
+        num_res_block=1,
         motif_prior=True,
         embed_dim=768,
-        num_layers=8,
-        nhead=8,
+        num_layers=12,
+        nhead=12,
         dropout=0.1,
         output_dim=2,
         pos_emb_components=["CTCF"],

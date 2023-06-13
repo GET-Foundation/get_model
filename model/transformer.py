@@ -62,7 +62,9 @@ class Attention(nn.Module):
                 attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)
             assert (
                 attention_mask.shape[-1] == N
-            ), "The last dimension of attention_mask should be equal to N"
+            ), "The last dimension of attention_mask should be equal to N. Currently the shape is {}".format(
+                attention_mask.shape
+            )
 
             attn = attn.masked_fill(attention_mask, -100000000)
 
