@@ -167,14 +167,14 @@ class DataAugmentationForGETPeakFinetune(object):
         )
         self.masked_position_generator = TSSMaskingGenerator(args.mask_tss)
 
-    def __call__(self, region, sequence, target, tss_idx):
+    def __call__(self, region, sequence, tss_idx, target):
         if sequence is not None:
             sequence = torch.Tensor(sequence)
         if isinstance(region, scipy.sparse.coo_matrix):
             region = region.toarray()
         region = self.transform(region)
         mask = self.masked_position_generator(tss_idx)
-        target = torch.Tensor(target)
+        target = torch.Tensor(target.toarray())
         return region, sequence, mask, target
 
     def __repr__(self):

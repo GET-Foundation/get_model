@@ -197,7 +197,6 @@ class ExpressionDataset(Dataset):
         else:
             self.use_seq = False
 
-
         if len(peaks) == 0:
             msg = "Found 0 files in subfolders of: {}\n".format(self.root)
             raise RuntimeError(msg)

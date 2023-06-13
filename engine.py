@@ -327,39 +327,21 @@ def finetune_train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def cal_score_stats(preds, obs, data_loader, args):
+def cal_score_stats(preds, obs, data_loader, args, eval_nonzero=False, eval_tss=False):
 
-    if args.eval_nonzero:
+    if eval_nonzero:
         r2score = score_r2(preds[obs > 0], obs[obs > 0])
         spearmanr_score = score_spearmanr(preds[obs > 0], obs[obs > 0])
         pearsonr_score = score_pearsonr(preds[obs > 0], obs[obs > 0])
-    if args.eval_tss:
-        # gene_idx = np.load(os.path.join(args.data_path, "tss_idx/gene_idx_{}.npy".format(args.num_region_per_sample)))
-        gene_idx = data_loader.dataset.geneidx.reshape(-1)
-        r2score = score_r2(preds[gene_idx], obs[gene_idx])
-        spearmanr_score = score_spearmanr(preds[gene_idx], obs[gene_idx])
-        pearsonr_score = score_pearsonr(preds[gene_idx], obs[gene_idx])
+    if eval_tss:
+        gene_idx = np.where(data_loader.dataset.tssidxs.reshape(-1)>0)[0]
+        r2score = score_r2(preds[gene_idx][obs[gene_idx]>0], obs[gene_idx][obs[gene_idx]>0])
+        spearmanr_score = score_spearmanr(preds[gene_idx][obs[gene_idx]>0], obs[gene_idx][obs[gene_idx]>0])
+        pearsonr_score = score_pearsonr(preds[gene_idx][obs[gene_idx]>0], obs[gene_idx][obs[gene_idx]>0])
     else:
-        if args.setting != "human":
-            r2score = score_r2(preds, obs)
-            spearmanr_score = score_spearmanr(preds, obs)
-            pearsonr_score = score_pearsonr(preds, obs)
-        else:
-            r2score = 0
-            spearmanr_score = 0
-            pearsonr_score = 0
-            for i in range(len(preds)):
-                r2score += score_r2(preds[i], obs[i])
-                pearsonr_score += score_pearsonr(preds[i], obs[i])
-                spearmanr_score += score_spearmanr(preds[i], obs[i])
-
-            r2score = r2score / len(preds)
-            spearmanr_score = spearmanr_score / len(preds)
-            pearsonr_score = pearsonr_score / len(preds)
-
-            # r2score = np.mean([score_r2(preds[i], obs[i]) for i in range(len(preds))])
-            # spearmanr_score = np.mean([score_spearmanr(preds[i], obs[i]) for i in range(len(preds))])
-            # pearsonr_score = np.mean([score_pearsonr(preds[i], obs[i]) for i in range(len(preds))])
+        r2score = score_r2(preds, obs)
+        spearmanr_score = score_spearmanr(preds, obs)
+        pearsonr_score = score_pearsonr(preds, obs)
 
     return r2score, spearmanr_score, pearsonr_score
 
@@ -406,7 +388,7 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
     preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
     obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
 
-    r2score, pearsonr_score, spearmanr_score = cal_score_stats(preds, obs, data_loader, args)
+    r2score, pearsonr_score, spearmanr_score = cal_score_stats(preds, obs, data_loader, args, eval_tss=True)
     r2score_atac, pearsonr_score_atac, spearmanr_score_atac = cal_score_stats(preds_atac, obs_atac, data_loader, args)
 
     # gather the stats from all processes

@@ -715,7 +715,9 @@ def main(args, ds_init):
     max_r2score = 0.0
     max_pearsonr_score = 0.0
     max_spearmanr_score = 0.0
-
+    max_r2score_atac = 0.0
+    max_pearsonr_score_atac = 0.0
+    max_spearmanr_score_atac = 0.0
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -766,6 +768,7 @@ def main(args, ds_init):
             print(
                 f"R2, Pearson, Spearmanr Score of the network on the {len(dataset_val)} test atac: {test_stats['r2score_atac']:.1f}, {test_stats['pearsonr_score_atac']:.1f}, {test_stats['spearmanr_score_atac']:.1f}"
             )
+
             if max_r2score < test_stats["r2score"]:
                 max_r2score = test_stats["r2score"]
                 max_pearsonr_score = test_stats["pearsonr_score"]
