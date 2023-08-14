@@ -43,7 +43,7 @@ def pretrain_one_epoch(
     print_freq = 10
 
     loss_masked = nn.MSELoss()
-    loss_atac = nn.PoissonNLLLoss(log_input=False, reduction="mean")
+    #loss_atac = nn.PoissonNLLLoss(log_input=False, reduction="mean")
 
     for step, (batch) in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
@@ -88,9 +88,9 @@ def pretrain_one_epoch(
 
         output_masked, atac = model(regions, seq, bool_masked_pos, ctcf_pos)
         loss_masked_value = loss_masked(input=output_masked, target=labels_masked)
-        loss_atac_value = loss_atac(atac, labels_atac)
+        #loss_atac_value = loss_atac(atac, labels_atac)
         # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss
-        loss = loss_masked_value + loss_atac_value * 5
+        loss = loss_masked_value #+ loss_atac_value * 5
 
         loss_value = loss.item()
 
@@ -144,8 +144,8 @@ def pretrain_one_epoch(
         if lr_scheduler is not None:
             lr_scheduler.step_update(start_steps + step)
     # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
+    #metric_logger.synchronize_between_processes()
+    #print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
@@ -322,7 +322,7 @@ def finetune_train_one_epoch(
             log_writer.set_step()
 
     # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
+    #metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 

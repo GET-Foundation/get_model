@@ -201,7 +201,7 @@ def get_args_parser():
         help="Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.",
     )
     parser.add_argument("--no_pin_mem", action="store_false", dest="pin_mem", help="")
-    parser.set_defaults(pin_mem=True)
+    parser.set_defaults(pin_mem=False)
 
     # distributed training parameters
     parser.add_argument("--distributed", default=True, action="store_true")
@@ -306,7 +306,7 @@ def main(args):
 
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[args.gpu], find_unused_parameters=False
+            model, device_ids=[args.gpu], find_unused_parameters=True
         )
         model_without_ddp = model.module
 

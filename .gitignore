@@ -4,3 +4,4 @@ run_pretrain_k562_cut.sh
 consensus_pwms.meme
 log.txt
 run_finetune.sh
+*.pth
