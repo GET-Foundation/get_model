@@ -156,7 +156,7 @@ class ExpressionDataset(Dataset):
         self.transform = transform
 
         celltype_metadata_path = os.path.join(
-            self.root, "data/cell_type_pretrain_human_bingren_shendure_apr2023.txt"
+            self.root, "data/cell_type_pretrain.test.txt"
         )
         data_path = os.path.join(self.root, "")
         ctcf_path = os.path.join(
@@ -335,6 +335,7 @@ def make_dataset(
     ctcf_pos_list = []
 
     for file_id in tqdm(file_id_list):
+        print(file_id)
         cell_label = cell_dict[file_id]
         data_type = datatype_dict[file_id]
 
@@ -442,6 +443,7 @@ def make_dataset(
                     #     )
                     # ctcf_pos_i = np.vstack(
                     #     [ctcf_pos_i, np.zeros((pad_len, ctcf_pos_i.shape[1]))])
-        if seq_list is None:
-            return peak_list, np.zeros((len(peak_list))), cell_list, target_list, tssidx_list, ctcf_pos_list
+
+    if seq_list is None:
+        return peak_list, np.zeros((len(peak_list))), cell_list, target_list, tssidx_list, ctcf_pos_list
     return peak_list, seq_list, cell_list, target_list, tssidx_list, ctcf_pos_list

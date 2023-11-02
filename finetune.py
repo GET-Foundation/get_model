@@ -23,7 +23,11 @@ from timm.utils import ModelEma
 from utils import NativeScalerWithGradNormCount as NativeScaler
 
 import model.model
+import warnings
 
+# Suppress FutureWarnings
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", category=FutureWarning)
 torch.autograd.set_detect_anomaly(True)
 
 

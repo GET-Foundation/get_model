@@ -1,24 +1,31 @@
 #!/bin/bash
-mamba activate geneformer
+# source /manitou-home/home/xf2217/.bashrc
+# mamba activate /manitou/pmg/users/xf2217/mambaforge/atac_rna_data_processing
+# mkdir -p /pmglocal/xf2217/pretrain_human_bingren_shendure_apr2023/
+# cp -r /manitou/pmg/users/xf2217/pretrain_human_bingren_shendure_apr2023/k562_cut  /pmglocal/xf2217/pretrain_human_bingren_shendure_apr2023/
+# cp -r /manitou/pmg/users/xf2217/pretrain_human_bingren_shendure_apr2023/k562_encode  /pmglocal/xf2217/pretrain_human_bingren_shendure_apr2023/
+# cp -r /manitou/pmg/users/xf2217/pretrain_human_bingren_shendure_apr2023/k562_count_10  /pmglocal/xf2217/pretrain_human_bingren_shendure_apr2023/
+# cp -r /manitou/pmg/users/xf2217/pretrain_human_bingren_shendure_apr2023/data  /pmglocal/xf2217/pretrain_human_bingren_shendure_apr2023/
 # Set the path to save checkpoints
-OUTPUT_DIR='/home/xf2217/Projects/all_finetune/output'
+OUTPUT_DIR='/pmglocal/xf2217/finetune_natac_test/'
 # path to expression set
-DATA_PATH='/home/xf2217/Projects/all_finetune/data/'
+DATA_PATH='/pmglocal/xf2217/pretrain_human_bingren_shendure_apr2023/'
 PORT=7956
 
+
 # batch_size can be adjusted according to the graphics card
-OMP_NUM_THREADS=1 torchrun --nproc_per_node=1 finetune.py \
+OMP_NUM_THREADS=1 torchrun --nproc_per_node=3 finetune.py \
     --data_set "Expression" \
-    --mask_tss \
     --data_path ${DATA_PATH} \
     --input_dim 283 \
-    --eval_freq 5 \
+    --eval_freq 1 \
     --criterion "poisson" \
-    --data_type ball \
+    --data_type fetal_adult,k562_cut \
     --model get_finetune_motif \
     --use_natac \
-    --batch_size 16 \
-    --leave_out_celltypes "795" \
+    --resume /pmglocal/xf2217/finetune_natac_test/pretrain_finetune_natac_fetal_adult.pth \
+    --batch_size 12 \
+    --leave_out_celltypes "astrocyte,k562_cut0.04" \
     --leave_out_chromosomes "chr11" \
     --lr 1e-3 \
     --opt adamw \

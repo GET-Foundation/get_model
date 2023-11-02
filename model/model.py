@@ -109,12 +109,12 @@ class RegionEmbed(nn.Module):
         self.num_region = num_regions
         self.num_features = num_features
         self.embed_dim = embed_dim
-        self.embed = nn.Conv1d(num_features, embed_dim, 1)
+        self.embed = nn.Linear(num_features, embed_dim)
 
     def forward(self, x, **kwargs):
-        x = x.permute(0, 2, 1)  # (BATCH_SIZE, NUM_MOTIF, NUM_REGION)
+        # x = x.permute(0, 2, 1)  # (BATCH_SIZE, NUM_MOTIF, NUM_REGION)
         x = self.embed(x)
-        x = x.permute(0, 2, 1)  # (BATCH_SIZE, NUM_REGION, EMBED_DIM)
+        # x = x.permute(0, 2, 1)  # (BATCH_SIZE, NUM_REGION, EMBED_DIM)
         return x
 
 
@@ -147,9 +147,9 @@ class GETPretrain(nn.Module):
         self.dropout = dropout
         self.output_dim = output_dim
         self.pos_emb_components = pos_emb_components
-        self.motif = SequenceEncoder(
-            num_regions, num_motif, num_res_block, motif_prior
-        )
+        # self.motif = SequenceEncoder(
+        #     num_regions, num_motif, num_res_block, motif_prior
+        # )
         self.region_embed = RegionEmbed(num_regions, num_motif, embed_dim)
         self.pos_embed = []
         if "CTCF" in self.pos_emb_components: 
@@ -387,12 +387,12 @@ def get_pretrain_motif(pretrained=False, **kwargs):
     model = GETPretrain(
         num_regions=200,
         num_motif=283,
-        num_res_block=1,
+        num_res_block=0,
         motif_prior=False,
         embed_dim=768,
-        num_layers=8,
+        num_layers=12,
         d_model=768,
-        nhead=8,
+        nhead=12,
         dropout=0.1,
         output_dim=283,
         pos_emb_components=[],
@@ -408,11 +408,11 @@ def get_finetune_motif(pretrained=False, **kwargs):
     model = GETFinetune(
         num_regions=200,
         num_motif=283,
-        num_res_block=1,
+        num_res_block=0,
         motif_prior=False,
         embed_dim=768,
-        num_layers=8,
-        nhead=8,
+        num_layers=12,
+        nhead=12,
         dropout=0.1,
         output_dim=2,
         pos_emb_components=[],

@@ -151,9 +151,10 @@ def pretrain_one_epoch(
 
 def train_class_batch(model, peak, seq, mask, ctcf_pos, atac_target, exp_target, criterion):
     atac, exp = model(peak, seq, mask, ctcf_pos)
-    loss_atac = criterion(atac, atac_target)
+    # loss_atac = criterion(atac, atac_target)
     loss_exp = criterion(exp, exp_target)
-    loss = loss_atac + loss_exp
+    # loss = loss_atac + loss_exp
+    loss = loss_exp
     return loss, atac, exp
 
 
@@ -369,27 +370,27 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         ctcf_pos = ctcf_pos.to(device, non_blocking=True).bool()
         atac_targets = peaks[:, :, -1]
         # compute output
-        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
-            atac, exp = model(peaks, seq, mask, ctcf_pos)
-            loss_atac = criterion(atac, atac_targets)
-            loss_exp = criterion(exp, exp_targets)
-            loss = loss_atac + loss_exp
-            # print("loss:", loss)
+        # with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+        atac, exp = model(peaks, seq, mask, ctcf_pos)
+        # loss_atac = criterion(atac, atac_targets)
+        loss_exp = criterion(exp, exp_targets)
+        # loss = loss_atac + loss_exp
+        loss = loss_exp
 
         preds.append(exp.reshape(-1).detach().cpu().numpy())
         obs.append(exp_targets.reshape(-1).detach().cpu().numpy())
-        preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
-        obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
+        # preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
+        # obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
 
         metric_logger.update(loss=loss.item())
 
     preds = np.concatenate(preds, axis=0).reshape(-1)
     obs = np.concatenate(obs, axis=0).reshape(-1)
-    preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
-    obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
+    # preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
+    # obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
 
     r2score, pearsonr_score, spearmanr_score = cal_score_stats(preds, obs, data_loader, args, eval_tss=True)
-    r2score_atac, pearsonr_score_atac, spearmanr_score_atac = cal_score_stats(preds_atac, obs_atac, data_loader, args)
+    # r2score_atac, pearsonr_score_atac, spearmanr_score_atac = cal_score_stats(preds_atac, obs_atac, data_loader, args)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -398,19 +399,19 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
     metric_logger.meters["pearsonr_score"].update(pearsonr_score, n=1)
     metric_logger.meters["spearmanr_score"].update(spearmanr_score, n=1)
 
-    metric_logger.meters["r2score_atac"].update(r2score_atac, n=1)
-    metric_logger.meters["pearsonr_score_atac"].update(pearsonr_score_atac, n=1)
-    metric_logger.meters["spearmanr_score_atac"].update(spearmanr_score_atac, n=1)
+    # metric_logger.meters["r2score_atac"].update(r2score_atac, n=1)
+    # metric_logger.meters["pearsonr_score_atac"].update(pearsonr_score_atac, n=1)
+    # metric_logger.meters["spearmanr_score_atac"].update(spearmanr_score_atac, n=1)
 
     if printlog:
         print(
-            "* Score@R2 {r2:.3f} Score@pearsonr {pearson:.3f} Score@spearmanr {spearman:.3f} Score@R2_atac {r2_atac:.3f} Score@pearsonr_atac {pearson_atac:.3f} Score@spearmanr_atac {spearman_atac:.3f} loss {losses.global_avg:.3f}".format(
+            "* Score@R2 {r2:.3f} Score@pearsonr {pearson:.3f} Score@spearmanr {spearman:.3f}  loss {losses.global_avg:.3f}".format(
                 r2=r2score,
                 pearson=pearsonr_score,
                 spearman=spearmanr_score,
-                r2_atac=r2score_atac,
-                pearson_atac=pearsonr_score_atac,
-                spearman_atac=spearmanr_score_atac,
+                # r2_atac=r2score_atac,
+                # pearson_atac=pearsonr_score_atac,
+                # spearman_atac=spearmanr_score_atac,
                 losses=metric_logger.loss,
             )
         )

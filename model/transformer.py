@@ -55,18 +55,18 @@ class Attention(nn.Module):
         q = q * self.scale
         attn = q @ k.transpose(-2, -1)
 
-        if attention_mask is not None:
-            if attention_mask.dim() == 1:
-                attention_mask = attention_mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
-            elif attention_mask.dim() == 2:
-                attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)
-            assert (
-                attention_mask.shape[-1] == N
-            ), "The last dimension of attention_mask should be equal to N. Currently the shape is {}".format(
-                attention_mask.shape
-            )
+        # if attention_mask is not None:
+        #     if attention_mask.dim() == 1:
+        #         attention_mask = attention_mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+        #     elif attention_mask.dim() == 2:
+        #         attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)
+        #     assert (
+        #         attention_mask.shape[-1] == N
+        #     ), "The last dimension of attention_mask should be equal to N. Currently the shape is {}".format(
+        #         attention_mask.shape
+        #     )
 
-            attn = attn.masked_fill(attention_mask, -100000000)
+        #     attn = attn.masked_fill(attention_mask, -100000000)
 
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)

@@ -325,6 +325,8 @@ def load_state_dict(
     # copy state_dict so _load_from_state_dict can modify it
     metadata = getattr(state_dict, "_metadata", None)
     state_dict = state_dict.copy()
+    # state_dict = rename_keys(state_dict)
+    # print(state_dict)
     if metadata is not None:
         state_dict._metadata = metadata
 
@@ -505,6 +507,22 @@ def save_model(
             client_state=client_state,
         )
 
+def rename_keys(state_dict):
+    new_state_dict = {}
+    for key in state_dict.keys():
+        new_key = key
+        if "blocks." in new_key:
+            new_key = new_key.replace("blocks.", "encoder.blocks.")
+        if "fc_norm." in new_key:
+            new_key = new_key.replace("fc_norm.", "encoder.norm.")
+        if "head." in new_key:
+            new_key = new_key.replace("head.", "head_exp.head.")
+        if "region_embed.proj." in new_key:
+            new_key = new_key.replace("region_embed.proj.", "region_embed.embed.")
+        new_state_dict[new_key] = state_dict[key]
+    
+    new_state_dict['region_embed.embed.weight'] = new_state_dict['region_embed.embed.weight']#.unsqueeze(2)
+    return new_state_dict
 
 def auto_load_model(
     args, model, model_without_ddp, optimizer, loss_scaler, model_ema=None
@@ -534,11 +552,19 @@ def auto_load_model(
                 )
             else:
                 checkpoint = torch.load(args.resume, map_location="cpu")
-            model_without_ddp.load_state_dict(checkpoint["model"])
+            model_without_ddp.load_state_dict(rename_keys(checkpoint["model"]), strict=False)
+
             print("Resume checkpoint %s" % args.resume)
             if "optimizer" in checkpoint and "epoch" in checkpoint:
-                optimizer.load_state_dict(checkpoint["optimizer"])
-                args.start_epoch = checkpoint["epoch"] + 1
+                for group in checkpoint['optimizer']['param_groups']:
+                    group.setdefault('differentiable', False)
+                    group.setdefault('fused', None)
+                try:
+                    optimizer.load_state_dict(checkpoint['optimizer'])
+                    args.start_epoch = checkpoint["epoch"] + 1
+                except:
+                    print("Can't load optimizer state dict!")
+                
                 if hasattr(args, "model_ema") and args.model_ema:
                     _load_checkpoint_for_ema(model_ema, checkpoint["model_ema"])
                 if "scaler" in checkpoint:
