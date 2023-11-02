@@ -46,9 +46,12 @@ def cell_splitter(celltype_metadata: pd.DataFrame, leave_out_celltypes: str, dat
     datatype_dict = {}
     cell_dict = {}
 
+    print(celltype_metadata.astype(str))
+
     # Iterate over cell types
     for cell in celltype_list:
         celltype_metadata_of_cell = celltype_metadata.loc[celltype_metadata["cluster"] == cell]
+        print(celltype_metadata_of_cell)
         file_list = celltype_metadata_of_cell["id"].tolist()
         cluster_list = celltype_metadata_of_cell["cluster"].tolist()
         datatype_list = celltype_metadata_of_cell["datatype"].tolist()
@@ -58,11 +61,12 @@ def cell_splitter(celltype_metadata: pd.DataFrame, leave_out_celltypes: str, dat
 
         # Process each file
         for file, cluster, datatype, expression in zip(file_list, cluster_list, datatype_list, expression_list):
+            print(file, cluster, datatype, expression, datatype in datatypes)
             if is_pretrain and datatype in datatypes: # load cell types with ATAC but no expression
                 file_id_list.append(file)
                 cell_dict[file] = cluster
                 datatype_dict[file] = datatype
-            elif datatype in datatypes and expression is True:
+            elif datatype in datatypes and expression == 'True':
                 file_id_list.append(file)
                 cell_dict[file] = cluster
                 datatype_dict[file] = datatype

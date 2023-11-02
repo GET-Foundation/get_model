@@ -34,7 +34,7 @@ def generate_paths(file_id: int, data_path: str, data_type: str, use_natac: bool
     target_npy_path = os.path.join(data_path, data_type, str(file_id) + ".exp.npy")
     tssidx_npy_path = os.path.join(data_path, data_type, str(file_id) + ".tss.npy")
     seq_path = os.path.join(data_path, data_type, str(file_id) + ".seq.zarr.zip")
-    celltype_annot = os.path.join(data_path, data_type, file_id + ".csv")
+    celltype_annot = os.path.join(data_path, data_type, str(file_id) + ".csv")
 
     paths_dict = {
         "file_id": file_id,

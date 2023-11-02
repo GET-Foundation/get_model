@@ -186,7 +186,7 @@ class GETPretrain(nn.Module):
 
     def forward(self, peak, seq, mask, ctcf_pos):
         """forward function with hooks to return embedding or attention weights."""
-        if seq is not None:
+        if False:
             x = self.motif(
                 seq
             )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
@@ -354,7 +354,7 @@ class GETFinetune(GETPretrain):
 
     def forward(self, peak, seq, tss_mask, ctcf_pos):
         """forward function with hooks to return embedding or attention weights."""
-        if seq is not None:
+        if False:
             x = self.motif(
                 seq
             )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
@@ -386,16 +386,16 @@ class GETFinetune(GETPretrain):
 def get_pretrain_motif(pretrained=False, **kwargs):
     model = GETPretrain(
         num_regions=200,
-        num_motif=637,
+        num_motif=283,
         num_res_block=1,
-        motif_prior=True,
+        motif_prior=False,
         embed_dim=768,
         num_layers=8,
         d_model=768,
         nhead=8,
         dropout=0.1,
         output_dim=283,
-        pos_emb_components=["CTCF"],
+        pos_emb_components=[],
     )
     if pretrained:
         checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
@@ -407,15 +407,16 @@ def get_pretrain_motif(pretrained=False, **kwargs):
 def get_finetune_motif(pretrained=False, **kwargs):
     model = GETFinetune(
         num_regions=200,
-        num_motif=637,
+        num_motif=283,
         num_res_block=1,
-        motif_prior=True,
+        motif_prior=False,
         embed_dim=768,
         num_layers=8,
         nhead=8,
         dropout=0.1,
         output_dim=2,
-        pos_emb_components=["CTCF"],
+        pos_emb_components=[],
+        use_atac=False
     )
     if pretrained:
         checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")

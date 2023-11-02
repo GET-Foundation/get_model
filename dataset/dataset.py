@@ -308,7 +308,7 @@ def make_dataset(
         Tuple[List[ATACSample], List[str], List[coo_matrix], List[np.ndarray], List[np.ndarray]]: A tuple containing the generated dataset,
         cell labels, target data, TSS indices, and CTCF position segmentation.
     """
-    celltype_metadata = pd.read_csv(celltype_metadata_path, sep=",")
+    celltype_metadata = pd.read_csv(celltype_metadata_path, sep=",", dtype=str)
 
     # generate file id list
     file_id_list, cell_dict, datatype_dict = cell_splitter(
@@ -393,6 +393,7 @@ def make_dataset(
 
                 # sanity check
                 if end_index > idx_peak_end:
+                    print("end_index > idx_peak_end")
                     continue
                 celltype_annot_i = celltype_annot.iloc[start_index:end_index, :]
                 if celltype_annot_i.iloc[-1].End - celltype_annot_i.iloc[0].Start > 5000000:
@@ -441,5 +442,6 @@ def make_dataset(
                     #     )
                     # ctcf_pos_i = np.vstack(
                     #     [ctcf_pos_i, np.zeros((pad_len, ctcf_pos_i.shape[1]))])
-                    
+        if seq_list is None:
+            return peak_list, np.zeros((len(peak_list))), cell_list, target_list, tssidx_list, ctcf_pos_list
     return peak_list, seq_list, cell_list, target_list, tssidx_list, ctcf_pos_list
