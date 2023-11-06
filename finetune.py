@@ -747,7 +747,9 @@ def main(args, ds_init):
             update_freq=args.update_freq,
             args=args,
         )
+        print("*******Epoch done********")
         if args.output_dir and args.save_ckpt:
+            print("*******Saving models********")
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
                 utils.save_model(
                     args=args,
@@ -758,29 +760,31 @@ def main(args, ds_init):
                     epoch=epoch,
                     model_ema=model_ema,
                 )
+        
         if (
             data_loader_val is not None
             and args.eval_freq > 0
             and (epoch + 1) % args.eval_freq == 0
         ):
+            print("*******Start evaluation********")
             test_stats = evaluate_all(
                 data_loader_val, model, device, criterion, args, epoch, printlog=True
             )
             print(
                 f"R2, Pearson, Spearmanr Score of the network on the {len(dataset_val)} test expression: {test_stats['r2score']:.1f}, {test_stats['pearsonr_score']:.1f}, {test_stats['spearmanr_score']:.1f}"
             )
-            print(
-                f"R2, Pearson, Spearmanr Score of the network on the {len(dataset_val)} test atac: {test_stats['r2score_atac']:.1f}, {test_stats['pearsonr_score_atac']:.1f}, {test_stats['spearmanr_score_atac']:.1f}"
-            )
+            # print(
+            #     f"R2, Pearson, Spearmanr Score of the network on the {len(dataset_val)} test atac: {test_stats['r2score_atac']:.1f}, {test_stats['pearsonr_score_atac']:.1f}, {test_stats['spearmanr_score_atac']:.1f}"
+            # )
 
             if max_r2score < test_stats["r2score"]:
                 max_r2score = test_stats["r2score"]
                 max_pearsonr_score = test_stats["pearsonr_score"]
                 max_spearmanr_score = test_stats["spearmanr_score"]
 
-                max_r2score_atac = test_stats["r2score_atac"]
-                max_pearsonr_score_atac = test_stats["pearsonr_score_atac"]
-                max_spearmanr_score_atac = test_stats["spearmanr_score_atac"]
+                # max_r2score_atac = test_stats["r2score_atac"]
+                # max_pearsonr_score_atac = test_stats["pearsonr_score_atac"]
+                # max_spearmanr_score_atac = test_stats["spearmanr_score_atac"]
 
                 if args.output_dir and args.save_ckpt:
                     utils.save_model(
@@ -796,9 +800,9 @@ def main(args, ds_init):
             print(
                 f"Max r2score: {max_r2score:.3f}, Max pearsonr_score: {max_pearsonr_score:.3f}, Max spearmanr_score: {max_spearmanr_score:.3f}"
             )
-            print(
-                f"Max r2score atac: {max_r2score_atac:.3f}, Max pearsonr_score atac: {max_pearsonr_score_atac:.3f}, Max spearmanr_score atac: {max_spearmanr_score_atac:.3f}"
-            )
+            # print(
+            #     f"Max r2score atac: {max_r2score_atac:.3f}, Max pearsonr_score atac: {max_pearsonr_score_atac:.3f}, Max spearmanr_score atac: {max_spearmanr_score_atac:.3f}"
+            # )
             if log_writer is not None:
                 log_writer.update(
                     test_r2score=test_stats["r2score"], head="perf", step=epoch
@@ -813,19 +817,19 @@ def main(args, ds_init):
                     head="perf",
                     step=epoch,
                 )
-                log_writer.update(
-                    test_r2score_atac=test_stats["r2score_atac"], head="perf", step=epoch
-                )
-                log_writer.update(
-                    test_spearmanr_score_atac=test_stats["pearsonr_score_atac"],
-                    head="perf",
-                    step=epoch,
-                )
-                log_writer.update(
-                    test_spearmanr_score_atac=test_stats["spearmanr_score_atac"],
-                    head="perf",
-                    step=epoch,
-                )
+                # log_writer.update(
+                #     test_r2score_atac=test_stats["r2score_atac"], head="perf", step=epoch
+                # )
+                # log_writer.update(
+                #     test_spearmanr_score_atac=test_stats["pearsonr_score_atac"],
+                #     head="perf",
+                #     step=epoch,
+                # )
+                # log_writer.update(
+                #     test_spearmanr_score_atac=test_stats["spearmanr_score_atac"],
+                #     head="perf",
+                #     step=epoch,
+                # )
                 log_writer.update(test_loss=test_stats["loss"], head="perf", step=epoch)
 
             log_stats = {
