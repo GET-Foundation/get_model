@@ -14,7 +14,7 @@ PORT=7956
 
 
 # batch_size can be adjusted according to the graphics card
-OMP_NUM_THREADS=1 torchrun --nproc_per_node=3 finetune.py \
+OMP_NUM_THREADS=1 torchrun finetune.py \
     --data_set "Expression" \
     --data_path ${DATA_PATH} \
     --input_dim 283 \
