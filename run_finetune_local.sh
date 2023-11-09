@@ -7,7 +7,7 @@
 # cp -r /manitou/pmg/users/xf2217/pretrain_human_bingren_shendure_apr2023/k562_count_10  /pmglocal/xf2217/pretrain_human_bingren_shendure_apr2023/
 # cp -r /manitou/pmg/users/xf2217/pretrain_human_bingren_shendure_apr2023/data  /pmglocal/xf2217/pretrain_human_bingren_shendure_apr2023/
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/xf2217/finetune_natac_test/'
+OUTPUT_DIR='/pmglocal/alb2281/repos/get_model/finetune_natac_test/'
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/pretrain_human_bingren_shendure_apr2023/'
 PORT=7956
@@ -24,7 +24,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=3 finetune.py \
     --model get_finetune_motif \
     --use_natac \
     --resume /pmglocal/xf2217/finetune_natac_test/pretrain_finetune_natac_fetal_adult.pth \
-    --batch_size 12 \
+    --batch_size 32 \
     --leave_out_celltypes "k562_cut0.04" \
     --leave_out_chromosomes "chr11" \
     --lr 1e-3 \
