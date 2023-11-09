@@ -23,6 +23,7 @@ from timm.utils import ModelEma
 from utils import NativeScalerWithGradNormCount as NativeScaler
 
 import model.model
+import wandb
 import warnings
 
 # Suppress FutureWarnings
@@ -350,6 +351,10 @@ def get_args():
     parser.add_argument("--use_seq", default=False, action="store_true")
     parser.add_argument("--sampling_step", default=100, type=int)
     parser.add_argument("--target_sequence_length", default=200, type=int)
+
+    # wandb params
+    parser.add_argument("--wandb_project_name", type=str, default="GET finetune", help="wandb project name")
+    parser.add_argument("--wandb_run_name", type=str, default=None, help="wandb run name")
     known_args, _ = parser.parse_known_args()
 
     if known_args.enable_deepspeed:
@@ -845,7 +850,10 @@ def main(args, ds_init):
                 "epoch": epoch,
                 "n_parameters": n_parameters,
             }
-
+        
+        if utils.is_main_process():
+            wandb.log(log_stats)
+        
         if args.output_dir and utils.is_main_process():
             if log_writer is not None:
                 log_writer.flush()
@@ -861,6 +869,12 @@ def main(args, ds_init):
 
 if __name__ == "__main__":
     opts, ds_init = get_args()
+
+    wandb.login()
+    run = wandb.init(
+        project=opts.wandb_project_name,
+        name=opts.wandb_run_name,
+    )
     if opts.output_dir:
         Path(opts.output_dir).mkdir(parents=True, exist_ok=True)
     main(opts, ds_init)
