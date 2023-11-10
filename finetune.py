@@ -353,7 +353,7 @@ def get_args():
     parser.add_argument("--target_sequence_length", default=200, type=int)
 
     # wandb params
-    parser.add_argument("--wandb_project_name", type=str, default="GET finetune", help="wandb project name")
+    parser.add_argument("--wandb_project_name", type=str, default="get-finetune", help="wandb project name")
     parser.add_argument("--wandb_run_name", type=str, default=None, help="wandb run name")
     known_args, _ = parser.parse_known_args()
 
