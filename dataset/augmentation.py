@@ -139,7 +139,7 @@ class DataAugmentationForGETPeak(object):
         )
 
     def __call__(self, region, sequence):
-        if sequence is not None:
+        if sequence.sum() != 0:
             sequence = torch.Tensor(sequence)
         if isinstance(region, scipy.sparse.coo_matrix):
             region = region.toarray()
