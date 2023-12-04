@@ -1,5 +1,5 @@
 import torch
-from model.model import get_finetune_motif
+from get_model.model.model import get_finetune_motif
 
 class InferenceModel:
     def __init__(self, checkpoint_path, device='cuda'):
