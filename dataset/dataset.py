@@ -156,7 +156,7 @@ class ExpressionDataset(Dataset):
         self.transform = transform
 
         celltype_metadata_path = os.path.join(
-            self.root, "data/cell_type_pretrain.test.txt"
+            self.root, "data/cell_type_pretrain_human_bingren_shendure_apr2023.txt"
         )
         data_path = os.path.join(self.root, "")
         ctcf_path = os.path.join(
@@ -353,9 +353,10 @@ def make_dataset(
             celltype_annot = prepare_sequence_idx(celltype_annot, num_region_per_sample)
 
         # Compute sample specific CTCF position segmentation
-        ctcf_pos = get_hierachical_ctcf_pos(
-            celltype_annot, ctcf, cut=[5, 10, 20, 50, 100, 200]
-        )
+        # ctcf_pos = get_hierachical_ctcf_pos(
+        #     celltype_annot, ctcf, cut=[5, 10, 20, 50, 100, 200]
+        # )
+        ctcf_pos = None
 
         # load data
         try:
@@ -413,8 +414,9 @@ def make_dataset(
                     seq_data_i = seq_data[start_index:end_index]
                 # sample_data_i = ATACSample(sample_data_i, seq_data_i)
 
-                ctcf_pos_i = ctcf_pos[start_index:end_index]
-                ctcf_pos_i = ctcf_pos_i - ctcf_pos_i.min(0, keepdims=True)  # (200,5)
+                # ctcf_pos_i = ctcf_pos[start_index:end_index]
+                # ctcf_pos_i = ctcf_pos_i - ctcf_pos_i.min(0, keepdims=True)  # (200,5)
+                ctcf_pos_i = 0
                 if not is_pretrain:
                     target_i = coo_matrix(target_data[start_index:end_index])
                     tssidx_i = tssidx_data[start_index:end_index]

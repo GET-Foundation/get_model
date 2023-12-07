@@ -118,6 +118,74 @@ class RegionEmbed(nn.Module):
         return x
 
 
+class TFEncoder(nn.Module):
+    """This module is used to encode TF protein information. More specifically,
+    each TF among L TFs is represented by a N-by-D matrix (as input), where N is 1 or 2 or N, 
+    when N is 1, the vector is directly from ESM CLS token embedding
+    when N is 2, the two vectors are from DBD CLS and non-DBD CLS token embedding
+    when N is N, the vectors are from pLDDT-segmented CLS token embedding
+    the output of this module is a L by D matrix which captures the TF relationship.
+    """
+    pass
+
+class MotifScanner(nn.Module):
+    """A sequence encoder based on Conv1D.
+    Input: one-hot encoding of DNA sequences of all regions in batch (BATCH_SIZE, NUM_REGION, SEQ_LEN, 4)
+    Output: embedding of batch (BATCH_SIZE, NUM_REGION, EMBED_DIM)
+    Architecture:
+    Conv1D(4, 32, 3, padding='valid', activation='relu')
+    """
+
+    def __init__(
+        self, num_motif=637, target_dim=1280, atac_attention=False, include_reverse_complement=True):
+        super().__init__()
+        self.num_motif = num_motif
+        if include_reverse_complement:
+            self.num_motif *= 2
+        self.target_dim = target_dim
+        self.atac_attention = atac_attention
+        motifs = self.load_pwm_as_kernel(include_reverse_complement=include_reverse_complement)
+        self.motif = nn.Sequential(
+            nn.Conv1d(4, self.num_motif, 29, padding="same"),
+            # nn.BatchNorm1d(num_motif),
+            nn.ReLU(),
+        )
+        assert (
+            motifs.shape == self.motif[0].weight.shape
+        ), f"Motif prior shape ({motifs.shape}) doesn't match model ({self.motif[0].weight.shape})."
+        self.motif[0].weight.data = motifs
+        self.motif[0].weight.requires_grad = False
+
+    def load_pwm_as_kernel(
+        self,
+        pwm_path="https://resources.altius.org/~jvierstra/projects/motif-clustering-v2.1beta/consensus_pwms.meme",
+        include_reverse_complement=True,
+    ):
+        # download pwm to local
+        if not os.path.exists("consensus_pwms.meme"):
+            os.system(f"wget {pwm_path}")
+        # load pwm
+        motifs = parse_meme_file("consensus_pwms.meme")
+        motifs_rev = motifs[:, ::-1, ::-1].copy()
+        # construct reverse complement
+        motifs = torch.tensor(motifs)
+        motifs_rev = torch.tensor(motifs_rev)
+        motifs = torch.cat([motifs, motifs_rev], dim=0)
+        return motifs.permute(0, 2, 1).float()
+
+    def forward(self, x):
+        x = x.permute(
+            0, 2, 1
+        )  # (BATCH_SIZE * NUM_REGION, 4, SEQ_LEN)
+        x = self.motif(x)
+
+        return x
+
+    # make sure cuda is used
+    def cuda(self, device=None):
+        self.motif = self.motif.cuda()
+        return self._apply(lambda t: t.cuda(device))
+
 class GETPretrain(nn.Module):
     """A GET model for pretraining using mask and prediction."""
 

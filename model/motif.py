@@ -25,9 +25,10 @@ def parse_meme_file(file_path):
             current_motif["width"] = len(letter_prob_matrix)
             if current_motif["width"] < 29:
                 current_motif["letter_prob_matrix"] = np.concatenate(
-                    (
+                    (   
+                        np.zeros(((29 - current_motif["width"])//2, 4)),
                         current_motif["letter_prob_matrix"],
-                        np.zeros((29 - current_motif["width"], 4)),
+                        np.zeros((29 - current_motif["width"] - (29 - current_motif["width"])//2, 4)),
                     ),
                     axis=0,
                 )

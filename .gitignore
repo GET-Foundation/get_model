@@ -5,3 +5,4 @@ consensus_pwms.meme
 log.txt
 run_finetune.sh
 *.pth
+wandb
