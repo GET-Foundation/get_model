@@ -6,3 +6,4 @@ log.txt
 run_finetune.sh
 *.pth
 wandb
+run_finetune_local_k562_zeroshot.sh
