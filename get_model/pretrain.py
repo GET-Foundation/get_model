@@ -16,7 +16,7 @@ from optim import create_optimizer
 from timm.models import create_model
 from utils import NativeScalerWithGradNormCount as NativeScaler
 
-import model.model
+import get_model.model.model
 #%%
 
 def get_args_parser():

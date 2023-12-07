@@ -22,7 +22,7 @@ from timm.models import create_model
 from timm.utils import ModelEma
 from utils import NativeScalerWithGradNormCount as NativeScaler
 
-import model.model
+import get_model.model.model
 import wandb
 import warnings
 

@@ -6,9 +6,9 @@ import torch.nn.functional as F
 from timm.models.layers import trunc_normal_
 from timm.models.registry import register_model
 # from rotary_embedding_torch import RotaryEmbedding
-from model.position_encoding import CTCFPositionalEncoding, AbsolutePositionalEncoding
-from model.motif import parse_meme_file
-from model.transformer import GETTransformer
+from get_model.model.position_encoding import CTCFPositionalEncoding, AbsolutePositionalEncoding
+from get_model.model.motif import parse_meme_file
+from get_model.model.transformer import GETTransformer
 
 class SequenceEncoder(nn.Module):
     """A sequence encoder based on Conv1D.
