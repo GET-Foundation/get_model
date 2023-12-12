@@ -870,11 +870,13 @@ def main(args, ds_init):
 if __name__ == "__main__":
     opts, ds_init = get_args()
 
-    wandb.login()
-    run = wandb.init(
-        project=opts.wandb_project_name,
-        name=opts.wandb_run_name,
-    )
     if opts.output_dir:
         Path(opts.output_dir).mkdir(parents=True, exist_ok=True)
+
+    wandb.login()
+    if opts.local_rank == 0: # Log metrics only on main process
+        run = wandb.init(
+            project=opts.wandb_project_name,
+            name=opts.wandb_run_name,
+        )
     main(opts, ds_init)
