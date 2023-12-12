@@ -874,7 +874,7 @@ if __name__ == "__main__":
         Path(opts.output_dir).mkdir(parents=True, exist_ok=True)
 
     wandb.login()
-    if opts.local_rank == 0: # Log metrics only on main process
+    if utils.is_main_process(): # Log metrics only on main process
         run = wandb.init(
             project=opts.wandb_project_name,
             name=opts.wandb_run_name,
