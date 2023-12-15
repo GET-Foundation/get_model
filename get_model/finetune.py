@@ -381,6 +381,13 @@ def main(args, ds_init):
 
     print(args)
 
+    if utils.is_main_process(): # Log metrics only on main process
+        wandb.login()
+        run = wandb.init(
+            project=opts.wandb_project_name,
+            name=opts.wandb_run_name,
+        )
+
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
@@ -872,11 +879,4 @@ if __name__ == "__main__":
 
     if opts.output_dir:
         Path(opts.output_dir).mkdir(parents=True, exist_ok=True)
-
-    wandb.login()
-    if utils.is_main_process(): # Log metrics only on main process
-        run = wandb.init(
-            project=opts.wandb_project_name,
-            name=opts.wandb_run_name,
-        )
     main(opts, ds_init)
