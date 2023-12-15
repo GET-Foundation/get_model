@@ -175,13 +175,11 @@ class MotifScanner(nn.Module):
 
     def forward(self, x):
         # [B, 200, 1000, 4] --> [B, 200, 1000, 1274]
-        print('motif scanner x:', x.shape)
         B, N, L, _ = x.shape
         x = x.reshape(B * N, L, 4)
         x = x.permute(0, 2, 1)                # (B * N, 4, L)
         x = self.motif(x)
         x = x.permute(0, 2, 1).reshape(B, N, L, self.num_motif)     # (B, N, L, 1274)
-        print('after motif scanner x:', x.shape)
 
         return x
 
@@ -268,17 +266,14 @@ class GETPretrain(nn.Module):
         #     x = peak
         # seq: [B, 200, 1000, 4]
         # peak: [B, 200, 1000, 1]
-        print('seq', seq.shape)
-        print('peak', peak.shape)
-        print('mask', mask.shape)
-        print('ctcf_pos', ctcf_pos.shape)
         # [B, 200, 1000, 4] --> [B, 200, 1000, 1280]
         x = self.motif_scanner(seq)
         # [B, 200, 1000, 1280] --> [B, 200, 1280]
         # gloabl pooling inner product with peak
-        x_original = torch.einsum("brcd,brcd->br", x, peak)
+        peak = peak.squeeze(-1)
+        x_original = torch.einsum("brcd,brc->brcd", x, peak).sum(dim=2)
         x = self.region_embed(x_original)
-        B, N, C, _ = peak.shape
+        B, N, C = x_original.shape
         mask_token = self.mask_token.expand(B, N, -1)
         w = mask.unsqueeze(-1).type_as(mask_token)
         x = x * (1 - w) + mask_token * w
