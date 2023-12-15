@@ -258,17 +258,11 @@ class GETPretrain(nn.Module):
 
     def forward(self, peak, seq, mask, ctcf_pos):
         """forward function with hooks to return embedding or attention weights."""
-        # if False:
-        #     x = self.motif(
-        #         seq
-        #     )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
-        # else:
-        #     x = peak
         # seq: [B, 200, 1000, 4]
         # peak: [B, 200, 1000, 1]
-        # [B, 200, 1000, 4] --> [B, 200, 1000, 1280]
+        # [B, 200, 1000, 4] --> [B, 200, 1000, 1274]
         x = self.motif_scanner(seq)
-        # [B, 200, 1000, 1280] --> [B, 200, 1280]
+        # [B, 200, 1000, 1274] --> [B, 200, 1274]
         # gloabl pooling inner product with peak
         peak = peak.squeeze(-1)
         x_original = torch.einsum("brcd,brc->brcd", x, peak).sum(dim=2)
