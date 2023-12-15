@@ -57,15 +57,18 @@ def pretrain_one_epoch(
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
 
-        regions, seq, bool_masked_pos, ctcf_pos = batch
-        regions = regions.to(device, non_blocking=True)
+        peaks, seq, bool_masked_pos, ctcf_pos = batch
+        peaks = peaks.to(device, non_blocking=True)
         seq = seq.to(device, non_blocking=True)
-        regions = regions.float()
+        peaks = peaks.float()
         bool_masked_pos = (
             bool_masked_pos.to(device, non_blocking=True).bool()
         )
         ctcf_pos = ctcf_pos.to(device, non_blocking=True).bool()
 
+        output_masked, atac, regions = model(peaks, seq, bool_masked_pos, ctcf_pos)
+
+        # target generation
         with torch.no_grad():
             unnorm_regions = regions
             labels_atac = unnorm_regions[:,:,-1]
@@ -85,8 +88,6 @@ def pretrain_one_epoch(
             B, _, C = regions_embed.shape
             labels_masked = regions_embed[bool_masked_pos].reshape(B, -1, C)
 
-
-        output_masked, atac = model(regions, seq, bool_masked_pos, ctcf_pos)
         loss_masked_value = loss_masked(input=output_masked, target=labels_masked)
         #loss_atac_value = loss_atac(atac, labels_atac)
         # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss

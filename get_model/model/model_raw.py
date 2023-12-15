@@ -129,7 +129,7 @@ class TFEncoder(nn.Module):
     pass
 
 class MotifScanner(nn.Module):
-    """A motif encoder based on Conv1D.
+    """A sequence encoder based on Conv1D.
     Input: one-hot encoding of DNA sequences of all regions in batch (BATCH_SIZE, NUM_REGION, SEQ_LEN, 4)
     Output: embedding of batch (BATCH_SIZE, NUM_REGION, EMBED_DIM)
     Architecture:
@@ -174,14 +174,10 @@ class MotifScanner(nn.Module):
         return motifs.permute(0, 2, 1).float()
 
     def forward(self, x):
-        # [B, 200, 1000, 4] --> [B, 200, 1000, 1274]
-        print('motif scanner x:', x.shape)
-        B, N, L, _ = x.shape
-        x = x.reshape(B * N, L, 4)
-        x = x.permute(0, 2, 1)                # (B * N, 4, L)
+        x = x.permute(
+            0, 2, 1
+        )  # (BATCH_SIZE * NUM_REGION, 4, SEQ_LEN)
         x = self.motif(x)
-        x = x.permute(0, 2, 1).reshape(B, N, L, self.num_motif)     # (B, N, L, 1274)
-        print('after motif scanner x:', x.shape)
 
         return x
 
@@ -197,7 +193,6 @@ class GETPretrain(nn.Module):
         self,
         num_regions=200,
         num_motif=637,
-        motif_dim=1274,
         num_res_block=0,
         motif_prior=False,
         embed_dim=768,
@@ -207,7 +202,6 @@ class GETPretrain(nn.Module):
         dropout=0.1,
         output_dim=1,
         pos_emb_components=["CTCF", "Rotary", "Absolute"],
-        atac_attention=False,
     ):
         super().__init__()
         self.num_regions = num_regions
@@ -221,10 +215,10 @@ class GETPretrain(nn.Module):
         self.dropout = dropout
         self.output_dim = output_dim
         self.pos_emb_components = pos_emb_components
-        self.motif_scanner = MotifScanner(
-            num_motif=num_motif, target_dim=motif_dim, atac_attention=atac_attention, include_reverse_complement=True
-        )
-        self.region_embed = RegionEmbed(num_regions, motif_dim, embed_dim)
+        # self.motif = SequenceEncoder(
+        #     num_regions, num_motif, num_res_block, motif_prior
+        # )
+        self.region_embed = RegionEmbed(num_regions, num_motif, embed_dim)
         self.pos_embed = []
         if "CTCF" in self.pos_emb_components: 
             self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
@@ -242,7 +236,7 @@ class GETPretrain(nn.Module):
             attn_drop_rate=dropout,
             use_mean_pooling=False,
         )
-        # self.head_atac = nn.Conv1d(d_model, 1, 1)
+        self.head_atac = nn.Conv1d(d_model, 1, 1)
         self.head_mask = nn.Linear(d_model, output_dim)
 
         self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -260,25 +254,15 @@ class GETPretrain(nn.Module):
 
     def forward(self, peak, seq, mask, ctcf_pos):
         """forward function with hooks to return embedding or attention weights."""
-        # if False:
-        #     x = self.motif(
-        #         seq
-        #     )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
-        # else:
-        #     x = peak
-        # seq: [B, 200, 1000, 4]
-        # peak: [B, 200, 1000, 1]
-        print('seq', seq.shape)
-        print('peak', peak.shape)
-        print('mask', mask.shape)
-        print('ctcf_pos', ctcf_pos.shape)
-        # [B, 200, 1000, 4] --> [B, 200, 1000, 1280]
-        x = self.motif_scanner(seq)
-        # [B, 200, 1000, 1280] --> [B, 200, 1280]
-        # gloabl pooling inner product with peak
-        x_original = torch.einsum("brcd,brcd->br", x, peak)
-        x = self.region_embed(x_original)
-        B, N, C, _ = peak.shape
+        if False:
+            x = self.motif(
+                seq
+            )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
+        else:
+            x = peak
+        x = self.region_embed(x)
+
+        B, N, C = peak.shape
         mask_token = self.mask_token.expand(B, N, -1)
         w = mask.unsqueeze(-1).type_as(mask_token)
         x = x * (1 - w) + mask_token * w
@@ -292,10 +276,9 @@ class GETPretrain(nn.Module):
         x, _ = self.encoder(x, mask=mask) # (N, D)
         x_masked = self.head_mask(x) # (N, Motif)
         x_masked = x_masked[mask].reshape(B, -1, C)
-        # atac = F.softplus(self.head_atac(x.permute(0, 2, 1)).permute(0, 2, 1).squeeze(-1))
-        atac = None
+        atac = F.softplus(self.head_atac(x.permute(0, 2, 1)).permute(0, 2, 1).squeeze(-1))
 
-        return x_masked, atac, x_original
+        return x_masked, atac
 
     def reset_head(self, output_dim, global_pool=""):
         self.output_dim = output_dim
@@ -468,11 +451,10 @@ class GETFinetune(GETPretrain):
 
 
 @register_model
-def get_pretrain_motif_base(pretrained=False, **kwargs):
+def get_pretrain_motif(pretrained=False, **kwargs):
     model = GETPretrain(
-        num_regions=kwargs["num_region_per_sample"],
-        num_motif=kwargs["num_motif"],
-        motif_dim=kwargs["motif_dim"],
+        num_regions=200,
+        num_motif=283,
         num_res_block=0,
         motif_prior=False,
         embed_dim=768,
@@ -480,7 +462,7 @@ def get_pretrain_motif_base(pretrained=False, **kwargs):
         d_model=768,
         nhead=12,
         dropout=0.1,
-        output_dim=kwargs["output_dim"],
+        output_dim=283,
         pos_emb_components=[],
     )
     if pretrained:

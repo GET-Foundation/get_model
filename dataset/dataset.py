@@ -12,6 +12,7 @@ from dataset.io import generate_paths, get_hierachical_ctcf_pos, prepare_sequenc
 from dataset.splitter import cell_splitter, chromosome_splitter
 from scipy.sparse import coo_matrix, load_npz, vstack
 import zarr
+import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
@@ -121,6 +122,12 @@ class PretrainDataset(Dataset):
 
         if peak.shape[0] == 1:
             peak = peak.squeeze(0)
+
+        # seq: [200, 1000, 4]
+        # peak: [200, 1000, 1]
+
+        seq = torch.rand(peak.shape[0], 1000, 4)      # [200, 1000, 4]
+        peak = torch.rand(peak.shape[0], 1000, 1)     # [200, 1000, 1]
 
         return peak, seq, mask, ctcf_pos
 

@@ -42,6 +42,13 @@ def get_args_parser():
     )
 
     parser.add_argument(
+        "--num_motif",
+        default=1273,
+        type=int,
+        help="number of motifs for each region",
+    )
+
+    parser.add_argument(
         "--mask_ratio",
         default=0.75,
         type=float,
@@ -221,12 +228,15 @@ def get_model(args):
     print(f"Creating model: {args.model}")
     model = create_model(
         args.model,
+        num_motif=args.num_motif,
+        motif_dim=args.input_dim,
         num_region_per_sample=args.num_region_per_sample,
         encoder_in_chans=args.input_dim,
         encoder_num_classes=args.input_dim,
         pretrained=False,
         drop_path_rate=args.drop_path,
         drop_block_rate=None,
+        output_dim=args.input_dim,
     )
 
     return model
@@ -249,7 +259,11 @@ def main(args):
 
     model = get_model(args)
     num_region_per_sample = args.num_region_per_sample
+    num_motif = args.num_motif
+    motif_dim=args.input_dim
     print("Region size = %s" % str(num_region_per_sample))
+    print("Number motif = %s" % str(num_motif))
+    print("Dimension motif = %s" % str(motif_dim))
     args.region_size = num_region_per_sample
 
     # get dataset
