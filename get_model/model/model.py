@@ -283,7 +283,7 @@ class GETPretrain(nn.Module):
         x_masked = x_masked[mask].reshape(B, -1, C)
         # atac = F.softplus(self.head_atac(x.permute(0, 2, 1)).permute(0, 2, 1).squeeze(-1))
         atac = None
-
+        
         return x_masked, atac, x_original
 
     def reset_head(self, output_dim, global_pool=""):
