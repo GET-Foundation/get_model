@@ -4,12 +4,12 @@ from typing import Any, Callable, Optional, Tuple, List, Dict
 
 import numpy as np
 import pandas as pd
-from dataset.augmentation import (
+from get_model.dataset.augmentation import (
     DataAugmentationForGETPeak,
     DataAugmentationForGETPeakFinetune,
 )
-from dataset.io import generate_paths, get_hierachical_ctcf_pos, prepare_sequence_idx
-from dataset.splitter import cell_splitter, chromosome_splitter
+from get_model.dataset.io import generate_paths, get_hierachical_ctcf_pos, prepare_sequence_idx
+from get_model.dataset.splitter import cell_splitter, chromosome_splitter
 from scipy.sparse import coo_matrix, load_npz, vstack
 import zarr
 from torch.utils.data import Dataset

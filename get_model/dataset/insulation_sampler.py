@@ -1,5 +1,4 @@
 #%%
-from typing import final
 import pyBigWig
 import numpy as np
 import os
@@ -74,11 +73,13 @@ class InsulationSampler:
         positions, insulation = self.calculate_insulation(chromosome, start, end, window_size)
         local_minima = self.find_local_minima(insulation, threshold_factor)
         samples = np.random.choice(positions[local_minima], (n, 2)) 
+        # add consecutive local minima as samples
+        samples = np.concatenate([samples, np.stack((positions[local_minima][0:-1], positions[local_minima][1:]), axis=1)])
         final_samples = []
         for i in samples:
-            if i[0] > i[1] and i[0] - i[1] > 20000 and i[0] - i[1] < 3000000:
+            if i[0] > i[1] and i[0] - i[1] > 10000 and i[0] - i[1] < 3000000:
                 final_samples.append((i[1], i[0]))
-            elif i[1] - i[0] > 20000 and i[1] - i[0] < 3000000:
+            elif i[1] - i[0] > 10000 and i[1] - i[0] < 3000000:
                 final_samples.append((i[0], i[1]))
         return np.array(list(set(final_samples))).T
     
@@ -94,12 +95,49 @@ class InsulationSampler:
         sample_list_min = sample_list.min()
         sample_list_max = sample_list.max()
         ctcf_df = self.ctcf_df.query(f'Chromosome=="{chromosome}" and Start>={sample_list_min} and End<={sample_list_max}')
-        return ctcf_df.query('num_celltype>50'), sample_list
+        ctcf_df = ctcf_df.query('num_celltype>20')
+        result = [(ctcf_df.query('Start>@start & End<@end').Start.values[0], ctcf_df.query('Start>@start-5000 & End<@end+5000').End.values[-1]) for (start, end) in sample_list.T] 
+        result = pd.DataFrame(result, columns=['start', 'end'])
+        result['distance'] = result.end - result.start
+        return result.query('distance>10000')
+    
+    def sample_for_chromosome(self, chromosome, chunk_size = 4000000, window_size=10, threshold_factor=0.1):
+        """
+        Samples a boundary from a given chromosome.
+
+        :param chromosome: Chromosome identifier (e.g., 'chr1').
+        :param window_size: Window size for calculating the moving average.
+        :return: Tuple of numpy arrays (positions, insulation scores).
+        """
+        results = []
+        results_seed = []
+        for seed in range(500):
+            chrom_size = self.bw.chroms()[chromosome]
+            for i in range(chrom_size//chunk_size):
+                try:
+                    l = self.sample_boundary_with_ctcf(chromosome, i*chunk_size, (i+1)*chunk_size, n=chunk_size//100000, window_size=window_size, threshold_factor=threshold_factor)
+                    results_seed.append(l)
+                except:
+                    continue
+            results_seed = pd.concat(results_seed)
+            results_seed['seed'] = seed
+            results.append(results_seed)
+        results = pd.concat(results)
+        results['chromosome'] = chromosome
+        return results
 #%%
 # Example usage
-insulation = InsulationSampler('../data/4DN_average_insulation.bw', '../data/hg38.ctcf_motif_count.num_celltype_gt_5.feather')
-insulation.sample_boundary_with_ctcf('chr1', 0, 4000000)
+insulation = InsulationSampler('../../data/4DN_average_insulation.bw', '../../data/hg38.ctcf_motif_count.num_celltype_gt_5.feather')
+#%%
+from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
+with ThreadPoolExecutor(max_workers=23) as executor:
+    results = tqdm(executor.map(insulation.sample_for_chromosome, insulation.get_chroms().keys()))
 
+results = pd.concat(results)
+#%%
+results.distance.hist(bins=100)
+#%%
 #%%
 class CTCFBoundary(object):
 

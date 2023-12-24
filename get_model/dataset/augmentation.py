@@ -3,6 +3,9 @@ import torch
 import numpy as np
 import scipy
 
+
+
+
 # class ATACSample(object):
 #     """Object contains peak motif vector and peak sequence of a single sample."""
 #     def __init__(self, peak_motif, peak_sequence=None):
