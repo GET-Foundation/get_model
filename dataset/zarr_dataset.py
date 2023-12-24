@@ -1,9 +1,11 @@
 import os
 import os.path
 from typing import Any, Callable, Optional, Tuple, List, Dict
+from intervaltree import IntervalTree
 
 import numpy as np
 import pandas as pd
+from caesar.io.genome import ChromSize
 # from dataset.augmentation import (
 #     DataAugmentationForGETPeak,
 #     DataAugmentationForGETPeakFinetune,
@@ -100,7 +102,6 @@ class DenseZarrIO(ZarrIO):
         for i, (start, end) in enumerate(region_list):
             region_set[i] = a[start:end]
         return region_set # N, L, D
-    
 
 class PretrainDataset(Dataset):
 
@@ -108,8 +109,23 @@ class PretrainDataset(Dataset):
     Args:
         root (string): Root directory path.
      Attributes:
-        samples (list): List of (sample, cell_index) tuples
+        metadata (pandas.DataFrame): Metadata of the dataset, for each sample annotate their libsize, celltype, source, etc..
+        samples (dict): Dict of (sample_id: atac_zarr_file, peak_bed, assembly) tuples
+        sequence_dir: directory with zarr file for genome sequences
     """
+    def __init__(self, zarr_dirs, ctcf_df) -> None:
+        super().__init__()
+        self.zarr_dirs = zarr_dirs
+        for zarr_dir in self.zarr_dirs:
+            assert os.path.exists(zarr_dir), f"zarr_dir {zarr_dir} does not exist"
+        
+
+# /manitou/pmg/users/xf2217/Seq2VecDB_ENCODE/assays/atac_seq/targets/atac/cell_types/IMR_90/conditions/Homo_sapiens_IMR_90_nuclear_fraction_and_unspecified_fraction/dataset_accession_numbers/ENCSR200OML/reps_subsampled/40000000/genome_assembly/hg38/steps/S07_zarr/zarrs_normalized/data.zarr/
 
 
-# one sample for model: atac signal (N, 1000, 1), seq (N, 1000, 4) 
+
+    # one sample for model: atac signal (N, 1000, 1), seq (N, 1000, 4) 
+        
+#%%
+
+#%%
