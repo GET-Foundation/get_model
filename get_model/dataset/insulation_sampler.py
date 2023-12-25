@@ -1,4 +1,5 @@
 #%%
+from random import sample
 import pyBigWig
 import numpy as np
 import os
@@ -62,7 +63,7 @@ class InsulationSampler:
 
         return np.where(local_min)
     
-    def sample_boundary(self, chromosome, start, end, n=10, window_size=10, threshold_factor=0.1):
+    def sample_boundary(self, chromosome, start, end, window_size=10, threshold_factor=0.1):
         """
         Samples a boundary from a given chromosome.
 
@@ -72,18 +73,20 @@ class InsulationSampler:
         """
         positions, insulation = self.calculate_insulation(chromosome, start, end, window_size)
         local_minima = self.find_local_minima(insulation, threshold_factor)
-        samples = np.random.choice(positions[local_minima], (n, 2)) 
+        local_minima_pos = [start] + list(positions[local_minima]) 
+        # all possible pairs of local_minima_pos
+        samples = np.array(np.meshgrid(local_minima_pos, local_minima_pos)).T.reshape(-1,2)
         # add consecutive local minima as samples
-        samples = np.concatenate([samples, np.stack((positions[local_minima][0:-1], positions[local_minima][1:]), axis=1)])
         final_samples = []
         for i in samples:
-            if i[0] > i[1] and i[0] - i[1] > 10000 and i[0] - i[1] < 3000000:
+            if i[0] > i[1] and i[0] - i[1] > 5000 and i[0] - i[1] < 3000000:
                 final_samples.append((i[1], i[0]))
-            elif i[1] - i[0] > 10000 and i[1] - i[0] < 3000000:
+            elif i[1] - i[0] > 5000 and i[1] - i[0] < 3000000:
                 final_samples.append((i[0], i[1]))
-        return np.array(list(set(final_samples))).T
+        return np.array(list(set(final_samples)))
     
-    def sample_boundary_with_ctcf(self, chromosome, start, end, n=10, window_size=10, threshold_factor=0.1):
+        
+    def adjacent_boundary(self, chromosome, start, end, window_size=2, threshold_factor=0):
         """
         Samples a boundary from a given chromosome.
 
@@ -91,15 +94,69 @@ class InsulationSampler:
         :param window_size: Window size for calculating the moving average.
         :return: Tuple of numpy arrays (positions, insulation scores).
         """
-        sample_list = self.sample_boundary(chromosome, start, end, n, window_size, threshold_factor)
-        sample_list_min = sample_list.min()
-        sample_list_max = sample_list.max()
-        ctcf_df = self.ctcf_df.query(f'Chromosome=="{chromosome}" and Start>={sample_list_min} and End<={sample_list_max}')
-        ctcf_df = ctcf_df.query('num_celltype>20')
-        result = [(ctcf_df.query('Start>@start & End<@end').Start.values[0], ctcf_df.query('Start>@start-5000 & End<@end+5000').End.values[-1]) for (start, end) in sample_list.T] 
-        result = pd.DataFrame(result, columns=['start', 'end'])
-        result['distance'] = result.end - result.start
-        return result.query('distance>10000')
+        positions, insulation = self.calculate_insulation(chromosome, start, end, window_size)
+        local_minima = self.find_local_minima(insulation, threshold_factor)
+        local_minima_pos = [start] + list(positions[local_minima]) 
+        # all possible pairs of local_minima_pos
+        samples = np.stack([local_minima_pos[:-1], local_minima_pos[1:]], axis=1)
+        # add consecutive local minima as samples
+        final_samples = []
+        for i in samples:
+            if i[0] > i[1] and i[0] - i[1] > 1000 and i[0] - i[1] < 200000:
+                final_samples.append((i[1], i[0]))
+            elif i[1] - i[0] > 1000 and i[1] - i[0] < 200000:
+                final_samples.append((i[0], i[1]))
+        return np.array(list(set(final_samples)))
+    
+    def sample_boundary_with_ctcf(self, chromosome, start, end, window_size=10, threshold_factor=0.1):
+        """
+        Samples a boundary from a given chromosome.
+
+        :param chromosome: Chromosome identifier (e.g., 'chr1').
+        :param window_size: Window size for calculating the moving average.
+        :return: Tuple of numpy arrays (positions, insulation scores).
+        """
+        sample_list = self.sample_boundary(chromosome, start, end, window_size, threshold_factor)
+        ctcf_df = self.ctcf_df.query(f'Chromosome=="{chromosome}" and Start>={start} and End<={end}')
+        result = []
+        for c_start, c_end in sample_list:
+            ctcf_start = ctcf_df.query('Start>@c_start-15000 & Start<@c_start+15000')
+            ctcf_end = ctcf_df.query('End>@c_end-15000 & End<@c_end+15000')
+            if len(ctcf_start) == 0 or len(ctcf_end) == 0:
+                continue
+            else:
+                ctcf_start = ctcf_start.sample(1, weights='num_celltype')
+                ctcf_end = ctcf_end.sample(1, weights='num_celltype')
+                result.append((ctcf_start.Start.values[0], ctcf_end.End.values[0], (ctcf_start.num_celltype.values[0]+ctcf_end.num_celltype.values[0])/2))
+        result = pd.DataFrame(result, columns=['Start', 'End', 'mean_num_celltype'])
+        result['Chromosome'] = chromosome
+        result['Distance'] = result.End - result.Start
+        return result.query('Distance>5000')
+    
+    def adjacent_boundary_with_ctcf(self, chromosome, start, end, window_size=2, threshold_factor=0):
+        """
+        Samples a boundary from a given chromosome.
+
+        :param chromosome: Chromosome identifier (e.g., 'chr1').
+        :param window_size: Window size for calculating the moving average.
+        :return: Tuple of numpy arrays (positions, insulation scores).
+        """
+        sample_list = self.adjacent_boundary(chromosome, start, end, window_size, threshold_factor)
+        ctcf_df = self.ctcf_df.query(f'Chromosome=="{chromosome}" and Start>={start} and End<={end}')
+        result = []
+        for c_start, c_end in sample_list:
+            ctcf_start = ctcf_df.query('Start>@c_start-2500 & Start<@c_start+2500')
+            ctcf_end = ctcf_df.query('End>@c_end-2500 & End<@c_end+2500')
+            if len(ctcf_start) == 0 or len(ctcf_end) == 0:
+                result.append((c_start, c_end, 0))
+            else:
+                ctcf_start = ctcf_start.sample(1, weights='num_celltype')
+                ctcf_end = ctcf_end.sample(1, weights='num_celltype')
+                result.append((ctcf_start.Start.values[0], ctcf_end.End.values[0], (ctcf_start.num_celltype.values[0]+ctcf_end.num_celltype.values[0])/2))
+        result = pd.DataFrame(result, columns=['Start', 'End', 'mean_num_celltype'])
+        result['Chromosome'] = chromosome
+        result['Distance'] = result.End - result.Start
+        return result.query('Distance>1000')
     
     def sample_for_chromosome(self, chromosome, chunk_size = 4000000, window_size=10, threshold_factor=0.1):
         """
@@ -110,34 +167,71 @@ class InsulationSampler:
         :return: Tuple of numpy arrays (positions, insulation scores).
         """
         results = []
-        results_seed = []
-        for seed in range(500):
-            chrom_size = self.bw.chroms()[chromosome]
-            for i in range(chrom_size//chunk_size):
-                try:
-                    l = self.sample_boundary_with_ctcf(chromosome, i*chunk_size, (i+1)*chunk_size, n=chunk_size//100000, window_size=window_size, threshold_factor=threshold_factor)
-                    results_seed.append(l)
-                except:
-                    continue
-            results_seed = pd.concat(results_seed)
-            results_seed['seed'] = seed
-            results.append(results_seed)
+        chrom_size = self.bw.chroms()[chromosome]
+        for start in range(0, chrom_size, 1000000):
+            try:
+                l = self.sample_boundary_with_ctcf(chromosome, start, start + chunk_size, window_size=window_size, threshold_factor=threshold_factor)
+                results.append(l)
+            except:
+                continue
         results = pd.concat(results)
-        results['chromosome'] = chromosome
         return results
+    
+    def sample_for_chromosome_adjacent(self, chromosome, chunk_size = 2000000, window_size=2, threshold_factor=0):
+        """
+        Samples a boundary from a given chromosome.
+
+        :param chromosome: Chromosome identifier (e.g., 'chr1').
+        :param window_size: Window size for calculating the moving average.
+        :return: Tuple of numpy arrays (positions, insulation scores).
+        """
+        results = []
+        chrom_size = self.bw.chroms()[chromosome]
+        for start in range(0, chrom_size, 1000000):
+            try:
+                l = self.adjacent_boundary_with_ctcf(chromosome, start, start + chunk_size, window_size=window_size, threshold_factor=threshold_factor)
+                results.append(l)
+            except:
+                continue
+        results = pd.concat(results)
+        return results.drop_duplicates()
 #%%
 # Example usage
 insulation = InsulationSampler('../../data/4DN_average_insulation.bw', '../../data/hg38.ctcf_motif_count.num_celltype_gt_5.feather')
+insulation.adjacent_boundary_with_ctcf('chr1', 0, 4000000)
 #%%
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
-with ThreadPoolExecutor(max_workers=23) as executor:
+with ThreadPoolExecutor(max_workers=96) as executor:
     results = tqdm(executor.map(insulation.sample_for_chromosome, insulation.get_chroms().keys()))
 
 results = pd.concat(results)
 #%%
-results.distance.hist(bins=100)
+results.Distance.hist(bins=100)
 #%%
+results = results.drop_duplicates()
+#%%
+results.Distance.hist(bins=100, log=True)
+#%%
+results.to_feather('../../data/hg38_4DN_average_insulation.ctcf.longrange.feather')
+
+
+#%%
+from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
+results_adjecent = []
+for threshold in [0, 0.2, 0.4, 0.6, 0.8, 1]:
+    for window in [1, 2, 5]:
+        with ThreadPoolExecutor(max_workers=96) as executor:
+            result_adjecent = tqdm(executor.map(insulation.sample_for_chromosome_adjacent, insulation.get_chroms().keys(), [2000000]*24,[window]*24,[threshold]*24))
+        result_adjecent = pd.concat(result_adjecent)
+        result_adjecent['window'] = window
+        result_adjecent['threshold'] = threshold
+        results_adjecent.append(result_adjecent)
+#%%
+results_adjecent = pd.concat(results_adjecent).drop_duplicates()
+#%%
+results_adjecent.to_feather('../../data/hg38_4DN_average_insulation.ctcf.adjecent.feather')
 #%%
 class CTCFBoundary(object):
 
