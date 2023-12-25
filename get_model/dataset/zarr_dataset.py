@@ -117,6 +117,9 @@ class PretrainDataset(Dataset):
         self.zarr_dict = {cdz.data_key: cdz for zarr_dir in self.zarr_dirs for cdz in [
             CelltypeDenseZarrIO(zarr_dir)]}
         self.data_keys = list(self.zarr_dict.keys())
+        self.peaks_dict = self._load_peaks()
+        self.insulation = self._load_insulation(self.insulation_paths)
+
         self._calculate_metadata()
         self.preloaded_data = [self._load_window_data(random.randint(
             0, self.total_chunk_length)) for _ in range(self.preload_count)]
@@ -167,9 +170,9 @@ class PretrainDataset(Dataset):
 
         track = self.zarr_dict[data_key].get_track(
             celltype_id, chr_name, start, end, sparse=True).T
-        sequence = self.sequence.get_track(chr_name, start, end, sparse=True)
+        sequence = self.sequence.get_track(chr_name, start, end, sparse=False)
 
-        peak_sequence = self._generate_peak_sequence(celltype_peaks, sequence)
+        peak_sequence = self._generate_peak_sequence(celltype_peaks, sequence, start)
 
         return window_index, chr_name, start, end, celltype_id, track, peak_sequence, item_insulation
 
@@ -192,11 +195,11 @@ class PretrainDataset(Dataset):
         return self.insulation.query(
             'Chromosome == @chr_name and Start >= @start and End <= @end')
 
-    def _generate_peak_sequence(self, celltype_peaks, sequence):
-        peak_sequence = np.zeros(sequence.shape[0], dtype=np.int64)
+    def _generate_peak_sequence(self, celltype_peaks, sequence, window_start):
+        peak_sequence = np.zeros_like(sequence, dtype=np.int32)
         for start, end in celltype_peaks[['Start', 'End']].to_numpy():
-            peak_sequence[start:end] = 1
-        return csr_matrix(peak_sequence.reshape(-1, 1)).multiply(sequence)
+            peak_sequence[start-window_start:end-window_start] = 1
+        return csr_matrix(peak_sequence*sequence)
 
     def _async_reload_data(self, index):
         logging.info('Reloading data')
@@ -341,10 +344,12 @@ class PretrainDataset(Dataset):
 
 
 # %%
-pretrain = PretrainDataset(['/pmglocal/xf2217/shendure_fetal/shendure_fetal_dense.zarr'], 
+pretrain = PretrainDataset(['/pmglocal/xf2217/shendure_fetal/shendure_fetal_dense.zarr', 
+                            '/pmglocal/xf2217/bingren_adult/bingren_adult_dense.zarr'], 
                            '/manitou/pmg/users/xf2217/get_model/data/hg38.zarr', [
                            '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather'], preload_count=50, samples_per_window=50)
 pretrain.__len__()
 # %%
 for i in tqdm(range(pretrain.__len__())):
     pretrain.__getitem__(1)
+
