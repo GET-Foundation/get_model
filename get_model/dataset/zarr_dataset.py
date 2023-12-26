@@ -27,7 +27,7 @@ sys.path.append('/manitou/pmg/users/xf2217/get_model')
 
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, preload_count=50, samples_per_window=50):
+    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, preload_count=50, samples_per_window=50, return_list=True):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -77,10 +77,12 @@ class PretrainDataset(Dataset):
             about the extracted sample, including cell type ID, chromosome name, and positions.
         """
         self.sequence = DenseZarrIO(genome_seq_zarr)
+        self.sequence.load_to_memory_dense()
         self.zarr_dirs = zarr_dirs
         self.insulation_paths = insulation_paths
         self.preload_count = preload_count
         self.samples_per_window = samples_per_window
+        self.return_list = return_list
         self._initialize_datasets()
 
     def __getitem__(self, index: int):
@@ -172,9 +174,9 @@ class PretrainDataset(Dataset):
             celltype_id, chr_name, start, end, sparse=True).T
         sequence = self.sequence.get_track(chr_name, start, end, sparse=False)
 
-        peak_sequence = self._generate_peak_sequence(celltype_peaks, sequence, start)
+        peak_sequence = self._generate_peak_sequence(celltype_peaks, sequence, start, end)
 
-        return window_index, chr_name, start, end, celltype_id, track, peak_sequence, item_insulation
+        return window_index, chr_name, start, end, celltype_id, track, peak_sequence, item_insulation, celltype_peaks
 
     def _get_celltype_info(self, window_index):
         celltype_idx = window_index // self.genome_chunk_length
@@ -195,7 +197,7 @@ class PretrainDataset(Dataset):
         return self.insulation.query(
             'Chromosome == @chr_name and Start >= @start and End <= @end')
 
-    def _generate_peak_sequence(self, celltype_peaks, sequence, window_start):
+    def _generate_peak_sequence(self, celltype_peaks, sequence, window_start, window_end):
         peak_sequence = np.zeros_like(sequence, dtype=np.int32)
         for start, end in celltype_peaks[['Start', 'End']].to_numpy():
             peak_sequence[start-window_start:end-window_start] = 1
@@ -230,23 +232,30 @@ class PretrainDataset(Dataset):
         This implementation relies on the availability of insulation data. If insulation data is empty,
         it attempts to load data from another randomly selected window.
         """
-        window_index, chr_name, start, end, celltype_id, track, peak_sequence, insulation = window
+        window_index, chr_name, start, end, celltype_id, track, peak_sequence, insulation, celltype_peaks = window
         if len(insulation) == 0:
             return self._handle_empty_insulation()
 
         i_start, i_end = self._insulation_sampler(insulation)
-        i_start, i_end = self._adjust_indices_relative_to_window(
-            i_start, i_end, start)
-
-        sample_track = track[i_start:i_end]
-        sample_peak_sequence = peak_sequence[i_start:i_end]
-
+        celltype_peaks = celltype_peaks.query('Start>@i_start and End<@i_end')[['Start', 'End']].to_numpy()
+        wi_start, wi_end = self._adjust_indices_relative_to_window(i_start, i_end, start)
+        celltype_peaks = celltype_peaks - i_start
+        sample_track = track[wi_start:wi_end]
+        sample_peak_sequence = peak_sequence[wi_start:wi_end]
         sample_metadata = {
             'celltype_id': celltype_id, 'chr_name': chr_name,
-            'start': start, 'end': end, 'i_start': i_start, 'i_end': i_end
+            'start': start, 'end': end, 'i_start': wi_start, 'i_end': wi_end
         }
 
-        return sample_track, sample_peak_sequence, sample_metadata
+        if self.return_list:
+            sample_track_list = []
+            sample_peak_sequence_list = []
+            for p_start, p_end in celltype_peaks:
+                sample_track_list.append(sample_track[p_start:p_end])
+                sample_peak_sequence_list.append(sample_peak_sequence[p_start:p_end])
+            return sample_track_list, sample_peak_sequence_list, sample_metadata
+
+        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks
 
     def _handle_empty_insulation(self):
         """
@@ -341,15 +350,27 @@ class PretrainDataset(Dataset):
         # Call this method to cleanly shut down the thread
         self.reload_queue.put(None)
         self.reload_thread.join()
+        # clear all the locks
+        for lock in self.locks:
+            lock.acquire()
+            lock.release()
+        
 
 
 # %%
 pretrain = PretrainDataset(['/pmglocal/xf2217/shendure_fetal/shendure_fetal_dense.zarr', 
                             '/pmglocal/xf2217/bingren_adult/bingren_adult_dense.zarr'], 
                            '/manitou/pmg/users/xf2217/get_model/data/hg38.zarr', [
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather'], preload_count=50, samples_per_window=50)
+                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather'], preload_count=80, samples_per_window=100,
+                           return_list=False)
 pretrain.__len__()
 # %%
 for i in tqdm(range(pretrain.__len__())):
     pretrain.__getitem__(1)
 
+
+# %%
+data = pretrain.__getitem__(1)
+# %%
+data[-1]
+# %%
