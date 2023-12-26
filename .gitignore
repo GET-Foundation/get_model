@@ -7,3 +7,5 @@ run_finetune.sh
 *.pth
 wandb
 run_finetune_local_k562_zeroshot.sh
+build
+get_model.egg-info
