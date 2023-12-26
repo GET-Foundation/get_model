@@ -14,7 +14,7 @@ def sparse_coo_to_tensor(coo):
     v = torch.FloatTensor(values)
     s = torch.Size(shape)
 
-    return torch.sparse.FloatTensor(i, v, s)
+    return torch.sparse_coo_tensor(i, v, s)
 
 
 def sparse_batch_collate(batch: list):

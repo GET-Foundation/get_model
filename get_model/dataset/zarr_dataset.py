@@ -77,7 +77,7 @@ class PretrainDataset(Dataset):
             about the extracted sample, including cell type ID, chromosome name, and positions.
         """
         self.sequence = DenseZarrIO(genome_seq_zarr)
-        self.sequence.load_to_memory_dense()
+        # self.sequence.load_to_memory_dense()
         self.zarr_dirs = zarr_dirs
         self.insulation_paths = insulation_paths
         self.preload_count = preload_count
@@ -120,7 +120,7 @@ class PretrainDataset(Dataset):
             CelltypeDenseZarrIO(zarr_dir)]}
         self.data_keys = list(self.zarr_dict.keys())
         self.peaks_dict = self._load_peaks()
-        self.insulation = self._load_insulation(self.insulation_paths)
+        self.insulation = self._load_insulation(self.insulation_paths).sample(frac=0.1)
 
         self._calculate_metadata()
         self.preloaded_data = [self._load_window_data(random.randint(
@@ -357,20 +357,5 @@ class PretrainDataset(Dataset):
         
 
 
-# %%
-pretrain = PretrainDataset(['/pmglocal/xf2217/shendure_fetal/shendure_fetal_dense.zarr', 
-                            '/pmglocal/xf2217/bingren_adult/bingren_adult_dense.zarr'], 
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38.zarr', [
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather'], preload_count=80, samples_per_window=100,
-                           return_list=False)
-pretrain.__len__()
-# %%
-for i in tqdm(range(pretrain.__len__())):
-    pretrain.__getitem__(1)
 
-
-# %%
-data = pretrain.__getitem__(1)
-# %%
-data[-1]
 # %%
