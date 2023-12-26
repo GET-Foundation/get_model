@@ -117,7 +117,6 @@ class RegionEmbed(nn.Module):
         # x = x.permute(0, 2, 1)  # (BATCH_SIZE, NUM_REGION, EMBED_DIM)
         return x
 
-
 class TFEncoder(nn.Module):
     """This module is used to encode TF protein information. More specifically,
     each TF among L TFs is represented by a N-by-D matrix (as input), where N is 1 or 2 or N, 

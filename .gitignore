@@ -1,4 +1,3 @@
-data
 __pycache__
 run_pretrain_k562_cut.sh
 consensus_pwms.meme
@@ -9,3 +8,13 @@ wandb
 run_finetune_local_k562_zeroshot.sh
 build
 get_model.egg-info
+data/hg38.zarr
+data/loops
+data/TADs
+data/motif_symbol.txt
+data/motif_cluster.txt
+data/motif_annot.tsv
+data/cell_type_pretrain.txt
+data/cell_type_pretrain_human_bingren_shendure_apr2023.txt
+data/cell_type_pretrain_exp.txt
+data/motif_cluster_original_id.txt
