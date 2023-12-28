@@ -1,24 +1,34 @@
 # %%
-import zarr
-import threading
-import random
-from numcodecs import Blosc
-from caesar.io.zarr_io import DenseZarrIO, CelltypeDenseZarrIO
-from tqdm import tqdm
-from torch.utils.data import Dataset
-from scipy.sparse import coo_matrix, load_npz, vstack
-from get_model.dataset.splitter import cell_splitter, chromosome_splitter
-from get_model.dataset.io import generate_paths, get_hierachical_ctcf_pos, prepare_sequence_idx
-from scipy.sparse import csr_matrix
-import pandas as pd
-import time
-import numpy as np
-from glob import glob
 import logging
+from math import log
+import os.path
+import random
 import sys
+import threading
+import time
+from glob import glob
 from posixpath import basename
 from queue import Queue
-import os.path
+
+import numpy as np
+import pandas as pd
+import zarr
+from caesar.io.zarr_io import CelltypeDenseZarrIO, DenseZarrIO
+from numcodecs import Blosc
+from pyranges import PyRanges as pr
+from scipy.sparse import coo_matrix, csr_matrix, load_npz, vstack, hstack
+from torch.utils.data import Dataset
+from tqdm import tqdm
+
+from get_model.dataset.io import (generate_paths, get_hierachical_ctcf_pos,
+                                  prepare_sequence_idx)
+from get_model.dataset.splitter import cell_splitter, chromosome_splitter
+
+# # Setup logging
+# logging.basicConfig(level=logging.INFO,
+#                     format='%(asctime)s - %(levelname)s - %(message)s')
+
+
 sys.path.append('/manitou/pmg/users/xf2217/get_model')
 # from augmentation import (
 #     DataAugmentationForGETPeak,
@@ -86,26 +96,58 @@ class PretrainDataset(Dataset):
         self._initialize_datasets()
 
     def __getitem__(self, index: int):
+        try:
+            return self._getitem(index)
+        except Exception as e:
+            logging.info(f'Error: {e}')
+
+    def _getitem(self, index: int):
+
+        while self.insulation_peak_counts.shape[0] == 0:
+            if self.reload_queue.qsize() > 0:
+                logging.info('Waiting for insulation_peak_counts to be available')
+                # Wait for 0.5 seconds for a slot to be available
+                time.sleep(0.5)
+                continue
+            else:
+                logging.info('Reloading data')
+                self._preload_data()
+                continue
+            
+        
+        with self.insulation_lock:
+            sample_key = self.insulation_peak_counts.iloc[0]['key']
+            window_index, insulation_index = map(int, sample_key.split('_'))
+
+        window_slot = self.preloaded_data_window_indices_mapping[window_index]
         usable_slot = np.where(np.array(self.usage_counters)
                                < self.samples_per_window)[0]
-        while len(usable_slot) == 0:
-            logging.info('Waiting for a slot to be available')
+        while window_slot not in usable_slot:
+            # logging.info('Waiting for a slot to be available')
             # Wait for 0.5 seconds for a slot to be available
             time.sleep(0.5)
             usable_slot = np.where(
                 np.array(self.usage_counters) < self.samples_per_window)[0]
-        preload_index = np.random.choice(usable_slot)
-        with self.locks[int(preload_index)]:
-            # Access the preloaded data for the specific index
-            window = self.preloaded_data[preload_index]
 
-        sample = self._extract_sample_from_window(window)
+        # Retrieve preloaded data using window index
+        
+        with self.locks[window_slot]:
+            window = self.preloaded_data[window_slot]
 
-        with self.locks[preload_index]:
-            # Update the usage counter for the specific index
-            self.usage_counters[preload_index] += 1
-            if self.usage_counters[preload_index] >= self.samples_per_window:
-                self._reload_data(preload_index)
+        # Extract the sample
+        sample = self._extract_sample_from_window(window, insulation_index)
+        
+        # Update insulation_peak_counts to remove the current sample
+        with self.insulation_lock:
+            self.insulation_peak_counts = self.insulation_peak_counts.iloc[1:]
+
+        # Update usage counter and possibly reload data
+        with self.locks[window_slot]:
+            logging.info(f'Usage counter for slot {window_slot} is {self.usage_counters[window_slot]}')
+            self.usage_counters[window_slot] += 1
+            if self.usage_counters[window_slot] >= self.samples_per_window:
+                logging.info(f'Reloading data for slot {window_slot}')
+                self._reload_data(window_slot)
 
         return sample
 
@@ -120,14 +162,58 @@ class PretrainDataset(Dataset):
             CelltypeDenseZarrIO(zarr_dir)]}
         self.data_keys = list(self.zarr_dict.keys())
         self.peaks_dict = self._load_peaks()
-        self.insulation = self._load_insulation(self.insulation_paths).sample(frac=0.1)
+        self.insulation = self._load_insulation(
+            self.insulation_paths).sample(frac=0.1).reset_index(drop=True)
 
         self._calculate_metadata()
-        self.preloaded_data = [self._load_window_data(random.randint(
-            0, self.total_chunk_length)) for _ in range(self.preload_count)]
+        self._preload_data()
+        self._setup_locks()
+        self._start_reload_thread()
+
+    def _setup_locks(self):
         self.usage_counters = np.zeros(self.preload_count, dtype=np.int32)
         self.locks = [threading.Lock() for _ in range(self.preload_count)]
-        self._start_reload_thread()
+        self.insulation_lock = threading.Lock()
+
+    def _load_window_data(self, window_index):
+        data_key, celltype_id = self._get_celltype_info(window_index)
+        chr_name, chunk_idx, start, end = self._get_chromosome_info(
+            window_index)
+
+        celltype_peaks = self._query_peaks(celltype_id, chr_name, start, end)
+        item_insulation = self._query_insulation(chr_name, start, end)
+
+        track = self.zarr_dict[data_key].get_track(
+            celltype_id, chr_name, start, end, sparse=True).T
+        sequence = self.sequence.get_track(chr_name, start, end, sparse=False)
+
+        peak_sequence = self._generate_peak_sequence(
+            celltype_peaks, sequence, start, end)
+        item_insulation = item_insulation.reset_index(drop=True).reset_index()
+        item_insulation['key'] = str(
+            window_index) + '_' + item_insulation['index'].astype(str)
+        celltype_peaks = celltype_peaks.reset_index(drop=True).reset_index()
+        return window_index, chr_name, start, end, celltype_id, track, peak_sequence, item_insulation, celltype_peaks
+
+    def _get_peak_count(self, item_insulation, celltype_peaks):
+        df = pr(item_insulation).join(pr(celltype_peaks), suffix="_peak").df.groupby(
+            'key').index_peak.count().reset_index()
+        return df.set_index('key').to_dict()['index_peak']
+
+    def _calculate_peak_num_per_sample(self):
+        insulation_pool_peak_num = {}
+        for _, _, _, _, _, _, _, item_insulation, celltype_peaks in self.preloaded_data:
+            try:
+                insulation_pool_peak_num.update(
+                    self._get_peak_count(item_insulation, celltype_peaks))
+            except:
+                continue
+        # Convert to DataFrame and sort
+        insulation_pool_peak_num_df = pd.DataFrame.from_dict(
+            insulation_pool_peak_num, orient='index').reset_index()
+        insulation_pool_peak_num_df.columns = ['key', 'peak_num']
+        insulation_pool_peak_num_df.sort_values('peak_num', inplace=True)
+        return insulation_pool_peak_num_df.query('peak_num>3')
 
     def _calculate_metadata(self):
         first_zarr = next(iter(self.zarr_dict.values()))
@@ -149,6 +235,7 @@ class PretrainDataset(Dataset):
         while True:
             index = self.reload_queue.get()
             if index is None:
+                logging.info('Exiting reload thread')
                 break
             self._async_reload_data(index)
             self.reload_queue.task_done()
@@ -160,23 +247,16 @@ class PretrainDataset(Dataset):
     def _preload_data(self):
         # Preload data
         # Load data for a fixed number of windows
-        return [self._load_window_data(random.randint(0, self.total_chunk_length)) for _ in range(self.preload_count)]
-
-    def _load_window_data(self, window_index):
-        data_key, celltype_id = self._get_celltype_info(window_index)
-        chr_name, chunk_idx, start, end = self._get_chromosome_info(
-            window_index)
-
-        celltype_peaks = self._query_peaks(celltype_id, chr_name, start, end)
-        item_insulation = self._query_insulation(chr_name, start, end)
-
-        track = self.zarr_dict[data_key].get_track(
-            celltype_id, chr_name, start, end, sparse=True).T
-        sequence = self.sequence.get_track(chr_name, start, end, sparse=False)
-
-        peak_sequence = self._generate_peak_sequence(celltype_peaks, sequence, start, end)
-
-        return window_index, chr_name, start, end, celltype_id, track, peak_sequence, item_insulation, celltype_peaks
+        self.preloaded_data = []
+        self.preloaded_data_window_indices_mapping = {}
+        for i in range(self.preload_count):
+            window_index, chr_name, start, end, celltype_id, track, peak_sequence, item_insulation, celltype_peaks = self._load_window_data(
+                random.randint(0, self.total_chunk_length))
+            self.preloaded_data.append((window_index, chr_name, start, end,
+                                       celltype_id, track, peak_sequence, item_insulation, celltype_peaks))
+            self.preloaded_data_window_indices_mapping[window_index] = i
+        # trigger the computation of peak_num_per_sample
+        self.insulation_peak_counts = self._calculate_peak_num_per_sample()
 
     def _get_celltype_info(self, window_index):
         celltype_idx = window_index // self.genome_chunk_length
@@ -204,16 +284,29 @@ class PretrainDataset(Dataset):
         return csr_matrix(peak_sequence*sequence)
 
     def _async_reload_data(self, index):
-        logging.info('Reloading data')
         # This method runs in a separate thread
+        logging.info(f'Async reloading data for slot {index}')
         new_data = self._load_window_data(
             random.randint(0, self.total_chunk_length))
+        
+        
+        # Update the mapping
+        new_window_index = new_data[0]
+
+        # First remove the old mapping
+        old_window_index = self.preloaded_data[index][0]
+        del self.preloaded_data_window_indices_mapping[old_window_index]
+        # Then add the new mapping
+        self.preloaded_data_window_indices_mapping[new_window_index] = index
+
+        # Update insulation_peak_counts to remove the current sample
+        self.insulation_peak_counts = self._calculate_peak_num_per_sample().query(f'~(key.str.startswith("{str(old_window_index)}"))')
         # Update the preloaded data for the specific index
         self.preloaded_data[index] = new_data
         # reset the usage counter
-        self.usage_counters[index] = 0
+        self.usage_counters = [0] * self.preload_count
 
-    def _extract_sample_from_window(self, window):
+    def _extract_sample_from_window(self, window, insulation_index):
         """
         Extract a single sample from a preloaded window.
 
@@ -234,14 +327,19 @@ class PretrainDataset(Dataset):
         """
         window_index, chr_name, start, end, celltype_id, track, peak_sequence, insulation, celltype_peaks = window
         if len(insulation) == 0:
-            return self._handle_empty_insulation()
-
-        i_start, i_end = self._insulation_sampler(insulation)
-        celltype_peaks = celltype_peaks.query('Start>@i_start and End<@i_end')[['Start', 'End']].to_numpy()
-        wi_start, wi_end = self._adjust_indices_relative_to_window(i_start, i_end, start)
+            raise ValueError('Empty insulation')
+        i_start, i_end = self._insulation_sampler(insulation, insulation_index)
+        celltype_peaks = celltype_peaks.query(
+            'Start>@i_start and End<@i_end')[['Start', 'End']].to_numpy()
+        if len(celltype_peaks) == 0:
+            raise ValueError('No peaks in insulation region')
+        wi_start, wi_end = self._adjust_indices_relative_to_window(
+            i_start, i_end, start)
         celltype_peaks = celltype_peaks - i_start
         sample_track = track[wi_start:wi_end]
         sample_peak_sequence = peak_sequence[wi_start:wi_end]
+        sample_peak_sequence = vstack([sample_peak_sequence[start-50:end+50] for start, end in celltype_peaks])
+        sample_track = vstack([sample_track[start-50:end+50] for start, end in celltype_peaks])
         sample_metadata = {
             'celltype_id': celltype_id, 'chr_name': chr_name,
             'start': start, 'end': end, 'i_start': wi_start, 'i_end': wi_end
@@ -252,23 +350,11 @@ class PretrainDataset(Dataset):
             sample_peak_sequence_list = []
             for p_start, p_end in celltype_peaks:
                 sample_track_list.append(sample_track[p_start:p_end])
-                sample_peak_sequence_list.append(sample_peak_sequence[p_start:p_end])
+                sample_peak_sequence_list.append(
+                    sample_peak_sequence[p_start:p_end])
             return sample_track_list, sample_peak_sequence_list, sample_metadata
 
         return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks
-
-    def _handle_empty_insulation(self):
-        """
-        Handle cases where insulation data is empty.
-
-        This method attempts to load data from another randomly selected window.
-
-        Returns:
-        tuple: Extracted sample data from a new window.
-        """
-        new_window = self._load_window_data(
-            random.randint(0, self.total_chunk_length))
-        return self._extract_sample_from_window(new_window)
 
     def _adjust_indices_relative_to_window(self, i_start, i_end, start):
         """
@@ -284,11 +370,12 @@ class PretrainDataset(Dataset):
         """
         return i_start - start, i_end - start
 
-    def _insulation_sampler(self, insulation):
+    def _insulation_sampler(self, insulation, sample_index=None):
         """
         Sample insulation from the insulation dataframe
         """
-        sample_index = np.random.randint(0, len(insulation))
+        if sample_index is None:
+            sample_index = np.random.randint(0, len(insulation))
         i_start, i_end = insulation.iloc[sample_index][['Start', 'End']]
         return i_start, i_end
 
@@ -354,8 +441,6 @@ class PretrainDataset(Dataset):
         for lock in self.locks:
             lock.acquire()
             lock.release()
-        
-
 
 
 # %%

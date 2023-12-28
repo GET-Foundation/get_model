@@ -13,7 +13,7 @@ def sparse_coo_to_tensor(coo):
     i = torch.LongTensor(indices)
     v = torch.FloatTensor(values)
     s = torch.Size(shape)
-
+ 
     return torch.sparse_coo_tensor(i, v, s)
 
 
