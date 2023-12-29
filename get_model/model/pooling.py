@@ -3,6 +3,56 @@ import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 from torch import nn
 
+def pool(x, method='mean'):
+    """
+    x: (L,D)
+    """
+    if method == 'sum':
+        return x.sum(0)
+    elif method == 'max':
+        return x.max(0)
+    elif method == 'mean':
+        return x.mean(0)
+
+
+class SplitPool(nn.Module):
+    """
+    Receive a tensor of shape (batch, length, dimension) and split along length
+    dimension based on a celltype_peak tensor of shape (batch, n_peak, 2) where
+    the second dimension is the start and end of the peak. The length dimension 
+    can be decomposed into a sum of the peak lengths with each peak padded left 
+    and right with 50bp and directly concatenated. Thus the boundary for the 
+    splitting can be calculated by cumsum of the padded peak lengths. The output
+    is a tensor of shape (batch, n_peak, dimension). 
+    """
+    def __init__(self, pool_method='sum'):
+        super().__init__()
+        self.pool_method = pool_method
+
+
+    def forward(self, x, chunk_size, n_peaks, max_n_peaks):
+        """
+        x: (batch, length, dimension)
+        chunk_size: the size of each chunk to pool        
+        n_peaks: the number of peaks for each sample
+        max_n_peaks: the maximum number of peaks in the batch
+        pool_method: the method to pool the tensor
+        """
+        batch, length, embed_dim = x.shape
+        chunk_list = torch.split(x.reshape(-1,embed_dim), chunk_size, dim=0)
+        # each element is L, D, pool the tensor
+        chunk_list = torch.vstack([pool(chunk, self.pool_method) for chunk in chunk_list])
+        # remove the padded part
+        pool_idx = torch.cumsum(n_peaks+1,0)
+        pool_start = torch.cat([torch.tensor(0).unsqueeze(0), pool_idx[:-1]])
+        pool_end = pool_idx-1
+        pool_list = [chunk_list[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
+        # pad the element in pool_list if the number of peaks is not the same
+        x = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks-n_peaks[i], embed_dim)]) for i in range(len(pool_list))])
+
+        return x
+
+
 
 class AttentionPool(nn.Module):
     def __init__(self, dim, pool_size = 2):

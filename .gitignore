@@ -18,3 +18,5 @@ data/cell_type_pretrain.txt
 data/cell_type_pretrain_human_bingren_shendure_apr2023.txt
 data/cell_type_pretrain_exp.txt
 data/motif_cluster_original_id.txt
+test/hail*
+test/data

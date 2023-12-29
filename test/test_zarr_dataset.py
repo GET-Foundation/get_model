@@ -4,71 +4,45 @@ import torch
 from scipy.sparse import coo_matrix
 from tqdm import tqdm
 
-from get_model.dataset.collate import csr_to_torch_sparse
+from get_model.dataset.collate import get_rev_collate_fn
 from get_model.dataset.zarr_dataset import PretrainDataset
 import logging
 # Setup logging
 # logging.basicConfig(level=logging.INFO,
 #                     format='%(asctime)s - %(levelname)s - %(message)s')
+import warnings
 
+# Suppress all deprecated warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # %%
 pretrain = PretrainDataset(['/pmglocal/xf2217/shendure_fetal/shendure_fetal_dense.zarr', 
                             '/pmglocal/xf2217/bingren_adult/bingren_adult_dense.zarr'], 
                            '/manitou/pmg/users/xf2217/get_model/data/hg38.zarr', [
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], preload_count=80, samples_per_window=150,
+                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], preload_count=50, samples_per_window=150,
                            return_list=False)
 pretrain.__len__()
 # %%
 # for i in tqdm(range(100)):
-#     pretrain.__getitem__(0)
+pretrain.__getitem__(0)
 
 #%%
 
 
-def collate_fn_test(batch):
-    # zip and convert to list
-    sample_track, sample_peak_sequence, sample_metadata, celltype_peaks = zip(*batch)
-    celltype_peaks = list(celltype_peaks)
-    sample_track = list(sample_track)
-    sample_peak_sequence = list(sample_peak_sequence)
-    sample_metadata = list(sample_metadata)
-    batch_size = len(celltype_peaks)
-    n_peak_max = max([len(x) for x in celltype_peaks])
-    sample_len_max = max([len(x.getnnz(1)) for x in sample_peak_sequence])
-    sample_track_boundary = []
-    sample_peak_sequence_boundary = []
-    # pad each peaks in the end with 0
-    for i in range(len(celltype_peaks)):
-        celltype_peaks[i] = np.pad(celltype_peaks[i], ((0, n_peak_max - len(celltype_peaks[i])), (0,0)))
-        # pad each track in the end with 0 which is csr_matrix, use sparse operation
-        sample_track[i].resize((sample_len_max, sample_track[i].shape[1]))
-        sample_peak_sequence[i].resize((sample_len_max, sample_peak_sequence[i].shape[1]))
-        sample_track[i] = sample_track[i].todense()
-        sample_peak_sequence[i] = sample_peak_sequence[i].todense()
 
-    celltype_peaks = np.stack(celltype_peaks, axis=0)
-    celltype_peaks = torch.from_numpy(celltype_peaks)
-    sample_track = np.hstack(sample_track).T
-    sample_track = torch.from_numpy(sample_track)
-    sample_peak_sequence = np.hstack(sample_peak_sequence)
-    sample_peak_sequence = torch.from_numpy(sample_peak_sequence).view(-1, batch_size, 4)
-    # sample_peak_sequence = sample_peak_sequence.to_sparse_csr()
-    # return sample_track, sample_peak_sequence.view(-1, batch_size, 4), sample_metadata, celltype_peaks
-    return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary
 #%%
 data_loader_train = torch.utils.data.DataLoader(
     pretrain,
-    batch_size=32,
+    batch_size=64,
     num_workers=96,
     pin_memory=False,
     drop_last=True,
-    collate_fn = collate_fn_test
+    collate_fn = get_rev_collate_fn
 )
 
 # %%
 for batch in tqdm(data_loader_train):
-    sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary= batch
+    sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len = batch
 # %%
 celltype_peaks.shape
 # %%
@@ -77,4 +51,65 @@ sample_metadata
 sample_peak_sequence.shape
 # %%
 sample_track.shape
+# %%
+mask
+
+
+
+
+
+
+#%%
+def pool(x, method='mean'):
+    """
+    x: (L,D)
+    """
+    if method == 'sum':
+        return x.sum(0)
+    elif method == 'max':
+        return x.max(0)
+    elif method == 'mean':
+        return x.mean(0)
+
+
+def forward(x, celltype_peaks, pool_method='sum'):
+    """
+    x: (batch, length, dimension)
+    celltype_peaks: (batch, n_peak, 2)
+    """
+    # calculate the length of each peak with 100bp padding on each side
+
+    batch, length, embed_dim = x.shape
+    chunk_list = torch.split(x.reshape(-1,embed_dim), chunk_size, dim=0)
+    # each element is L, D, pool the tensor
+    chunk_list = torch.vstack([pool(chunk, pool_method) for chunk in chunk_list])
+    # remove the padded part
+    pool_idx = torch.cumsum(n_peaks+1,0)
+    pool_start = torch.cat([torch.tensor(0).unsqueeze(0), pool_idx[:-1]])
+    pool_end = pool_idx-1
+    pool_list = [chunk_list[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
+    # pad the element in pool_list if the number of peaks is not the same
+    x = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks-n_peaks[i], embed_dim)]) for i in range(len(pool_list))])
+
+    return x
+
+forward(sample_track, celltype_peaks).shape
+
+
+
+
+
+
+
+#%%
+import seaborn as sns
+i=np.random.randint(0,32)
+cov = (celltype_peaks[:,:,1]-celltype_peaks[:,:,0]).sum(1)
+real_cov = sample_track.sum(1)
+conv = (cov/real_cov).numpy().astype(np.int32)*5
+# y = sample_track[i].numpy()
+y = np.convolve(sample_track[i].numpy(), np.ones(conv[i]), mode='same')
+sns.lineplot(y=y, x=range(len(sample_track[i].numpy())))
+# %%
+sample_track[i].numpy().sum()
 # %%

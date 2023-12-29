@@ -28,6 +28,10 @@ from get_model.dataset.splitter import cell_splitter, chromosome_splitter
 # logging.basicConfig(level=logging.INFO,
 #                     format='%(asctime)s - %(levelname)s - %(message)s')
 
+import warnings
+
+# Suppress all deprecated warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 sys.path.append('/manitou/pmg/users/xf2217/get_model')
 # from augmentation import (

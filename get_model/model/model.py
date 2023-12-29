@@ -9,6 +9,7 @@ from timm.models.registry import register_model
 from get_model.model.position_encoding import CTCFPositionalEncoding, AbsolutePositionalEncoding
 from get_model.model.motif import parse_meme_file
 from get_model.model.transformer import GETTransformer
+from get_model.model.pooling import SplitPool
 
 class SequenceEncoder(nn.Module):
     """A sequence encoder based on Conv1D.
@@ -136,13 +137,12 @@ class MotifScanner(nn.Module):
     """
 
     def __init__(
-        self, num_motif=637, target_dim=1280, atac_attention=False, include_reverse_complement=True):
+        self, num_motif=637, target_dim=1280, include_reverse_complement=True):
         super().__init__()
         self.num_motif = num_motif
         if include_reverse_complement:
             self.num_motif *= 2
         self.target_dim = target_dim
-        self.atac_attention = atac_attention
         motifs = self.load_pwm_as_kernel(include_reverse_complement=include_reverse_complement)
         self.motif = nn.Sequential(
             nn.Conv1d(4, self.num_motif, 29, padding="same"),
@@ -187,7 +187,15 @@ class MotifScanner(nn.Module):
         self.motif = self.motif.cuda()
         return self._apply(lambda t: t.cuda(device))
 
-class GETPretrain(nn.Module):
+class ATACAttention(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, peak_seq, atac):
+        return torch.einsum("bld,blc->blcd", peak_seq, atac).sum(dim=2)
+    
+
+class GETRevPretrain(nn.Module):
     """A GET model for pretraining using mask and prediction."""
 
     def __init__(
@@ -219,8 +227,10 @@ class GETPretrain(nn.Module):
         self.output_dim = output_dim
         self.pos_emb_components = pos_emb_components
         self.motif_scanner = MotifScanner(
-            num_motif=num_motif, target_dim=motif_dim, atac_attention=atac_attention, include_reverse_complement=True
+            num_motif=num_motif, target_dim=motif_dim, include_reverse_complement=True
         )
+        self.atac_attention = ATACAttention() if atac_attention else None
+        self.split_pool = SplitPool()
         self.region_embed = RegionEmbed(num_regions, motif_dim, embed_dim)
         self.pos_embed = []
         if "CTCF" in self.pos_emb_components: 
@@ -255,16 +265,16 @@ class GETPretrain(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, peak, seq, mask, ctcf_pos):
+    def forward(self, peak_seq, atac, mask, chunk_size, n_peaks, max_n_peaks):
         """forward function with hooks to return embedding or attention weights."""
-        # seq: [B, 200, 1000, 4]
-        # peak: [B, 200, 1000, 1]
-        # [B, 200, 1000, 4] --> [B, 200, 1000, 1274]
-        x = self.motif_scanner(seq)
-        # [B, 200, 1000, 1274] --> [B, 200, 1274]
+        # peak_seq: [B, L, 4]
+        # [B, L, 4] --> [B, L, 1274]
+        x = self.motif_scanner(peak_seq)
+        # [B, L, 1274] --> [B, R, 1274]
         # gloabl pooling inner product with peak
-        peak = peak.squeeze(-1)
-        x_original = torch.einsum("brcd,brc->brcd", x, peak).sum(dim=2)
+        x = self.atac_attention(x, atac)
+        x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
+
         x = self.region_embed(x_original)
         B, N, C = x_original.shape
         mask_token = self.mask_token.expand(B, N, -1)

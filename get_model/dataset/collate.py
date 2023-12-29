@@ -32,22 +32,51 @@ def sparse_batch_collate(batch: list):
     return data_batch, targets_batch, cells_batch, ctcf_pos_batch
 
 
-def csr_to_torch_sparse(csr):
-    # Step 1: Extract CSR components
-    csr_data = csr.data
-    csr_indices = csr.indices
-    csr_indptr = csr.indptr
+def get_rev_collate_fn(batch):
+    # zip and convert to list
+    sample_track, sample_peak_sequence, sample_metadata, celltype_peaks = zip(*batch)
+    celltype_peaks = list(celltype_peaks)
+    sample_track = list(sample_track)
+    sample_peak_sequence = list(sample_peak_sequence)
+    sample_metadata = list(sample_metadata)
+    batch_size = len(celltype_peaks)
 
-    # Step 2: Convert CSR to COO
-    coo_row_indices = np.empty_like(csr_data, dtype=np.int64)
-    for i in range(len(csr_indptr) - 1):
-        start, end = csr_indptr[i], csr_indptr[i+1]
-        coo_row_indices[start:end] = i  # Fill row indices
-    coo_col_indices = csr_indices
-    coo_indices = np.vstack((coo_row_indices, coo_col_indices))
+    n_peak_max = max([len(x) for x in celltype_peaks])
+    sample_len_max = max([len(x.getnnz(1)) for x in sample_peak_sequence])
+    sample_track_boundary = []
+    sample_peak_sequence_boundary = []
+    # pad each peaks in the end with 0
+    for i in range(len(celltype_peaks)):
+        celltype_peaks[i] = np.pad(celltype_peaks[i], ((0, n_peak_max - len(celltype_peaks[i])), (0,0)))
+        # pad each track in the end with 0 which is csr_matrix, use sparse operation
+        sample_track[i].resize((sample_len_max, sample_track[i].shape[1]))
+        sample_peak_sequence[i].resize((sample_len_max, sample_peak_sequence[i].shape[1]))
+        sample_track[i] = sample_track[i].todense()
+        sample_peak_sequence[i] = sample_peak_sequence[i].todense()
 
-    # Step 3: Create a PyTorch sparse tensor
-    coo_indices = torch.LongTensor(coo_indices)
-    coo_data = torch.FloatTensor(csr_data)
-    size = torch.Size(csr.shape)
-    return coo_indices, coo_data, size
+    celltype_peaks = np.stack(celltype_peaks, axis=0)
+    celltype_peaks = torch.from_numpy(celltype_peaks)
+    sample_track = np.hstack(sample_track).T
+    sample_track = torch.from_numpy(sample_track)
+    sample_peak_sequence = np.hstack(sample_peak_sequence)
+    sample_peak_sequence = torch.from_numpy(sample_peak_sequence).view(-1, batch_size, 4)
+
+    peak_len = celltype_peaks[:,:,1]-celltype_peaks[:,:,0]
+    padded_peak_len = peak_len + 100
+    total_peak_len = peak_len.sum(1)
+    n_peaks = (peak_len>0).sum(1)
+    max_n_peaks = n_peaks.max()
+    peak_peadding_len = n_peaks*100
+    tail_len = sample_peak_sequence.shape[1] - peak_peadding_len - peak_len.sum(1)
+    # flatten the list
+    chunk_size = torch.cat([torch.cat([padded_peak_len[i][0:n],tail_len[i].unsqueeze(0)]) for i, n in enumerate(n_peaks)]).tolist()
+
+    mask = torch.stack([torch.cat([torch.zeros(i), torch.zeros(max_n_peaks-i)-10000]) for i in n_peaks.tolist()])
+    maskable_pos = (mask+10000).nonzero()
+
+    for i in range(batch_size):
+        maskable_pos_i = maskable_pos[maskable_pos[:,0]==i,1]
+        idx = np.random.choice(maskable_pos_i, size=np.ceil(0.5*len(maskable_pos_i)).astype(int), replace=False)
+        mask[i,idx] = 1
+
+    return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len
