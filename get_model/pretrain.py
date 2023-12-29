@@ -10,12 +10,13 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import utils
-from dataset.dataset import build_dataset
+from dataset.dataset import build_dataset_zarr as build_dataset
+from get_model.dataset.collate import get_rev_collate_fn
 from engine import pretrain_one_epoch as train_one_epoch
 from optim import create_optimizer
 from timm.models import create_model
 from utils import NativeScalerWithGradNormCount as NativeScaler
-
+import wandb
 import get_model.model.model
 #%%
 
@@ -24,7 +25,9 @@ def get_args_parser():
     parser.add_argument("--batch_size", default=64, type=int)
     parser.add_argument("--epochs", default=300, type=int)
     parser.add_argument("--save_ckpt_freq", default=20, type=int)
-
+    # wandb params
+    parser.add_argument("--wandb_project_name", type=str, default="get-pretrain", help="wandb project name")
+    parser.add_argument("--wandb_run_name", type=str, default=None, help="wandb run name")
     # Model parameters
     parser.add_argument(
         "--model",
@@ -39,6 +42,20 @@ def get_args_parser():
         default=200,
         type=int,
         help="number of regions for each sample",
+    )
+
+    parser.add_argument(
+        "--preload_count",
+        default=100,
+        type=int,
+        help="number of samples to preload",
+    )
+
+    parser.add_argument(
+        "--samples_per_window",
+        default=150,
+        type=int,
+        help="number of samples per window",
     )
 
     parser.add_argument(
@@ -246,6 +263,12 @@ def main(args):
     utils.init_distributed_mode(args)
 
     print(args)
+    if utils.is_main_process(): # Log metrics only on main process
+        wandb.login()
+        run = wandb.init(
+            project=opts.wandb_project_name,
+            name=opts.wandb_run_name,
+        )
 
     device = torch.device(args.device)
 
@@ -297,7 +320,7 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        # collate_fn = sparse_batch_collate_pretrain
+        collate_fn = get_rev_collate_fn
     )
 
     model.to(device)
@@ -394,6 +417,9 @@ def main(args):
             "epoch": epoch,
             "n_parameters": n_parameters,
         }
+                
+        if utils.is_main_process():
+            wandb.log(log_stats)
 
         if args.output_dir and utils.is_main_process():
             if log_writer is not None:

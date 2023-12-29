@@ -1,12 +1,13 @@
 # %%
 import logging
-from math import log
 import os.path
 import random
 import sys
 import threading
 import time
+import warnings
 from glob import glob
+from math import log
 from posixpath import basename
 from queue import Queue
 
@@ -14,9 +15,8 @@ import numpy as np
 import pandas as pd
 import zarr
 from caesar.io.zarr_io import CelltypeDenseZarrIO, DenseZarrIO
-from numcodecs import Blosc
 from pyranges import PyRanges as pr
-from scipy.sparse import coo_matrix, csr_matrix, load_npz, vstack, hstack
+from scipy.sparse import csr_matrix, vstack
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
@@ -24,24 +24,17 @@ from get_model.dataset.io import (generate_paths, get_hierachical_ctcf_pos,
                                   prepare_sequence_idx)
 from get_model.dataset.splitter import cell_splitter, chromosome_splitter
 
-# # Setup logging
-# logging.basicConfig(level=logging.INFO,
-#                     format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
-import warnings
 
 # Suppress all deprecated warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 sys.path.append('/manitou/pmg/users/xf2217/get_model')
-# from augmentation import (
-#     DataAugmentationForGETPeak,
-#     DataAugmentationForGETPeakFinetune,
-# )
-
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, preload_count=50, samples_per_window=50, return_list=True):
+    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, preload_count=50, samples_per_window=50, padding=50, mask_ratio=0.5):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -96,7 +89,8 @@ class PretrainDataset(Dataset):
         self.insulation_paths = insulation_paths
         self.preload_count = preload_count
         self.samples_per_window = samples_per_window
-        self.return_list = return_list
+        self.padding = padding
+        self.mask_ratio = mask_ratio
         self._initialize_datasets()
 
     def __getitem__(self, index: int):
@@ -109,16 +103,15 @@ class PretrainDataset(Dataset):
 
         while self.insulation_peak_counts.shape[0] == 0:
             if self.reload_queue.qsize() > 0:
-                logging.info('Waiting for insulation_peak_counts to be available')
+                logging.info(
+                    'Waiting for insulation_peak_counts to be available')
                 # Wait for 0.5 seconds for a slot to be available
                 time.sleep(0.5)
                 continue
             else:
-                logging.info('Reloading data')
                 self._preload_data()
                 continue
-            
-        
+
         with self.insulation_lock:
             sample_key = self.insulation_peak_counts.iloc[0]['key']
             window_index, insulation_index = map(int, sample_key.split('_'))
@@ -134,23 +127,21 @@ class PretrainDataset(Dataset):
                 np.array(self.usage_counters) < self.samples_per_window)[0]
 
         # Retrieve preloaded data using window index
-        
+
         with self.locks[window_slot]:
             window = self.preloaded_data[window_slot]
 
         # Extract the sample
         sample = self._extract_sample_from_window(window, insulation_index)
-        
+
         # Update insulation_peak_counts to remove the current sample
         with self.insulation_lock:
             self.insulation_peak_counts = self.insulation_peak_counts.iloc[1:]
 
         # Update usage counter and possibly reload data
         with self.locks[window_slot]:
-            logging.info(f'Usage counter for slot {window_slot} is {self.usage_counters[window_slot]}')
             self.usage_counters[window_slot] += 1
             if self.usage_counters[window_slot] >= self.samples_per_window:
-                logging.info(f'Reloading data for slot {window_slot}')
                 self._reload_data(window_slot)
 
         return sample
@@ -292,8 +283,7 @@ class PretrainDataset(Dataset):
         logging.info(f'Async reloading data for slot {index}')
         new_data = self._load_window_data(
             random.randint(0, self.total_chunk_length))
-        
-        
+
         # Update the mapping
         new_window_index = new_data[0]
 
@@ -304,7 +294,8 @@ class PretrainDataset(Dataset):
         self.preloaded_data_window_indices_mapping[new_window_index] = index
 
         # Update insulation_peak_counts to remove the current sample
-        self.insulation_peak_counts = self._calculate_peak_num_per_sample().query(f'~(key.str.startswith("{str(old_window_index)}"))')
+        self.insulation_peak_counts = self._calculate_peak_num_per_sample().query(
+            f'~(key.str.startswith("{str(old_window_index)}"))')
         # Update the preloaded data for the specific index
         self.preloaded_data[index] = new_data
         # reset the usage counter
@@ -342,21 +333,14 @@ class PretrainDataset(Dataset):
         celltype_peaks = celltype_peaks - i_start
         sample_track = track[wi_start:wi_end]
         sample_peak_sequence = peak_sequence[wi_start:wi_end]
-        sample_peak_sequence = vstack([sample_peak_sequence[start-50:end+50] for start, end in celltype_peaks])
-        sample_track = vstack([sample_track[start-50:end+50] for start, end in celltype_peaks])
+        sample_peak_sequence = vstack(
+            [sample_peak_sequence[start-self.padding:end+self.padding] for start, end in celltype_peaks])
+        sample_track = vstack(
+            [sample_track[start-self.padding:end+self.padding] for start, end in celltype_peaks])
         sample_metadata = {
             'celltype_id': celltype_id, 'chr_name': chr_name,
-            'start': start, 'end': end, 'i_start': wi_start, 'i_end': wi_end
+            'start': start, 'end': end, 'i_start': wi_start, 'i_end': wi_end, 'mask_ratio': self.mask_ratio
         }
-
-        if self.return_list:
-            sample_track_list = []
-            sample_peak_sequence_list = []
-            for p_start, p_end in celltype_peaks:
-                sample_track_list.append(sample_track[p_start:p_end])
-                sample_peak_sequence_list.append(
-                    sample_peak_sequence[p_start:p_end])
-            return sample_track_list, sample_peak_sequence_list, sample_metadata
 
         return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks
 

@@ -57,23 +57,24 @@ def pretrain_one_epoch(
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
 
-        peaks, seq, bool_masked_pos, ctcf_pos = batch
-        peaks = peaks.to(device, non_blocking=True)
-        seq = seq.to(device, non_blocking=True)
-        peaks = peaks.float()
-        bool_masked_pos = (
-            bool_masked_pos.to(device, non_blocking=True).bool()
-        )
-        ctcf_pos = ctcf_pos.to(device, non_blocking=True).bool()
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len = batch
+        sample_track = sample_track.to(device, non_blocking=True).float()
+        peak_seq = peak_seq.to(device, non_blocking=True).float()
+        bool_mask_pos = mask.clone()
+        bool_mask_pos[bool_mask_pos==-10000]=0
+        bool_mask_pos = bool_mask_pos.to(device, non_blocking=True).bool()
+        # chunk_size = chunk_size.to(device, non_blocking=True)
+        n_peaks = n_peaks.to(device, non_blocking=True)
 
-        output_masked, atac, regions = model(peaks, seq, bool_masked_pos, ctcf_pos)
+
+
+        output_masked, _, target = model(peak_seq, sample_track, bool_mask_pos, chunk_size, n_peaks, max_n_peaks)
 
         # target generation
         with torch.no_grad():
-            unnorm_regions = regions
-            labels_atac = unnorm_regions[:,:,-1]
+            unnorm_targets = target
             if normlize_target:
-                regions_squeeze = unnorm_regions
+                regions_squeeze = unnorm_targets
                 regions_norm = (
                     regions_squeeze - regions_squeeze.mean(dim=-2, keepdim=True)
                 ) / (
@@ -83,12 +84,15 @@ def pretrain_one_epoch(
                 # we find that the mean is about 0.48 and standard deviation is about 0.08.
                 regions_embed = regions_norm
             else:
-                regions_embed = unnorm_regions
+                regions_embed = unnorm_targets
 
             B, _, C = regions_embed.shape
-            labels_masked = regions_embed[bool_masked_pos].reshape(B, -1, C)
 
-        loss_masked_value = loss_masked(input=output_masked, target=labels_masked)
+        mask_for_loss = mask.clone()
+        # mask_for_loss[mask_for_loss!=-10000]=1
+        mask_for_loss[mask_for_loss!=1]=0
+        mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
+        loss_masked_value = loss_masked(input=output_masked*mask_for_loss, target=regions_embed*mask_for_loss)
         #loss_atac_value = loss_atac(atac, labels_atac)
         # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss
         loss = loss_masked_value #+ loss_atac_value * 5

@@ -40,6 +40,7 @@ def get_rev_collate_fn(batch):
     sample_peak_sequence = list(sample_peak_sequence)
     sample_metadata = list(sample_metadata)
     batch_size = len(celltype_peaks)
+    mask_ratio = sample_metadata[0]['mask_ratio']
 
     n_peak_max = max([len(x) for x in celltype_peaks])
     sample_len_max = max([len(x.getnnz(1)) for x in sample_peak_sequence])
@@ -53,14 +54,18 @@ def get_rev_collate_fn(batch):
         sample_peak_sequence[i].resize((sample_len_max, sample_peak_sequence[i].shape[1]))
         sample_track[i] = sample_track[i].todense()
         sample_peak_sequence[i] = sample_peak_sequence[i].todense()
+        cov = (celltype_peaks[i][:,1]-celltype_peaks[i][:,0]).sum()
+        real_cov = sample_track[i].sum()
+        conv = int(min(500, max(50, int(cov/(real_cov+20)))))
+        sample_track[i] = np.convolve(np.array(sample_track[i]).reshape(-1), np.ones(conv), mode='same')
 
     celltype_peaks = np.stack(celltype_peaks, axis=0)
     celltype_peaks = torch.from_numpy(celltype_peaks)
-    sample_track = np.hstack(sample_track).T
+    sample_track = np.stack(sample_track, axis=0)
     sample_track = torch.from_numpy(sample_track)
     sample_peak_sequence = np.hstack(sample_peak_sequence)
     sample_peak_sequence = torch.from_numpy(sample_peak_sequence).view(-1, batch_size, 4)
-
+    sample_peak_sequence = sample_peak_sequence.transpose(0,1)
     peak_len = celltype_peaks[:,:,1]-celltype_peaks[:,:,0]
     padded_peak_len = peak_len + 100
     total_peak_len = peak_len.sum(1)
@@ -76,7 +81,9 @@ def get_rev_collate_fn(batch):
 
     for i in range(batch_size):
         maskable_pos_i = maskable_pos[maskable_pos[:,0]==i,1]
-        idx = np.random.choice(maskable_pos_i, size=np.ceil(0.5*len(maskable_pos_i)).astype(int), replace=False)
+        idx = np.random.choice(maskable_pos_i, size=np.ceil(mask_ratio*len(maskable_pos_i)).astype(int), replace=False)
         mask[i,idx] = 1
+
+    
 
     return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len

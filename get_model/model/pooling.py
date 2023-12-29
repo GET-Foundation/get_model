@@ -44,11 +44,12 @@ class SplitPool(nn.Module):
         chunk_list = torch.vstack([pool(chunk, self.pool_method) for chunk in chunk_list])
         # remove the padded part
         pool_idx = torch.cumsum(n_peaks+1,0)
-        pool_start = torch.cat([torch.tensor(0).unsqueeze(0), pool_idx[:-1]])
+        pool_left_pad = torch.tensor(0).unsqueeze(0).to(pool_idx.device)
+        pool_start = torch.cat([pool_left_pad, pool_idx[:-1]])
         pool_end = pool_idx-1
         pool_list = [chunk_list[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
         # pad the element in pool_list if the number of peaks is not the same
-        x = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks-n_peaks[i], embed_dim)]) for i in range(len(pool_list))])
+        x = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks-n_peaks[i], embed_dim).to(pool_list[i].device)]) for i in range(len(pool_list))])
 
         return x
 

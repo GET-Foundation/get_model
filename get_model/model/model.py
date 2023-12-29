@@ -174,11 +174,10 @@ class MotifScanner(nn.Module):
 
     def forward(self, x):
         # [B, 200, 1000, 4] --> [B, 200, 1000, 1274]
-        B, N, L, _ = x.shape
-        x = x.reshape(B * N, L, 4)
+        B, L, _ = x.shape
         x = x.permute(0, 2, 1)                # (B * N, 4, L)
         x = self.motif(x)
-        x = x.permute(0, 2, 1).reshape(B, N, L, self.num_motif)     # (B, N, L, 1274)
+        x = x.permute(0, 2, 1)#.reshape(B, L, self.num_motif)     # (B, N, L, 1274)
 
         return x
 
@@ -195,7 +194,7 @@ class ATACAttention(nn.Module):
         return torch.einsum("bld,blc->blcd", peak_seq, atac).sum(dim=2)
     
 
-class GETRevPretrain(nn.Module):
+class GETPretrain(nn.Module):
     """A GET model for pretraining using mask and prediction."""
 
     def __init__(
@@ -212,7 +211,7 @@ class GETRevPretrain(nn.Module):
         dropout=0.1,
         output_dim=1,
         pos_emb_components=["CTCF", "Rotary", "Absolute"],
-        atac_attention=False,
+        atac_attention=True,
     ):
         super().__init__()
         self.num_regions = num_regions
@@ -272,7 +271,7 @@ class GETRevPretrain(nn.Module):
         x = self.motif_scanner(peak_seq)
         # [B, L, 1274] --> [B, R, 1274]
         # gloabl pooling inner product with peak
-        x = self.atac_attention(x, atac)
+        x = self.atac_attention(x, atac.unsqueeze(-1))
         x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
 
         x = self.region_embed(x_original)
@@ -289,7 +288,7 @@ class GETRevPretrain(nn.Module):
 
         x, _ = self.encoder(x, mask=mask) # (N, D)
         x_masked = self.head_mask(x) # (N, Motif)
-        x_masked = x_masked[mask].reshape(B, -1, C)
+        # x_masked = x_masked[mask].reshape(B, -1, C)
         # atac = F.softplus(self.head_atac(x.permute(0, 2, 1)).permute(0, 2, 1).squeeze(-1))
         atac = None
         

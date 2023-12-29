@@ -1,20 +1,25 @@
+import logging
 import os
 import os.path
-from typing import Any, Callable, Optional, Tuple, List, Dict
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from get_model.dataset.augmentation import (
-    DataAugmentationForGETPeak,
-    DataAugmentationForGETPeakFinetune,
-)
-from get_model.dataset.io import generate_paths, get_hierachical_ctcf_pos, prepare_sequence_idx
-from get_model.dataset.splitter import cell_splitter, chromosome_splitter
-from scipy.sparse import coo_matrix, load_npz, vstack
-import zarr
+import seaborn as sns
 import torch
+import zarr
+from scipy.sparse import coo_matrix, load_npz, vstack
 from torch.utils.data import Dataset
 from tqdm import tqdm
+
+from get_model.dataset.augmentation import (DataAugmentationForGETPeak,
+                                            DataAugmentationForGETPeakFinetune)
+from get_model.dataset.collate import get_rev_collate_fn
+from get_model.dataset.io import (generate_paths, get_hierachical_ctcf_pos,
+                                  prepare_sequence_idx)
+from get_model.dataset.splitter import cell_splitter, chromosome_splitter
+from get_model.dataset.zarr_dataset import \
+    PretrainDataset as ZarrPretrainDataset
 
 
 class PretrainDataset(Dataset):
@@ -220,7 +225,6 @@ class ExpressionDataset(Dataset):
         self.ctcf_pos = ctcf_pos
         self.tssidxs = np.array(tssidx)
 
-
     def __getitem__(self, index: int) -> Tuple[Any, Any, Any, Any]:
         """
         Args:
@@ -229,13 +233,13 @@ class ExpressionDataset(Dataset):
         Returns:
             tuple: (sample, target) where target is cell_index of the target cell.
         """
-        peak = self.peaks[index] 
+        peak = self.peaks[index]
         if self.use_seq:
             seq = self.seqs[index]
         else:
             seq = None
-        target = self.targets[index] 
-        tssidx = self.tssidxs[index] 
+        target = self.targets[index]
+        tssidx = self.tssidxs[index]
 
         # cell = self.cells[index]
         ctcf_pos = self.ctcf_pos[index]
@@ -271,6 +275,29 @@ def build_dataset(is_train, args):
             transform=transform,
             args=args,
         )
+
+    else:
+        raise NotImplementedError()
+
+    return dataset
+
+
+def build_dataset_zarr(is_train, args):
+    if args.data_set == "Pretrain":
+        transform = DataAugmentationForGETPeak(args)
+        print("Data Aug = %s" % str(transform))
+        root = args.data_path
+        # get FILEPATH
+        codebase = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
+        dataset = ZarrPretrainDataset(
+            [f'/pmglocal/xf2217/shendure_fetal/shendure_fetal_dense.zarr',
+             f'/pmglocal/xf2217/bingren_adult/bingren_adult_dense.zarr'],
+            f'/pmglocal/xf2217/get_data/hg38.zarr', [
+                f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather',
+                f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'],
+            preload_count=args.preload_count, samples_per_window=args.samples_per_window,
+            mask_ratio=args.mask_ratio)
 
     else:
         raise NotImplementedError()
@@ -347,7 +374,8 @@ def make_dataset(
         data_type = datatype_dict[file_id]
 
         # generate file paths
-        paths_dict = generate_paths(file_id, data_path, data_type, use_natac=use_natac)
+        paths_dict = generate_paths(
+            file_id, data_path, data_type, use_natac=use_natac)
 
         # read celltype peak annotation files
         celltype_annot = pd.read_csv(paths_dict["celltype_annot_csv"], sep=",")
@@ -357,7 +385,8 @@ def make_dataset(
             if not os.path.exists(paths_dict["seq_npz"]):
                 continue
             seq_data = zarr.load(paths_dict["seq_npz"])['arr_0']
-            celltype_annot = prepare_sequence_idx(celltype_annot, num_region_per_sample)
+            celltype_annot = prepare_sequence_idx(
+                celltype_annot, num_region_per_sample)
 
         # Compute sample specific CTCF position segmentation
         # ctcf_pos = get_hierachical_ctcf_pos(
@@ -385,7 +414,6 @@ def make_dataset(
         )
         print('input_chromosomes:', input_chromosomes)
 
-
         # Generate sample list
         for chromosome in input_chromosomes:
             idx_peak_list = celltype_annot.index[
@@ -408,7 +436,8 @@ def make_dataset(
                 if celltype_annot_i.iloc[-1].End - celltype_annot_i.iloc[0].Start > 5000000:
                     # change end_index to avoid too large region
                     # find the region that is < 5000000 apart from the start
-                    end_index = celltype_annot_i[celltype_annot_i.End - celltype_annot_i.Start < 5000000].index[-1]
+                    end_index = celltype_annot_i[celltype_annot_i.End -
+                                                 celltype_annot_i.Start < 5000000].index[-1]
                 if celltype_annot_i["Start"].min() < 0:
                     continue
 
