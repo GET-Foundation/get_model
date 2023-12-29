@@ -48,6 +48,9 @@ def pretrain_one_epoch(
     for step, (batch) in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
     ):
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len = batch
+        if min(chunk_size)<0:
+            continue
         # assign learning rate & weight decay for each step
         it = start_steps + step  # global training iteration
         if lr_schedule_values is not None or wd_schedule_values is not None:
@@ -57,7 +60,7 @@ def pretrain_one_epoch(
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
 
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len = batch
+
         sample_track = sample_track.to(device, non_blocking=True).float()
         peak_seq = peak_seq.to(device, non_blocking=True).float()
         bool_mask_pos = mask.clone()
