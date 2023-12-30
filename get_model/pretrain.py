@@ -24,7 +24,7 @@ def get_args_parser():
     parser = argparse.ArgumentParser("GeneFormer pre-training script", add_help=False)
     parser.add_argument("--batch_size", default=64, type=int)
     parser.add_argument("--epochs", default=300, type=int)
-    parser.add_argument("--save_ckpt_freq", default=20, type=int)
+    parser.add_argument("--save_ckpt_freq", default=1, type=int)
     # wandb params
     parser.add_argument("--wandb_project_name", type=str, default="get-pretrain", help="wandb project name")
     parser.add_argument("--wandb_run_name", type=str, default=None, help="wandb run name")

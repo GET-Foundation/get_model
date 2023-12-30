@@ -191,7 +191,8 @@ class ATACAttention(nn.Module):
         super().__init__()
 
     def forward(self, peak_seq, atac):
-        return torch.einsum("bld,blc->blcd", peak_seq, atac).sum(dim=2)
+        return peak_seq * atac.unsqueeze(-1).sum(dim=2)
+        # return torch.einsum("bld,blc->blcd", peak_seq, atac).sum(dim=2)
     
 
 class GETPretrain(nn.Module):
@@ -271,7 +272,7 @@ class GETPretrain(nn.Module):
         x = self.motif_scanner(peak_seq)
         # [B, L, 1274] --> [B, R, 1274]
         # gloabl pooling inner product with peak
-        x = self.atac_attention(x, atac.unsqueeze(-1))
+        x = self.atac_attention(x, atac)
         x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
 
         x = self.region_embed(x_original)

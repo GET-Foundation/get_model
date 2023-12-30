@@ -21,12 +21,17 @@ pretrain.__len__()
 # %%
 # for i in tqdm(range(100)):
 pretrain.__getitem__(0)
+#%%
+#check maximum peak length
+for i, df in pretrain.peaks_dict.items():
+    print(i, (df['End']-df['Start']).quantile(0.99))
 
-
+#%%
+pretrain.peaks_dict['Fetal Astrocyte 2_500'].query('End-Start>50000')
 # %%
 data_loader_train = torch.utils.data.DataLoader(
     pretrain,
-    batch_size=64,
+    batch_size=16,
     num_workers=96,
     pin_memory=False,
     drop_last=True,
@@ -36,7 +41,8 @@ data_loader_train = torch.utils.data.DataLoader(
 # %%
 for batch in tqdm(data_loader_train):
     sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len = batch
-    break
+    if min(chunk_size)<0:
+        break
 # %%
 celltype_peaks.shape
 # %%
