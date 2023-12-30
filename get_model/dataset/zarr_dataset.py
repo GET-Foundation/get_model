@@ -376,7 +376,7 @@ class PretrainDataset(Dataset):
         for data_key, cdz in self.zarr_dict.items():
             for celltype_id in cdz.ids:
                 peaks_dict[celltype_id] = cdz.get_peaks(
-                    celltype_id, 'peaks_p0.01')
+                    celltype_id, 'peaks_p0.01').query('End-Start<10000')
 
         return peaks_dict
 
