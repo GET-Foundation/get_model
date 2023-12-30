@@ -296,7 +296,7 @@ def build_dataset_zarr(is_train, args):
             f'/pmglocal/xf2217/get_data/hg38.zarr', [
                 f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather',
                 f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'],
-            preload_count=args.preload_count, samples_per_window=args.samples_per_window,
+            preload_count=args.preload_count, n_packs=args.n_packs,
             mask_ratio=args.mask_ratio)
 
     else:
