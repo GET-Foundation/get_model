@@ -191,7 +191,7 @@ class ATACAttention(nn.Module):
         super().__init__()
 
     def forward(self, peak_seq, atac):
-        return peak_seq * atac.unsqueeze(-1).sum(dim=2)
+        return peak_seq * atac.unsqueeze(-1)
         # return torch.einsum("bld,blc->blcd", peak_seq, atac).sum(dim=2)
     
 

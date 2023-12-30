@@ -33,8 +33,261 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 sys.path.append('/manitou/pmg/users/xf2217/get_model')
 
+           
+class ZarrDataPool(object):
+    """A class to handle data loading for a slot."""
+    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, insulation_subsample_ratio=0.1):
+        logging.info('Initializing ZarrDataPool')
+        self.sequence = DenseZarrIO(genome_seq_zarr)
+        self.zarr_dirs = zarr_dirs
+        self.insulation_paths = insulation_paths
+        self.insulation_subsample_ratio = insulation_subsample_ratio
+        self.initialize_datasets()
+        self.calculate_metadata()
+        logging.info('ZarrDataPool initialized')
+    
+    def initialize_datasets(self):
+        self.zarr_dict = {cdz.data_key: cdz for zarr_dir in self.zarr_dirs for cdz in [
+            CelltypeDenseZarrIO(zarr_dir)]}
+        self.data_keys = list(self.zarr_dict.keys())
+        self.peaks_dict = self._load_peaks()
+        self.insulation = self._load_insulation(
+            self.insulation_paths).sample(frac=self.insulation_subsample_ratio).reset_index(drop=True)
+        
+    def calculate_metadata(self):
+        first_zarr = next(iter(self.zarr_dict.values()))
+        self.n_celltypes = sum(
+            zarr.n_celltypes for zarr in self.zarr_dict.values())
+        self.chunk_size = first_zarr.chunk_size
+        self.chrom_n_chunks = first_zarr.chrom_n_chunks
+        self.genome_chunk_length = sum(
+            n_chunks - 1 for n_chunks in self.chrom_n_chunks.values())
+        self.total_chunk_length = self.genome_chunk_length * self.n_celltypes
+    
+    def load_window_data(self, window_index):
+        data_key, celltype_id = self._get_celltype_info(window_index)
+        chr_name, chunk_idx, start, end = self._get_chromosome_info(
+            window_index)
+
+        celltype_peaks = self._query_peaks(celltype_id, chr_name, start, end)
+        item_insulation = self._query_insulation(chr_name, start, end)
+
+        track = self.zarr_dict[data_key].get_track(
+            celltype_id, chr_name, start, end, sparse=True).T
+        sequence = self.sequence.get_track(chr_name, start, end, sparse=False)
+
+        peak_sequence = self._generate_peak_sequence(
+            celltype_peaks, sequence, start, end)
+        item_insulation = item_insulation.reset_index(drop=True).reset_index()
+        item_insulation['key'] = str(
+            window_index) + '_' + item_insulation['index'].astype(str)
+        celltype_peaks = celltype_peaks.reset_index(drop=True).reset_index()
+        return window_index, chr_name, start, end, celltype_id, track, peak_sequence, item_insulation, celltype_peaks
+    
+    def _load_peaks(self):
+        """
+        Load peaks data which is a dictionary of pandas dataframe feather
+        """
+        logging.info('Loading peaks data')
+        peaks_dict = {}
+        for data_key, cdz in self.zarr_dict.items():
+            for celltype_id in cdz.ids:
+                peaks_dict[celltype_id] = cdz.get_peaks(
+                    celltype_id, 'peaks_p0.01').query('End-Start<10000')
+
+        return peaks_dict
+
+    def _load_insulation(self, insulation_paths: list):
+        """
+        Load insulation data which is a list of pandas dataframe feather
+        """
+        logging.info('Loading insulation data')
+        insulation_list = []
+        for path in insulation_paths:
+            insulation_list.append(pd.read_feather(path))
+
+        return pd.concat(insulation_list).drop_duplicates(subset=['Chromosome', 'Start', 'End'])
+
+
+    def _get_celltype_info(self, window_index):
+        celltype_idx = window_index // self.genome_chunk_length
+        data_key, celltype_id = self._get_celltype(celltype_idx)
+        return data_key, celltype_id
+
+    def _get_chromosome_info(self, window_index):
+        chunk_idx = window_index % self.genome_chunk_length
+        chr_name, chunk_idx = self._get_chr_chunk_idx(chunk_idx)
+        start, end = self._get_start_end(chr_name, chunk_idx)
+        return chr_name, chunk_idx, start, end
+
+    def _generate_peak_sequence(self, celltype_peaks, sequence, window_start, window_end):
+        peak_sequence = np.zeros_like(sequence, dtype=np.int32)
+        for start, end in celltype_peaks[['Start', 'End']].to_numpy():
+            peak_sequence[start-window_start:end-window_start] = 1
+        return csr_matrix(peak_sequence*sequence)
+
+    def _query_peaks(self, celltype_id, chr_name, start, end):
+        return self.peaks_dict[celltype_id].query(
+            'Chromosome == @chr_name and Start >= @start and End <= @end')
+
+    def _query_insulation(self, chr_name, start, end):
+        return self.insulation.query(
+            'Chromosome == @chr_name and Start >= @start and End <= @end')
+    
+    def _get_celltype(self, celltype_idx):
+        """
+        Get the data_key and celltype from the celltype index
+        """
+        for data_key, cdz in self.zarr_dict.items():
+            if celltype_idx < cdz.n_celltypes:
+                return data_key, cdz.ids[celltype_idx]
+            else:
+                celltype_idx -= cdz.n_celltypes
+        raise ValueError(f'Celltype index {celltype_idx} is out of range')
+
+    def _get_chr_chunk_idx(self, chunk_idx):
+        """
+        Get the chromosome name and chunk index from the chunk index
+        """
+        for chr_name, n_chunks in self.chrom_n_chunks.items():
+            if chunk_idx < n_chunks-1:
+                return chr_name, chunk_idx
+            else:
+                chunk_idx -= n_chunks-1
+        raise ValueError(f'Chunk index {chunk_idx} is out of range')
+
+    def _get_start_end(self, chr_name, chunk_idx):
+        """
+        Get the start and end position from the chunk index
+        """
+        start = chunk_idx * self.chunk_size
+        end = start + 2 * self.chunk_size
+        return start, end
+
+class PreloadDataPack(object):
+    """A class to store preloaded data for a slot."""
+    def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, padding=50, mask_ratio=0.5):
+        logging.info('Initializing PreloadDataPack')
+        self.preload_count = preload_count
+        self.zarr_data_pool = zarr_data_pool
+        self.preloaded_data = []
+        self.insulation_peak_counts = pd.DataFrame()
+        self.preloaded_data_window_indices_mapping = {}
+        self.next_sample = 0
+        self.padding = padding
+        self.mask_ratio = mask_ratio
+        self.preload_data()
+        logging.info('PreloadDataPack initialized')
+
+    def __len__(self):
+        return self.insulation_peak_counts.shape[0]
+    
+    def __iter__(self):
+        return self
+    
+    def __next__(self):
+        if self.next_sample >= self.insulation_peak_counts.shape[0]:
+            raise StopIteration
+        else:
+            sample = self.get_sample_with_idx(self.next_sample)
+            self.next_sample += 1
+            return sample
+    
+    def preload_data(self, window_index=None):
+        # Preload data
+        # Load data for a fixed number of windows
+        self.preloaded_data_window_indices_mapping = {}
+        if window_index is None:
+            window_index = np.random.randint(0, self.zarr_data_pool.total_chunk_length, size=self.preload_count)
+        for i, window_index in enumerate(window_index):
+            self.preloaded_data.append(self.zarr_data_pool.load_window_data(window_index))
+            self.preloaded_data_window_indices_mapping[window_index] = i
+        # trigger the computation of peak_num_per_sample
+        self.insulation_peak_counts = self._calculate_peak_num_per_sample()
+
+    def get_sample_with_idx(self, idx):
+        return self._get_sample_with_key(self.insulation_peak_counts.iloc[idx]['key'])
+
+    def _get_sample_with_key(self, key):
+        window_index = int(key.split('_')[0])
+        insulation_index = int(key.split('_')[1])
+        window_slot = self.preloaded_data_window_indices_mapping[window_index]
+        return self._extract_sample_from_window(self.preloaded_data[window_slot], insulation_index)
+
+    def _extract_sample_from_window(self, window, insulation_index):
+        """
+        Extract a single sample from a preloaded window.
+
+        This method selects a portion of the data within a preloaded 4Mbp window based on insulation data.
+        It extracts a sample track and peak sequence from the window for further processing.
+
+        Parameters:
+        window (tuple): Contains preloaded data for a window, including window index, chromosome name,
+                        start and end positions, cell type ID, track data, peak sequence, and insulation data.
+
+        Returns:
+        tuple: A tuple containing the extracted sample track, peak sequence, and a dictionary with metadata
+            about the extracted sample, including cell type ID, chromosome name, and positions.
+
+        Note:
+        This implementation relies on the availability of insulation data. If insulation data is empty,
+        it attempts to load data from another randomly selected window.
+        """
+        window_index, chr_name, start, end, celltype_id, track, peak_sequence, insulations, celltype_peaks = window
+        if len(insulations) == 0:
+            raise ValueError('Empty insulation')
+        i_start, i_end = self._insulation_sampler(insulations, insulation_index)
+        celltype_peaks = celltype_peaks.query(
+            'Start>@i_start and End<@i_end')[['Start', 'End']].to_numpy()
+        if len(celltype_peaks) == 0:
+            raise ValueError('No peaks in insulation region')
+        wi_start, wi_end = i_start - start, i_end - start
+        celltype_peaks = celltype_peaks - i_start
+        sample_track = track[wi_start:wi_end]
+        sample_peak_sequence = peak_sequence[wi_start:wi_end]
+        sample_peak_sequence = vstack(
+            [sample_peak_sequence[start-self.padding:end+self.padding] for start, end in celltype_peaks])
+        sample_track = vstack(
+            [sample_track[start-self.padding:end+self.padding] for start, end in celltype_peaks])
+        sample_metadata = {
+            'celltype_id': celltype_id, 'chr_name': chr_name,
+            'start': start, 'end': end, 'i_start': wi_start, 'i_end': wi_end, 'mask_ratio': self.mask_ratio
+        }
+
+        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks
+    
+    def _insulation_sampler(self, insulation_df, insulation_index=None):
+        """
+        Sample insulation from the insulation dataframe
+        """
+        if insulation_index is None:
+            insulation_index = np.random.randint(0, len(insulation_df))
+        i_start, i_end = insulation_df.iloc[insulation_index][['Start', 'End']]
+        return i_start, i_end
+
+
+    def _calculate_peak_num_per_sample(self, lower_bound=5, upper_bound=900):
+        insulation_pool_peak_num = {}
+        for _, _, _, _, _, _, _, item_insulation, celltype_peaks in self.preloaded_data:
+            try:
+                insulation_pool_peak_num.update(
+                    self._get_peak_count(item_insulation, celltype_peaks))
+            except:
+                continue
+        # Convert to DataFrame and sort
+        insulation_pool_peak_num_df = pd.DataFrame.from_dict(
+            insulation_pool_peak_num, orient='index').reset_index()
+        insulation_pool_peak_num_df.columns = ['key', 'peak_num']
+        insulation_pool_peak_num_df.sort_values('peak_num', inplace=True)
+        return insulation_pool_peak_num_df.query('peak_num>=@lower_bound and peak_num<=@upper_bound')
+
+    def _get_peak_count(self, item_insulation, celltype_peaks):
+        df = pr(item_insulation).join(pr(celltype_peaks), suffix="_peak").df.groupby(
+            'key').index_peak.count().reset_index()
+        return df.set_index('key').to_dict()['index_peak']
+
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, preload_count=50, samples_per_window=50, padding=50, mask_ratio=0.5):
+    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -83,15 +336,21 @@ class PretrainDataset(Dataset):
         tuple: A tuple containing the extracted sample track, peak sequence, and a dictionary with metadata
             about the extracted sample, including cell type ID, chromosome name, and positions.
         """
-        self.sequence = DenseZarrIO(genome_seq_zarr)
-        # self.sequence.load_to_memory_dense()
-        self.zarr_dirs = zarr_dirs
-        self.insulation_paths = insulation_paths
         self.preload_count = preload_count
-        self.samples_per_window = samples_per_window
         self.padding = padding
         self.mask_ratio = mask_ratio
-        self._initialize_datasets()
+
+        self.n_packs = n_packs
+        
+        self.datapool = ZarrDataPool(zarr_dirs, genome_seq_zarr, insulation_paths)
+
+        # initialize n_packs preload data packs
+        self.preload_data_packs = [PreloadDataPack(
+            preload_count, self.datapool, self.padding, self.mask_ratio) for _ in range(n_packs)]
+        # self.locks = [threading.Lock() for _ in range(n_packs)]
+        self.current_pack = 0
+        self.avaliable_packs = list(range(n_packs))
+        self._start_reload_thread()
 
     def __getitem__(self, index: int):
         try:
@@ -100,125 +359,31 @@ class PretrainDataset(Dataset):
             logging.info(f'Error: {e}')
 
     def _getitem(self, index: int):
-
-        while self.insulation_peak_counts.shape[0] == 0:
-            if self.reload_queue.qsize() > 0:
-                logging.info(
-                    'Waiting for insulation_peak_counts to be available')
-                # Wait for 0.5 seconds for a slot to be available
-                time.sleep(0.5)
-                continue
-            else:
-                self._preload_data()
-                continue
-
-        with self.insulation_lock:
-            sample_key = self.insulation_peak_counts.iloc[0]['key']
-            window_index, insulation_index = map(int, sample_key.split('_'))
-
-        window_slot = self.preloaded_data_window_indices_mapping[window_index]
-        usable_slot = np.where(np.array(self.usage_counters)
-                               < self.samples_per_window)[0]
-        while window_slot not in usable_slot:
-            # logging.info('Waiting for a slot to be available')
-            # Wait for 0.5 seconds for a slot to be available
+        """
+        Load item from current preload data pack, after
+        the current pack is used up, switch to the next avaliable pack and reload the current pack
+        """
+        while self.current_pack not in self.avaliable_packs:
             time.sleep(0.5)
-            usable_slot = np.where(
-                np.array(self.usage_counters) < self.samples_per_window)[0]
+            continue
 
-        # Retrieve preloaded data using window index
+        try:
+            return self.preload_data_packs[self.current_pack].__next__()
+        except StopIteration:
+            self.avaliable_packs.remove(self.current_pack)
+            # reload the current pack
+            self._reload_data(self.current_pack)
 
-        with self.locks[window_slot]:
-            window = self.preloaded_data[window_slot]
+            # switch to the next avaliable pack
+            self.current_pack = (self.current_pack+1) % self.n_packs
 
-        # Extract the sample
-        sample = self._extract_sample_from_window(window, insulation_index)
-
-        # Update insulation_peak_counts to remove the current sample
-        with self.insulation_lock:
-            self.insulation_peak_counts = self.insulation_peak_counts.iloc[1:]
-
-        # Update usage counter and possibly reload data
-        with self.locks[window_slot]:
-            self.usage_counters[window_slot] += 1
-            if self.usage_counters[window_slot] >= self.samples_per_window:
-                self._reload_data(window_slot)
-
-        return sample
-
+            return self.preload_data_packs[self.current_pack].__next__()
+        
     def __len__(self):
         # Return the length of the dataset
         # Implement based on how you define the length of your dataset
         # Could be based on total windows, number of samples per window, etc.
-        return self.total_chunk_length * self.samples_per_window
-
-    def _initialize_datasets(self):
-        self.zarr_dict = {cdz.data_key: cdz for zarr_dir in self.zarr_dirs for cdz in [
-            CelltypeDenseZarrIO(zarr_dir)]}
-        self.data_keys = list(self.zarr_dict.keys())
-        self.peaks_dict = self._load_peaks()
-        self.insulation = self._load_insulation(
-            self.insulation_paths).sample(frac=0.1).reset_index(drop=True)
-
-        self._calculate_metadata()
-        self._preload_data()
-        self._setup_locks()
-        self._start_reload_thread()
-
-    def _setup_locks(self):
-        self.usage_counters = np.zeros(self.preload_count, dtype=np.int32)
-        self.locks = [threading.Lock() for _ in range(self.preload_count)]
-        self.insulation_lock = threading.Lock()
-
-    def _load_window_data(self, window_index):
-        data_key, celltype_id = self._get_celltype_info(window_index)
-        chr_name, chunk_idx, start, end = self._get_chromosome_info(
-            window_index)
-
-        celltype_peaks = self._query_peaks(celltype_id, chr_name, start, end)
-        item_insulation = self._query_insulation(chr_name, start, end)
-
-        track = self.zarr_dict[data_key].get_track(
-            celltype_id, chr_name, start, end, sparse=True).T
-        sequence = self.sequence.get_track(chr_name, start, end, sparse=False)
-
-        peak_sequence = self._generate_peak_sequence(
-            celltype_peaks, sequence, start, end)
-        item_insulation = item_insulation.reset_index(drop=True).reset_index()
-        item_insulation['key'] = str(
-            window_index) + '_' + item_insulation['index'].astype(str)
-        celltype_peaks = celltype_peaks.reset_index(drop=True).reset_index()
-        return window_index, chr_name, start, end, celltype_id, track, peak_sequence, item_insulation, celltype_peaks
-
-    def _get_peak_count(self, item_insulation, celltype_peaks):
-        df = pr(item_insulation).join(pr(celltype_peaks), suffix="_peak").df.groupby(
-            'key').index_peak.count().reset_index()
-        return df.set_index('key').to_dict()['index_peak']
-
-    def _calculate_peak_num_per_sample(self):
-        insulation_pool_peak_num = {}
-        for _, _, _, _, _, _, _, item_insulation, celltype_peaks in self.preloaded_data:
-            try:
-                insulation_pool_peak_num.update(
-                    self._get_peak_count(item_insulation, celltype_peaks))
-            except:
-                continue
-        # Convert to DataFrame and sort
-        insulation_pool_peak_num_df = pd.DataFrame.from_dict(
-            insulation_pool_peak_num, orient='index').reset_index()
-        insulation_pool_peak_num_df.columns = ['key', 'peak_num']
-        insulation_pool_peak_num_df.sort_values('peak_num', inplace=True)
-        return insulation_pool_peak_num_df.query('peak_num>3')
-
-    def _calculate_metadata(self):
-        first_zarr = next(iter(self.zarr_dict.values()))
-        self.n_celltypes = sum(
-            zarr.n_celltypes for zarr in self.zarr_dict.values())
-        self.chunk_size = first_zarr.chunk_size
-        self.chrom_n_chunks = first_zarr.chrom_n_chunks
-        self.genome_chunk_length = sum(
-            n_chunks - 1 for n_chunks in self.chrom_n_chunks.values())
-        self.total_chunk_length = self.genome_chunk_length * self.n_celltypes
+        return 10_000_000
 
     def _start_reload_thread(self):
         self.reload_queue = Queue()
@@ -239,196 +404,21 @@ class PretrainDataset(Dataset):
         # Modify the usage counter and initiate reloading for the specific index
         self.reload_queue.put(index)
 
-    def _preload_data(self):
-        # Preload data
-        # Load data for a fixed number of windows
-        self.preloaded_data = []
-        self.preloaded_data_window_indices_mapping = {}
-        for i in range(self.preload_count):
-            window_index, chr_name, start, end, celltype_id, track, peak_sequence, item_insulation, celltype_peaks = self._load_window_data(
-                random.randint(0, self.total_chunk_length))
-            self.preloaded_data.append((window_index, chr_name, start, end,
-                                       celltype_id, track, peak_sequence, item_insulation, celltype_peaks))
-            self.preloaded_data_window_indices_mapping[window_index] = i
-        # trigger the computation of peak_num_per_sample
-        self.insulation_peak_counts = self._calculate_peak_num_per_sample()
-
-    def _get_celltype_info(self, window_index):
-        celltype_idx = window_index // self.genome_chunk_length
-        data_key, celltype_id = self._get_celltype(celltype_idx)
-        return data_key, celltype_id
-
-    def _get_chromosome_info(self, window_index):
-        chunk_idx = window_index % self.genome_chunk_length
-        chr_name, chunk_idx = self._get_chr_chunk_idx(chunk_idx)
-        start, end = self._get_start_end(chr_name, chunk_idx)
-        return chr_name, chunk_idx, start, end
-
-    def _query_peaks(self, celltype_id, chr_name, start, end):
-        return self.peaks_dict[celltype_id].query(
-            'Chromosome == @chr_name and Start >= @start and End <= @end')
-
-    def _query_insulation(self, chr_name, start, end):
-        return self.insulation.query(
-            'Chromosome == @chr_name and Start >= @start and End <= @end')
-
-    def _generate_peak_sequence(self, celltype_peaks, sequence, window_start, window_end):
-        peak_sequence = np.zeros_like(sequence, dtype=np.int32)
-        for start, end in celltype_peaks[['Start', 'End']].to_numpy():
-            peak_sequence[start-window_start:end-window_start] = 1
-        return csr_matrix(peak_sequence*sequence)
-
     def _async_reload_data(self, index):
         # This method runs in a separate thread
         logging.info(f'Async reloading data for slot {index}')
-        new_data = self._load_window_data(
-            random.randint(0, self.total_chunk_length))
+        # reload by reinitializing the preload data pack and put it back to the preload_data_packs
+        self.preload_data_packs[index] = PreloadDataPack(
+            self.preload_count, self.datapool, self.padding, self.mask_ratio)
+        # add the index back to avaliable packs
+        self.avaliable_packs.append(index)
 
-        # Update the mapping
-        new_window_index = new_data[0]
-
-        # First remove the old mapping
-        old_window_index = self.preloaded_data[index][0]
-        del self.preloaded_data_window_indices_mapping[old_window_index]
-        # Then add the new mapping
-        self.preloaded_data_window_indices_mapping[new_window_index] = index
-
-        # Update insulation_peak_counts to remove the current sample
-        self.insulation_peak_counts = self._calculate_peak_num_per_sample().query(
-            f'~(key.str.startswith("{str(old_window_index)}"))')
-        # Update the preloaded data for the specific index
-        self.preloaded_data[index] = new_data
-        # reset the usage counter
-        self.usage_counters = [0] * self.preload_count
-
-    def _extract_sample_from_window(self, window, insulation_index):
-        """
-        Extract a single sample from a preloaded window.
-
-        This method selects a portion of the data within a preloaded 4Mbp window based on insulation data.
-        It extracts a sample track and peak sequence from the window for further processing.
-
-        Parameters:
-        window (tuple): Contains preloaded data for a window, including window index, chromosome name,
-                        start and end positions, cell type ID, track data, peak sequence, and insulation data.
-
-        Returns:
-        tuple: A tuple containing the extracted sample track, peak sequence, and a dictionary with metadata
-            about the extracted sample, including cell type ID, chromosome name, and positions.
-
-        Note:
-        This implementation relies on the availability of insulation data. If insulation data is empty,
-        it attempts to load data from another randomly selected window.
-        """
-        window_index, chr_name, start, end, celltype_id, track, peak_sequence, insulation, celltype_peaks = window
-        if len(insulation) == 0:
-            raise ValueError('Empty insulation')
-        i_start, i_end = self._insulation_sampler(insulation, insulation_index)
-        celltype_peaks = celltype_peaks.query(
-            'Start>@i_start and End<@i_end')[['Start', 'End']].to_numpy()
-        if len(celltype_peaks) == 0:
-            raise ValueError('No peaks in insulation region')
-        wi_start, wi_end = self._adjust_indices_relative_to_window(
-            i_start, i_end, start)
-        celltype_peaks = celltype_peaks - i_start
-        sample_track = track[wi_start:wi_end]
-        sample_peak_sequence = peak_sequence[wi_start:wi_end]
-        sample_peak_sequence = vstack(
-            [sample_peak_sequence[start-self.padding:end+self.padding] for start, end in celltype_peaks])
-        sample_track = vstack(
-            [sample_track[start-self.padding:end+self.padding] for start, end in celltype_peaks])
-        sample_metadata = {
-            'celltype_id': celltype_id, 'chr_name': chr_name,
-            'start': start, 'end': end, 'i_start': wi_start, 'i_end': wi_end, 'mask_ratio': self.mask_ratio
-        }
-
-        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks
-
-    def _adjust_indices_relative_to_window(self, i_start, i_end, start):
-        """
-        Adjust insulation indices relative to the start of the window.
-
-        Parameters:
-        i_start (int): The start index of insulation.
-        i_end (int): The end index of insulation.
-        start (int): The start position of the window.
-
-        Returns:
-        tuple: Adjusted start and end indices.
-        """
-        return i_start - start, i_end - start
-
-    def _insulation_sampler(self, insulation, sample_index=None):
-        """
-        Sample insulation from the insulation dataframe
-        """
-        if sample_index is None:
-            sample_index = np.random.randint(0, len(insulation))
-        i_start, i_end = insulation.iloc[sample_index][['Start', 'End']]
-        return i_start, i_end
-
-    def _load_peaks(self):
-        """
-        Load peaks data which is a dictionary of pandas dataframe feather
-        """
-        logging.info('Loading peaks data')
-        peaks_dict = {}
-        for data_key, cdz in self.zarr_dict.items():
-            for celltype_id in cdz.ids:
-                peaks_dict[celltype_id] = cdz.get_peaks(
-                    celltype_id, 'peaks_p0.01').query('End-Start<10000')
-
-        return peaks_dict
-
-    def _load_insulation(self, insulation_paths: list):
-        """
-        Load insulation data which is a list of pandas dataframe feather
-        """
-        logging.info('Loading insulation data')
-        insulation_list = []
-        for path in insulation_paths:
-            insulation_list.append(pd.read_feather(path))
-
-        return pd.concat(insulation_list).drop_duplicates(subset=['Chromosome', 'Start', 'End'])
-
-    def _get_celltype(self, celltype_idx):
-        """
-        Get the data_key and celltype from the celltype index
-        """
-        for data_key, cdz in self.zarr_dict.items():
-            if celltype_idx < cdz.n_celltypes:
-                return data_key, cdz.ids[celltype_idx]
-            else:
-                celltype_idx -= cdz.n_celltypes
-        raise ValueError(f'Celltype index {celltype_idx} is out of range')
-
-    def _get_chr_chunk_idx(self, chunk_idx):
-        """
-        Get the chromosome name and chunk index from the chunk index
-        """
-        for chr_name, n_chunks in self.chrom_n_chunks.items():
-            if chunk_idx < n_chunks-1:
-                return chr_name, chunk_idx
-            else:
-                chunk_idx -= n_chunks-1
-        raise ValueError(f'Chunk index {chunk_idx} is out of range')
-
-    def _get_start_end(self, chr_name, chunk_idx):
-        """
-        Get the start and end position from the chunk index
-        """
-        start = chunk_idx * self.chunk_size
-        end = start + 2 * self.chunk_size
-        return start, end
 
     def close(self):
         # Call this method to cleanly shut down the thread
         self.reload_queue.put(None)
         self.reload_thread.join()
-        # clear all the locks
-        for lock in self.locks:
-            lock.acquire()
-            lock.release()
 
 
 # %%
+ 
