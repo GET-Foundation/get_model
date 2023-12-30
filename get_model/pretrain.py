@@ -419,7 +419,7 @@ def main(args):
         }
                 
         if utils.is_main_process():
-            wandb.log(log_stats)
+            run.log(log_stats)
 
         if args.output_dir and utils.is_main_process():
             if log_writer is not None:
