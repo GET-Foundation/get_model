@@ -46,14 +46,14 @@ def get_args_parser():
 
     parser.add_argument(
         "--preload_count",
-        default=100,
+        default=200,
         type=int,
         help="number of samples to preload",
     )
 
     parser.add_argument(
-        "--samples_per_window",
-        default=150,
+        "--n_packs",
+        default=5,
         type=int,
         help="number of samples per window",
     )

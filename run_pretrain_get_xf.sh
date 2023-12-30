@@ -14,12 +14,13 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=6 --rdzv-endpoint=localhost:$PORT ge
     --num_motif 637 \
     --mask_ratio 0.5 \
     --model get_pretrain_motif_base \
-    --batch_size 16 \
+    --batch_size 8 \
     --num_workers 16 \
+    --n_packs 5 \
     --lr 1e-3 \
     --opt adamw \
     --opt_betas 0.9 0.95 \
-    --warmup_steps 1000 \
+    --warmup_steps 2000 \
     --epochs 100 \
     --num_region_per_sample 200 \
     --output_dir ${OUTPUT_DIR} 
