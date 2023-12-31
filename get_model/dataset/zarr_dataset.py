@@ -2,6 +2,7 @@
 import logging
 import os.path
 import random
+import re
 import sys
 import threading
 import time
@@ -206,12 +207,12 @@ class PreloadDataPack(object):
     def __len__(self):
         return self.insulation_peak_counts.shape[0]
     
-    def __iter__(self):
-        return self
+    # def __iter__(self):
+    #     return self
     
-    def __next__(self):
+    def get_next_sample(self):
         if self.next_sample >= self.insulation_peak_counts.shape[0]:
-            raise StopIteration
+            raise ValueError('No more samples')
         else:
             sample = self.get_sample_with_idx(self.next_sample)
             self.next_sample += 1
@@ -378,7 +379,7 @@ class PretrainDataset(Dataset):
         # self.locks = [threading.Lock() for _ in range(n_packs)]
         self.current_pack = 0
         self.avaliable_packs = list(range(n_packs))
-        self._start_reload_thread()
+        # self._start_reload_thread()
 
     def __getitem__(self, index: int):
         try:
@@ -393,20 +394,19 @@ class PretrainDataset(Dataset):
         """
         while self.current_pack not in self.avaliable_packs:
             time.sleep(0.5)
-            continue
+            return self._getitem(index)
 
         try:
-            return self.preload_data_packs[self.current_pack].__next__()
-        except StopIteration:
+            return self.preload_data_packs[self.current_pack].get_next_sample()
+        except ValueError:
             self.avaliable_packs.remove(self.current_pack)
-            # reload the current pack
-            self._reload_data(self.current_pack)
-
+            #  reload the current pack
+            self._async_reload_data(self.current_pack)
             # switch to the next avaliable pack
             self.current_pack = (self.current_pack+1) % self.n_packs
+            return self._getitem(index)
+            
 
-            return self.preload_data_packs[self.current_pack].__next__()
-        
     def __len__(self):
         # Return the length of the dataset
         # Implement based on how you define the length of your dataset
@@ -434,7 +434,7 @@ class PretrainDataset(Dataset):
 
     def _async_reload_data(self, index):
         # This method runs in a separate thread
-        logging.info(f'Async reloading data for slot {index}')
+        # logging.info(f'Async reloading data for slot {index}')
         # reload by reinitializing the preload data pack and put it back to the preload_data_packs
         self.preload_data_packs[index] = PreloadDataPack(
             self.preload_count, self.datapool, self.padding, self.mask_ratio)

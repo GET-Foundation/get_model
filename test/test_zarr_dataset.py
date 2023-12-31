@@ -29,12 +29,19 @@ while pdp.next_sample < len(pdp):
     print(pdp.next_sample)
 
 #%%
-pretrain = PretrainDataset(['/pmglocal/xf2217/shendure_fetal/shendure_fetal_dense.zarr',
-                            '/pmglocal/xf2217/bingren_adult/bingren_adult_dense.zarr'],
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38.zarr', [
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_p0.01', preload_count=200, n_packs=2,
-                           max_peak_length=5000, center_expand_target=1000)
+pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr',
+                            '/pmglocal/xf2217/get_data/bingren_adult_dense.zarr'],
+                           '/pmglocal/xf2217/get_data/hg38.zarr', [
+                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_p0.01', preload_count=50, n_packs=2,
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=5, n_peaks_upper_bound=200)
 pretrain.__len__()
+#%%
+pretrain.__len__
+#%%
+for i in range(1000):
+    print(i)
+    print(pretrain.avaliable_packs)
+    a = pretrain.__getitem__(0)
 # %%
 #check maximum peak length
 peak_len = []
@@ -46,7 +53,7 @@ sns.distplot(np.concatenate(peak_len))
 data_loader_train = torch.utils.data.DataLoader(
     pretrain,
     batch_size=32,
-    num_workers=16,
+    num_workers=64,
     pin_memory=False,
     drop_last=True,
     collate_fn=get_rev_collate_fn
@@ -54,13 +61,11 @@ data_loader_train = torch.utils.data.DataLoader(
 
 # %%
 for i, batch in tqdm(enumerate(data_loader_train)):
-    if i < 100:
-        continue
     sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len = batch
     if min(chunk_size)<0:
         continue
-    if max_n_peaks>200:
-        break
+    # if max_n_peaks>200:
+    #     break
 # %%
 celltype_peaks.shape
 # %%
