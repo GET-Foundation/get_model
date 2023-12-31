@@ -70,7 +70,7 @@ def pretrain_one_epoch(
         n_peaks = n_peaks.to(device, non_blocking=True)
 
 
-        with torch.cuda.amp.autocast('cuda', dtype=torch.bfloat16):
+        with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
             output_masked, _, target = model(peak_seq, sample_track, bool_mask_pos, chunk_size, n_peaks, max_n_peaks)
 
         # target generation
