@@ -61,8 +61,8 @@ def pretrain_one_epoch(
                     param_group["weight_decay"] = wd_schedule_values[it]
 
 
-        sample_track = sample_track.to(device, non_blocking=True).float()
-        peak_seq = peak_seq.to(device, non_blocking=True).float()
+        sample_track = sample_track.to(device, non_blocking=True).bfloat16()
+        peak_seq = peak_seq.to(device, non_blocking=True).bfloat16()
         bool_mask_pos = mask.clone()
         bool_mask_pos[bool_mask_pos==-10000]=0
         bool_mask_pos = bool_mask_pos.to(device, non_blocking=True).bool()
@@ -70,8 +70,8 @@ def pretrain_one_epoch(
         n_peaks = n_peaks.to(device, non_blocking=True)
 
 
-
-        output_masked, _, target = model(peak_seq, sample_track, bool_mask_pos, chunk_size, n_peaks, max_n_peaks)
+        with torch.cuda.amp.autocast('cuda', dtype=torch.bfloat16):
+            output_masked, _, target = model(peak_seq, sample_track, bool_mask_pos, chunk_size, n_peaks, max_n_peaks)
 
         # target generation
         with torch.no_grad():

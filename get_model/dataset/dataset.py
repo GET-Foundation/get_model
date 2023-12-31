@@ -290,14 +290,13 @@ def build_dataset_zarr(is_train, args):
         # get FILEPATH
         codebase = os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__))))
-        dataset = ZarrPretrainDataset(
-            [f'/pmglocal/xf2217/shendure_fetal/shendure_fetal_dense.zarr',
-             f'/pmglocal/xf2217/bingren_adult/bingren_adult_dense.zarr'],
-            f'/pmglocal/xf2217/get_data/hg38.zarr', [
-                f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather',
-                f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'],
-            preload_count=args.preload_count, n_packs=args.n_packs,
-            mask_ratio=args.mask_ratio)
+        dataset = ZarrPretrainDataset([f'{root}/shendure_fetal_dense.zarr',
+                            f'{root}/bingren_adult_dense.zarr'],
+                           f'{root}/hg38.zarr', [
+                           f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
+                           f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
+                           peak_name=args.peak_name, preload_count=args.preload_count, 
+                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound)
 
     else:
         raise NotImplementedError()

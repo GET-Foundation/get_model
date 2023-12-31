@@ -45,6 +45,13 @@ def get_args_parser():
     )
 
     parser.add_argument(
+        "--peak_name",
+        default="peaks_p0.01",
+        type=str,
+        help="peak name to use",
+    )
+
+    parser.add_argument(
         "--preload_count",
         default=200,
         type=int,
@@ -56,6 +63,34 @@ def get_args_parser():
         default=5,
         type=int,
         help="number of samples per window",
+    )
+
+    parser.add_argument(
+        "--max_peak_length",
+        default=5000,
+        type=int,
+        help="maximum peak length",
+    )
+
+    parser.add_argument(
+        "--center_expand_target",
+        default=1000,
+        type=int,
+        help="center expand target",
+    )
+
+    parser.add_argument(
+        "--n_peaks_lower_bound",
+        default=5,
+        type=int,
+        help="lower bound of number of peaks",
+    )
+
+    parser.add_argument(
+        "--n_peaks_upper_bound",
+        default=200,
+        type=int,
+        help="upper bound of number of peaks",
     )
 
     parser.add_argument(

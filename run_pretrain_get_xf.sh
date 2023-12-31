@@ -2,7 +2,7 @@
 # Set the path to save checkpoints
 OUTPUT_DIR='/pmglocal/xf2217/output_pretrain_rev/'
 # path to expression set
-DATA_PATH='/pmglocal/xf2217/get_model/'
+DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
 
 
@@ -12,15 +12,16 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=6 --rdzv-endpoint=localhost:$PORT ge
     --data_path ${DATA_PATH} \
     --input_dim 1274 \
     --num_motif 637 \
-    --mask_ratio 0.5 \
+    --mask_ratio 0.3 \
     --model get_pretrain_motif_base \
     --batch_size 32 \
+    --flash_attn \
     --num_workers 64 \
     --n_packs 6 \
-    --lr 1e-3 \
+    --lr 5e-4 \
     --opt adamw \
     --opt_betas 0.9 0.95 \
-    --warmup_steps 2000 \
+    --warmup_steps 10000 \
     --epochs 100 \
     --num_region_per_sample 200 \
     --output_dir ${OUTPUT_DIR} 

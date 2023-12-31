@@ -40,6 +40,7 @@ class ZarrDataPool(object):
                  max_peak_length=None, center_expand_target=None):
         logging.info('Initializing ZarrDataPool')
         self.sequence = DenseZarrIO(genome_seq_zarr)
+        self.sequence.load_to_memory_dense()
         self.zarr_dirs = zarr_dirs
         self.insulation_paths = insulation_paths
         self.insulation_subsample_ratio = insulation_subsample_ratio
@@ -310,7 +311,7 @@ class PreloadDataPack(object):
         return df.set_index('key').to_dict()['index_peak']
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=400):
+    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200):
         super().__init__()
         """
         Pretrain dataset for GET model.
