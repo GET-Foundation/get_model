@@ -4,7 +4,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import DropPath
-
+try:
+    from flash_attn import flash_attn_qkvpacked_func
+except ImportError:
+    flash_attn_qkvpacked_func = None
 
 class Attention(nn.Module):
     def __init__(
@@ -77,6 +80,56 @@ class Attention(nn.Module):
         return x, attn
 
 
+class Attention_Flash(nn.Module):
+    def __init__(
+        self,
+        dim,
+        num_heads=8,
+        qkv_bias=False,
+        qk_scale=None,
+        attn_drop=0.0,
+        proj_drop=0.0,
+        attn_head_dim=None,
+    ):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        if attn_head_dim is not None:
+            head_dim = attn_head_dim
+        all_head_dim = head_dim * self.num_heads
+        self.scale = qk_scale or head_dim**-0.5
+
+        self.qkv = nn.Linear(dim, all_head_dim * 3, bias=False)
+        if qkv_bias:
+            self.q_bias = nn.Parameter(torch.zeros(all_head_dim))
+            self.v_bias = nn.Parameter(torch.zeros(all_head_dim))
+        else:
+            self.q_bias = None
+            self.v_bias = None
+
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(all_head_dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x, attention_mask=None):
+        B, N, C = x.shape
+        qkv_bias = None
+        if self.q_bias is not None:
+            qkv_bias = torch.cat(
+                (
+                    self.q_bias,
+                    torch.zeros_like(self.v_bias, requires_grad=False),
+                    self.v_bias,
+                )
+            )
+        qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
+        qkv = qkv.reshape(B, N, 3, self.num_heads, -1)
+        x = flash_attn_qkvpacked_func(qkv, softmax_scale=self.scale).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x, None
+    
+
 class Mlp(nn.Module):
     def __init__(
         self,
@@ -119,18 +172,30 @@ class Block(nn.Module):
         act_layer=nn.GELU,
         norm_layer=nn.LayerNorm,
         attn_head_dim=None,
+        flash_attn=False,
     ):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(
-            dim,
-            num_heads=num_heads,
-            qkv_bias=qkv_bias,
-            qk_scale=qk_scale,
-            attn_drop=attn_drop,
-            proj_drop=drop,
-            attn_head_dim=attn_head_dim,
-        )
+        if flash_attn:
+            self.attn = Attention_Flash(
+                dim,
+                num_heads=num_heads,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                attn_drop=attn_drop,
+                proj_drop=drop,
+                attn_head_dim=attn_head_dim,
+            )
+        else:
+            self.attn = Attention(
+                dim,
+                num_heads=num_heads,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                attn_drop=attn_drop,
+                proj_drop=drop,
+                attn_head_dim=attn_head_dim,
+            )
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -181,6 +246,7 @@ class GETTransformer(nn.Module):
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
         init_values=0,
         use_mean_pooling=False,
+        flash_attn=False,
         *args,
         **kwargs,
     ) -> None:
@@ -201,6 +267,7 @@ class GETTransformer(nn.Module):
                     drop_path=dpr[i],
                     norm_layer=norm_layer,
                     init_values=init_values,
+                    flash_attn=flash_attn,
                 )
                 for i in range(depth)
             ]
