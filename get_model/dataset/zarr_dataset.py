@@ -38,10 +38,13 @@ sys.path.append('/manitou/pmg/users/xf2217/get_model')
 class ZarrDataPool(object):
     """A class to handle data loading for a slot."""
     def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks',insulation_subsample_ratio=0.1,
-                 max_peak_length=None, center_expand_target=None):
+                 max_peak_length=None, center_expand_target=None, sequence_obj=None):
         logging.info('Initializing ZarrDataPool')
-        self.sequence = DenseZarrIO(genome_seq_zarr)
-        self.sequence.load_to_memory_dense()
+        if sequence_obj is None:
+            self.sequence = DenseZarrIO(genome_seq_zarr)
+            self.sequence.load_to_memory_dense()
+        else:
+            self.sequence = sequence_obj
         self.zarr_dirs = zarr_dirs
         self.insulation_paths = insulation_paths
         self.insulation_subsample_ratio = insulation_subsample_ratio
@@ -312,7 +315,7 @@ class PreloadDataPack(object):
         return df.set_index('key').to_dict()['index_peak']
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200):
+    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -370,18 +373,24 @@ class PretrainDataset(Dataset):
         self.n_peaks_upper_bound = n_peaks_upper_bound
 
         self.n_packs = n_packs
-        
-        self.datapool = ZarrDataPool(zarr_dirs, genome_seq_zarr, insulation_paths, peak_name=peak_name, max_peak_length=max_peak_length, center_expand_target=center_expand_target)
+        if sequence_obj is None:
+            self.sequence = DenseZarrIO(genome_seq_zarr)
+            # self.sequence.load_to_memory_dense()
+        else:
+            self.sequence = sequence_obj
+        self.datapool = ZarrDataPool(zarr_dirs, genome_seq_zarr, insulation_paths, peak_name=peak_name, max_peak_length=max_peak_length, center_expand_target=center_expand_target, sequence_obj=self.sequence)
 
         # initialize n_packs preload data packs
-        self.preload_data_packs = [PreloadDataPack(self.preload_count, self.datapool, self.padding, self.mask_ratio,
-            self.n_peaks_lower_bound, self.n_peaks_upper_bound) for _ in range(n_packs)]
+        self.preload_data_packs = None
         # self.locks = [threading.Lock() for _ in range(n_packs)]
         self.current_pack = 0
         self.avaliable_packs = list(range(n_packs))
         # self._start_reload_thread()
 
     def __getitem__(self, index: int):
+        if self.preload_data_packs is None:
+            self.preload_data_packs = [PreloadDataPack(self.preload_count, self.datapool, self.padding, self.mask_ratio,
+            self.n_peaks_lower_bound, self.n_peaks_upper_bound) for _ in range(self.n_packs)]
         try:
             return self._getitem(index)
         except Exception as e:
@@ -437,7 +446,7 @@ class PretrainDataset(Dataset):
         # logging.info(f'Async reloading data for slot {index}')
         # reload by reinitializing the preload data pack and put it back to the preload_data_packs
         self.preload_data_packs[index] = PreloadDataPack(
-            self.preload_count, self.datapool, self.padding, self.mask_ratio)
+            self.preload_count, self.datapool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound)
         # add the index back to avaliable packs
         self.avaliable_packs.append(index)
 

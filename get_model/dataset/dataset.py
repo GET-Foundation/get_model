@@ -20,7 +20,7 @@ from get_model.dataset.io import (generate_paths, get_hierachical_ctcf_pos,
 from get_model.dataset.splitter import cell_splitter, chromosome_splitter
 from get_model.dataset.zarr_dataset import \
     PretrainDataset as ZarrPretrainDataset
-
+from get_model.dataset.zarr_dataset import DenseZarrIO
 
 class PretrainDataset(Dataset):
 
@@ -290,13 +290,15 @@ def build_dataset_zarr(is_train, args):
         # get FILEPATH
         codebase = os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__))))
+        hg38 = DenseZarrIO(f'{root}/hg38.zarr')
+        hg38.load_to_memory_dense()
         dataset = ZarrPretrainDataset([f'{root}/shendure_fetal_dense.zarr',
                             f'{root}/bingren_adult_dense.zarr'],
                            f'{root}/hg38.zarr', [
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, preload_count=args.preload_count, 
-                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound)
+                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, sequence_obj=hg38)
 
     else:
         raise NotImplementedError()

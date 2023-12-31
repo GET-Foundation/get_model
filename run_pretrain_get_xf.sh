@@ -12,13 +12,14 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 --rdzv-endpoint=localhost:$PORT ge
     --data_path ${DATA_PATH} \
     --input_dim 1274 \
     --num_motif 637 \
-    --mask_ratio 0.3 \
+    --mask_ratio 0.5 \
     --model get_pretrain_motif_base \
     --batch_size 16 \
     --num_workers 32 \
-    --n_packs 2 \
+    --preload_count 100 \
+    --n_packs 1 \
     --flash_attn \
-    --lr 5e-4 \
+    --lr 1e-3 \
     --opt adamw \
     --opt_betas 0.9 0.95 \
     --warmup_steps 10000 \
