@@ -145,7 +145,7 @@ class MotifScanner(nn.Module):
         self.target_dim = target_dim
         motifs = self.load_pwm_as_kernel(include_reverse_complement=include_reverse_complement)
         self.motif = nn.Sequential(
-            nn.Conv1d(4, self.num_motif, 29, padding="same"),
+            nn.Conv1d(4, self.num_motif, 29, padding="same", bias=False),
             # nn.BatchNorm1d(num_motif),
             nn.ReLU(),
         )

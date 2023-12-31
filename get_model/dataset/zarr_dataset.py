@@ -36,12 +36,16 @@ sys.path.append('/manitou/pmg/users/xf2217/get_model')
            
 class ZarrDataPool(object):
     """A class to handle data loading for a slot."""
-    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, insulation_subsample_ratio=0.1):
+    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks',insulation_subsample_ratio=0.1,
+                 max_peak_length=None, center_expand_target=None):
         logging.info('Initializing ZarrDataPool')
         self.sequence = DenseZarrIO(genome_seq_zarr)
         self.zarr_dirs = zarr_dirs
         self.insulation_paths = insulation_paths
         self.insulation_subsample_ratio = insulation_subsample_ratio
+        self.peak_name = peak_name
+        self.max_peak_length = max_peak_length
+        self.center_expand_target = center_expand_target
         self.initialize_datasets()
         self.calculate_metadata()
         logging.info('ZarrDataPool initialized')
@@ -92,8 +96,24 @@ class ZarrDataPool(object):
         peaks_dict = {}
         for data_key, cdz in self.zarr_dict.items():
             for celltype_id in cdz.ids:
-                peaks_dict[celltype_id] = cdz.get_peaks(
-                    celltype_id, 'peaks_p0.01').query('End-Start<10000')
+                peak = cdz.get_peaks(
+                    celltype_id, self.peak_name)
+                if self.max_peak_length is not None:
+                    peak = peak.query(
+                        'End-Start<@self.max_peak_length').reset_index(drop=True)
+                if self.center_expand_target is not None:
+                    peak_shorter = peak.query(
+                        'End-Start<@self.center_expand_target').reset_index(drop=True)
+                    peak_longer = peak.query(
+                        'End-Start>=@self.center_expand_target').reset_index(drop=True)
+                    peak_longer['Start'] = (peak_longer['Start'] + peak_longer['End']) // 2 - \
+                        self.center_expand_target // 2
+                    peak_longer['End'] = peak_longer['Start'] + \
+                        self.center_expand_target
+                    peak = pd.concat([peak_shorter, peak_longer]).sort_values(
+                        ['Chromosome', 'Start']).reset_index(drop=True)
+                peaks_dict[celltype_id] = peak
+        
 
         return peaks_dict
 
@@ -166,7 +186,8 @@ class ZarrDataPool(object):
 
 class PreloadDataPack(object):
     """A class to store preloaded data for a slot."""
-    def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, padding=50, mask_ratio=0.5):
+    def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, padding=50, mask_ratio=0.5,
+                 n_peaks_lower_bound=5, n_peaks_upper_bound=400):
         logging.info('Initializing PreloadDataPack')
         self.preload_count = preload_count
         self.zarr_data_pool = zarr_data_pool
@@ -176,6 +197,8 @@ class PreloadDataPack(object):
         self.next_sample = 0
         self.padding = padding
         self.mask_ratio = mask_ratio
+        self.n_peaks_lower_bound = n_peaks_lower_bound
+        self.n_peaks_upper_bound = n_peaks_upper_bound
         self.preload_data()
         logging.info('PreloadDataPack initialized')
 
@@ -266,7 +289,7 @@ class PreloadDataPack(object):
         return i_start, i_end
 
 
-    def _calculate_peak_num_per_sample(self, lower_bound=5, upper_bound=900):
+    def _calculate_peak_num_per_sample(self):
         insulation_pool_peak_num = {}
         for _, _, _, _, _, _, _, item_insulation, celltype_peaks in self.preloaded_data:
             try:
@@ -279,7 +302,7 @@ class PreloadDataPack(object):
             insulation_pool_peak_num, orient='index').reset_index()
         insulation_pool_peak_num_df.columns = ['key', 'peak_num']
         insulation_pool_peak_num_df.sort_values('peak_num', inplace=True)
-        return insulation_pool_peak_num_df.query('peak_num>=@lower_bound and peak_num<=@upper_bound')
+        return insulation_pool_peak_num_df.query('peak_num>=@self.n_peaks_lower_bound and peak_num<=@self.n_peaks_upper_bound')
 
     def _get_peak_count(self, item_insulation, celltype_peaks):
         df = pr(item_insulation).join(pr(celltype_peaks), suffix="_peak").df.groupby(
@@ -287,7 +310,7 @@ class PreloadDataPack(object):
         return df.set_index('key').to_dict()['index_peak']
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2):
+    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=400):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -340,13 +363,17 @@ class PretrainDataset(Dataset):
         self.padding = padding
         self.mask_ratio = mask_ratio
 
+        self.peak_name = peak_name
+        self.n_peaks_lower_bound = n_peaks_lower_bound
+        self.n_peaks_upper_bound = n_peaks_upper_bound
+
         self.n_packs = n_packs
         
-        self.datapool = ZarrDataPool(zarr_dirs, genome_seq_zarr, insulation_paths)
+        self.datapool = ZarrDataPool(zarr_dirs, genome_seq_zarr, insulation_paths, peak_name=peak_name, max_peak_length=max_peak_length, center_expand_target=center_expand_target)
 
         # initialize n_packs preload data packs
-        self.preload_data_packs = [PreloadDataPack(
-            preload_count, self.datapool, self.padding, self.mask_ratio) for _ in range(n_packs)]
+        self.preload_data_packs = [PreloadDataPack(self.preload_count, self.datapool, self.padding, self.mask_ratio,
+            self.n_peaks_lower_bound, self.n_peaks_upper_bound) for _ in range(n_packs)]
         # self.locks = [threading.Lock() for _ in range(n_packs)]
         self.current_pack = 0
         self.avaliable_packs = list(range(n_packs))

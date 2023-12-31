@@ -16,7 +16,8 @@ logging.basicConfig(level=logging.INFO,
 zdp = ZarrDataPool(
     ['/pmglocal/xf2217/shendure_fetal/shendure_fetal_dense.zarr'],
     '/manitou/pmg/users/xf2217/get_model/data/hg38.zarr', [
-        '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather'])
+        '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather'],
+        peak_name='peaks_p0.01', max_peak_length=10000, center_expand_target=None)
 
 #%%
 # from get_model.dataset.zarr_dataset import PreloadDataPack
@@ -31,30 +32,35 @@ while pdp.next_sample < len(pdp):
 pretrain = PretrainDataset(['/pmglocal/xf2217/shendure_fetal/shendure_fetal_dense.zarr',
                             '/pmglocal/xf2217/bingren_adult/bingren_adult_dense.zarr'],
                            '/manitou/pmg/users/xf2217/get_model/data/hg38.zarr', [
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], preload_count=200, n_packs=5)
+                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_p0.01', preload_count=200, n_packs=2,
+                           max_peak_length=10000, center_expand_target=None)
 pretrain.__len__()
 # %%
 #check maximum peak length
-for i, df in pretrain.peaks_dict.items():
-    print(i, (df['End']-df['Start']).quantile(0.99))
-
+peak_len = []
+for i, df in zdp.peaks_dict.items():
+    peak_len.append(df['End']-df['Start'].values)
 #%%
-pretrain.peaks_dict['Fetal Astrocyte 2_500'].query('End-Start>50000')
+sns.distplot(np.concatenate(peak_len))
 # %%
 data_loader_train = torch.utils.data.DataLoader(
     pretrain,
     batch_size=32,
-    num_workers=32,
+    num_workers=2,
     pin_memory=False,
     drop_last=True,
     collate_fn=get_rev_collate_fn
 )
 
 # %%
-for batch in tqdm(data_loader_train):
+for i, batch in tqdm(enumerate(data_loader_train)):
+    if i < 100:
+        continue
     sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len = batch
     if min(chunk_size)<0:
         continue
+    if max_n_peaks>400:
+        break
 # %%
 celltype_peaks.shape
 # %%
@@ -78,14 +84,29 @@ model = GETPretrain(
         output_dim=1274,
         pos_emb_components=[],
     )
-model.eval()
+model.train()
 #%%
 model.cuda()
+#%%
+del sample_peak_sequence
+del sample_track
+del model 
+torch.cuda.empty_cache()
+#%%
 bool_mask_pos = mask.clone()
 bool_mask_pos[bool_mask_pos == -10000] = 0
 
+# to sparse
+#%%
+sample_peak_sequence = sample_peak_sequence.bfloat16().cuda()
+sample_track = sample_track.bfloat16().cuda()
+with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+    a = model.forward(sample_peak_sequence, sample_track, bool_mask_pos.bool().cuda(), chunk_size, n_peaks.cuda(), max_n_peaks)
 
-a = model.forward(sample_peak_sequence.float().cuda(), sample_track.float().cuda(), bool_mask_pos.bool().cuda(), chunk_size, n_peaks.cuda(), max_n_peaks)
+#%%
+
+#%%
+(a[2]-a[0]).sum().backward()
 # %%
 a[0].shape
 # %%
