@@ -226,6 +226,7 @@ def get_args_parser():
     )
     parser.add_argument("--no_pin_mem", action="store_false", dest="pin_mem", help="")
     parser.set_defaults(pin_mem=False)
+    parser.add_argument("--flash_attn", action="store_true", default=False, help="flash attention")
 
     # distributed training parameters
     parser.add_argument("--distributed", default=True, action="store_true")
@@ -254,6 +255,7 @@ def get_model(args):
         drop_path_rate=args.drop_path,
         drop_block_rate=None,
         output_dim=args.input_dim,
+        flash_attn=args.flash_attn,
     )
 
     return model

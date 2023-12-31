@@ -213,6 +213,7 @@ class GETPretrain(nn.Module):
         output_dim=1,
         pos_emb_components=["CTCF", "Rotary", "Absolute"],
         atac_attention=True,
+        flash_attn=False,
     ):
         super().__init__()
         self.num_regions = num_regions
@@ -248,6 +249,7 @@ class GETPretrain(nn.Module):
             drop_rate=dropout,
             attn_drop_rate=dropout,
             use_mean_pooling=False,
+            flash_attn=flash_attn,
         )
         # self.head_atac = nn.Conv1d(d_model, 1, 1)
         self.head_mask = nn.Linear(d_model, output_dim)
@@ -480,6 +482,7 @@ def get_pretrain_motif_base(pretrained=False, **kwargs):
         dropout=0.1,
         output_dim=kwargs["output_dim"],
         pos_emb_components=[],
+        flash_attn=kwargs["flash_attn"],
     )
     if pretrained:
         checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
