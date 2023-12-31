@@ -7,17 +7,17 @@ PORT=7956
 
 
 # batch_size can be adjusted according to the graphics card
-OMP_NUM_THREADS=1 torchrun --nproc_per_node=6 --rdzv-endpoint=localhost:$PORT get_model/pretrain.py \
+OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 --rdzv-endpoint=localhost:$PORT get_model/pretrain.py \
     --data_set "Pretrain" \
     --data_path ${DATA_PATH} \
     --input_dim 1274 \
     --num_motif 637 \
     --mask_ratio 0.3 \
     --model get_pretrain_motif_base \
-    --batch_size 32 \
+    --batch_size 16 \
+    --num_workers 32 \
+    --n_packs 2 \
     --flash_attn \
-    --num_workers 64 \
-    --n_packs 6 \
     --lr 5e-4 \
     --opt adamw \
     --opt_betas 0.9 0.95 \
