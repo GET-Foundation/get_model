@@ -3,6 +3,7 @@ import argparse
 import datetime
 import json
 import os
+from random import shuffle
 import time
 from pathlib import Path
 
@@ -357,6 +358,7 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        shuffle=True,
         collate_fn = get_rev_collate_fn
     )
 
