@@ -290,7 +290,7 @@ def build_dataset_zarr(is_train, args):
         # get FILEPATH
         codebase = os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__))))
-        hg38 = DenseZarrIO(f'{root}/hg38.zarr')
+        hg38 = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
         hg38.load_to_memory_dense()
         dataset = ZarrPretrainDataset([f'{root}/shendure_fetal_dense.zarr',
                             f'{root}/bingren_adult_dense.zarr'],

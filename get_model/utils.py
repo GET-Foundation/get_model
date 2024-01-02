@@ -215,6 +215,16 @@ class TensorboardLogger(object):
     def flush(self):
         self.writer.flush()
 
+class WandBLogger(object):
+    def __init__(self, wandb_obj):
+        self.wandb = wandb_obj
+
+    def update(self, head="scalar", step=None, **kwargs):
+        self.wandb.log(kwargs, step=step)
+
+    def flush(self):
+        pass
+
 
 def _load_checkpoint_for_ema(model_ema, checkpoint):
     """

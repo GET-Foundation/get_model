@@ -18,7 +18,7 @@ import zarr
 from caesar.io.zarr_io import CelltypeDenseZarrIO, DenseZarrIO
 from pyranges import PyRanges as pr
 from scipy.sparse import csr_matrix, vstack
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, get_worker_info
 from tqdm import tqdm
 
 from get_model.dataset.io import (generate_paths, get_hierachical_ctcf_pos,
@@ -82,16 +82,16 @@ class ZarrDataPool(object):
         item_insulation = self._query_insulation(chr_name, start, end)
 
         track = self.zarr_dict[data_key].get_track(
-            celltype_id, chr_name, start, end, sparse=True).T
-        sequence = self.sequence.get_track(chr_name, start, end, sparse=False)
+            celltype_id, chr_name, start, end, sparse=True).T.astype(np.uint16)
+        # sequence = self.sequence.get_track(chr_name, start, end, sparse=False)
 
-        peak_sequence = self._generate_peak_sequence(
-            celltype_peaks, sequence, start, end)
+        # peak_sequence = self._generate_peak_sequence(
+            # celltype_peaks, sequence, start, end)
         item_insulation = item_insulation.reset_index(drop=True).reset_index()
         item_insulation['key'] = str(
             window_index) + '_' + item_insulation['index'].astype(str)
         celltype_peaks = celltype_peaks.reset_index(drop=True).reset_index()
-        return window_index, chr_name, start, end, celltype_id, track, peak_sequence, item_insulation, celltype_peaks
+        return window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks
     
     def _load_peaks(self):
         """
@@ -146,8 +146,8 @@ class ZarrDataPool(object):
         return chr_name, chunk_idx, start, end
 
     def _generate_peak_sequence(self, celltype_peaks, sequence, window_start, window_end):
-        peak_sequence = np.zeros_like(sequence, dtype=np.int32)
-        for start, end in celltype_peaks[['Start', 'End']].to_numpy():
+        peak_sequence = np.zeros_like(sequence, dtype=np.int8)
+        for start, end in celltype_peaks: #[['Start', 'End']].to_numpy()
             peak_sequence[start-window_start:end-window_start] = 1
         return csr_matrix(peak_sequence*sequence)
 
@@ -192,7 +192,7 @@ class ZarrDataPool(object):
 class PreloadDataPack(object):
     """A class to store preloaded data for a slot."""
     def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, padding=50, mask_ratio=0.5,
-                 n_peaks_lower_bound=5, n_peaks_upper_bound=400):
+                 n_peaks_lower_bound=5, n_peaks_upper_bound=200, window_index=None):
         logging.info('Initializing PreloadDataPack')
         self.preload_count = preload_count
         self.zarr_data_pool = zarr_data_pool
@@ -204,7 +204,10 @@ class PreloadDataPack(object):
         self.mask_ratio = mask_ratio
         self.n_peaks_lower_bound = n_peaks_lower_bound
         self.n_peaks_upper_bound = n_peaks_upper_bound
-        self.preload_data()
+        if window_index is None:
+            window_index = np.random.randint(0, self.zarr_data_pool.total_chunk_length, size=self.preload_count)
+        self.window_index = window_index
+        self.preload_data(window_index)
         logging.info('PreloadDataPack initialized')
 
     def __len__(self):
@@ -219,14 +222,13 @@ class PreloadDataPack(object):
         else:
             sample = self.get_sample_with_idx(self.next_sample)
             self.next_sample += 1
+            # self.next_sample = index % (self.insulation_peak_counts.shape[0])
             return sample
     
     def preload_data(self, window_index=None):
         # Preload data
         # Load data for a fixed number of windows
         self.preloaded_data_window_indices_mapping = {}
-        if window_index is None:
-            window_index = np.random.randint(0, self.zarr_data_pool.total_chunk_length, size=self.preload_count)
         for i, window_index in enumerate(window_index):
             self.preloaded_data.append(self.zarr_data_pool.load_window_data(window_index))
             self.preloaded_data_window_indices_mapping[window_index] = i
@@ -261,7 +263,8 @@ class PreloadDataPack(object):
         This implementation relies on the availability of insulation data. If insulation data is empty,
         it attempts to load data from another randomly selected window.
         """
-        window_index, chr_name, start, end, celltype_id, track, peak_sequence, insulations, celltype_peaks = window
+        # window_index, chr_name, start, end, celltype_id, track, peak_sequence, insulations, celltype_peaks = window
+        window_index, chr_name, start, end, celltype_id, track, insulations, celltype_peaks = window
         if len(insulations) == 0:
             raise ValueError('Empty insulation')
         i_start, i_end = self._insulation_sampler(insulations, insulation_index)
@@ -269,10 +272,18 @@ class PreloadDataPack(object):
             'Start>@i_start and End<@i_end')[['Start', 'End']].to_numpy()
         if len(celltype_peaks) == 0:
             raise ValueError('No peaks in insulation region')
+
+        sequence = self.zarr_data_pool.sequence.get_track(
+            chr_name, i_start, i_end, sparse=False)
+        sample_peak_sequence = self.zarr_data_pool._generate_peak_sequence(
+            celltype_peaks, sequence, i_start, i_end)
+
         wi_start, wi_end = i_start - start, i_end - start
         celltype_peaks = celltype_peaks - i_start
+
+        
         sample_track = track[wi_start:wi_end]
-        sample_peak_sequence = peak_sequence[wi_start:wi_end]
+
         sample_peak_sequence = vstack(
             [sample_peak_sequence[start-self.padding:end+self.padding] for start, end in celltype_peaks])
         sample_track = vstack(
@@ -296,7 +307,7 @@ class PreloadDataPack(object):
 
     def _calculate_peak_num_per_sample(self):
         insulation_pool_peak_num = {}
-        for _, _, _, _, _, _, _, item_insulation, celltype_peaks in self.preloaded_data:
+        for window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks in self.preloaded_data:
             try:
                 insulation_pool_peak_num.update(
                     self._get_peak_count(item_insulation, celltype_peaks))
@@ -306,8 +317,11 @@ class PreloadDataPack(object):
         insulation_pool_peak_num_df = pd.DataFrame.from_dict(
             insulation_pool_peak_num, orient='index').reset_index()
         insulation_pool_peak_num_df.columns = ['key', 'peak_num']
-        insulation_pool_peak_num_df.sort_values('peak_num', inplace=True)
-        return insulation_pool_peak_num_df.query('peak_num>=@self.n_peaks_lower_bound and peak_num<=@self.n_peaks_upper_bound')
+        # insulation_pool_peak_num_df.sort_values('peak_num', inplace=True)
+        # shuffle the dataframe
+        insulation_pool_peak_num_df = insulation_pool_peak_num_df.query('peak_num>=@self.n_peaks_lower_bound and peak_num<=@self.n_peaks_upper_bound')
+        insulation_pool_peak_num_df = insulation_pool_peak_num_df.sample(frac=1).reset_index(drop=True)
+        return insulation_pool_peak_num_df
 
     def _get_peak_count(self, item_insulation, celltype_peaks):
         df = pr(item_insulation).join(pr(celltype_peaks), suffix="_peak").df.groupby(
@@ -315,7 +329,7 @@ class PreloadDataPack(object):
         return df.set_index('key').to_dict()['index_peak']
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None):
+    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None, n_workers=32, n_ranks=4):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -385,7 +399,6 @@ class PretrainDataset(Dataset):
         # self.locks = [threading.Lock() for _ in range(n_packs)]
         self.current_pack = 0
         self.avaliable_packs = list(range(n_packs))
-        # self._start_reload_thread()
 
     def __getitem__(self, index: int):
         if self.preload_data_packs is None:
@@ -410,7 +423,7 @@ class PretrainDataset(Dataset):
         except ValueError:
             self.avaliable_packs.remove(self.current_pack)
             #  reload the current pack
-            self._async_reload_data(self.current_pack)
+            self.reload_data(self.current_pack)
             # switch to the next avaliable pack
             self.current_pack = (self.current_pack+1) % self.n_packs
             return self._getitem(index)
@@ -420,41 +433,17 @@ class PretrainDataset(Dataset):
         # Return the length of the dataset
         # Implement based on how you define the length of your dataset
         # Could be based on total windows, number of samples per window, etc.
-        return 10_000_000
+        return 1_000_000
 
-    def _start_reload_thread(self):
-        self.reload_queue = Queue()
-        self.reload_thread = threading.Thread(
-            target=self._process_reload_queue)
-        self.reload_thread.start()
 
-    def _process_reload_queue(self):
-        while True:
-            index = self.reload_queue.get()
-            if index is None:
-                logging.info('Exiting reload thread')
-                break
-            self._async_reload_data(index)
-            self.reload_queue.task_done()
-
-    def _reload_data(self, index):
-        # Modify the usage counter and initiate reloading for the specific index
-        self.reload_queue.put(index)
-
-    def _async_reload_data(self, index):
+    def reload_data(self, slot):
         # This method runs in a separate thread
         # logging.info(f'Async reloading data for slot {index}')
         # reload by reinitializing the preload data pack and put it back to the preload_data_packs
-        self.preload_data_packs[index] = PreloadDataPack(
+        self.preload_data_packs[slot] = PreloadDataPack(
             self.preload_count, self.datapool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound)
         # add the index back to avaliable packs
-        self.avaliable_packs.append(index)
-
-
-    def close(self):
-        # Call this method to cleanly shut down the thread
-        self.reload_queue.put(None)
-        self.reload_thread.join()
+        self.avaliable_packs.append(slot)
 
 
 # %%

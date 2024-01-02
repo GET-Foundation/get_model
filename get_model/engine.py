@@ -139,15 +139,24 @@ def pretrain_one_epoch(
         metric_logger.update(weight_decay=weight_decay_value)
         metric_logger.update(grad_norm=grad_norm)
 
-        if log_writer is not None:
+        if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
             log_writer.update(loss=loss_value, head="loss")
             log_writer.update(loss_scale=loss_scale_value, head="opt")
             log_writer.update(lr=max_lr, head="opt")
             log_writer.update(min_lr=min_lr, head="opt")
             log_writer.update(weight_decay=weight_decay_value, head="opt")
             log_writer.update(grad_norm=grad_norm, head="opt")
-
             log_writer.set_step()
+        elif log_writer is not None and isinstance(log_writer, utils.WandBLogger):
+            log_writer.update(
+                {'loss': loss_value,
+                 'loss_scale': loss_scale_value,
+                 'lr': max_lr,
+                 'min_lr': min_lr,
+                 'epoch': epoch,
+                 'weight_decay': weight_decay_value,
+                 'grad_norm': grad_norm},
+                step=it)
 
         if lr_scheduler is not None:
             lr_scheduler.step_update(start_steps + step)

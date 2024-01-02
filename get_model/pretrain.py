@@ -2,8 +2,8 @@
 import argparse
 import datetime
 import json
+from math import log
 import os
-from random import shuffle
 import time
 from pathlib import Path
 
@@ -300,13 +300,6 @@ def get_model(args):
 def main(args):
     utils.init_distributed_mode(args)
 
-    print(args)
-    if utils.is_main_process(): # Log metrics only on main process
-        wandb.login()
-        run = wandb.init(
-            project=opts.wandb_project_name,
-            name=opts.wandb_run_name,
-        )
 
     device = torch.device(args.device)
 
@@ -344,12 +337,18 @@ def main(args):
         print("Sampler_train = %s" % str(sampler_train))
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
-
+    
+    log_writer = None
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
         log_writer = utils.TensorboardLogger(log_dir=args.log_dir)
-    else:
-        log_writer = None
+    elif global_rank == 0 and args.wandb_project_name is not None:
+        wandb.login()
+        run = wandb.init(
+            project=args.wandb_project_name,
+            name=args.wandb_run_name,
+        )
+        log_writer = utils.WandBLogger(run)
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
@@ -358,7 +357,6 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        shuffle=True,
         collate_fn = get_rev_collate_fn
     )
 
@@ -424,7 +422,7 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
-        if log_writer is not None:
+        if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
             log_writer.set_step(epoch * num_training_steps_per_epoch)
         train_stats = train_one_epoch(
             model,
@@ -457,11 +455,8 @@ def main(args):
             "n_parameters": n_parameters,
         }
                 
-        if utils.is_main_process():
-            run.log(log_stats)
-
         if args.output_dir and utils.is_main_process():
-            if log_writer is not None:
+            if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
                 log_writer.flush()
             with open(
                 os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8"

@@ -8,16 +8,16 @@ from scipy.sparse import coo_matrix
 from tqdm import tqdm
 
 from get_model.dataset.collate import get_rev_collate_fn
-from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, PreloadDataPack
+from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, PreloadDataPack, CelltypeDenseZarrIO
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 # %%
 zdp = ZarrDataPool(
-    ['/pmglocal/xf2217/shendure_fetal/shendure_fetal_dense.zarr'],
-    '/manitou/pmg/users/xf2217/get_model/data/hg38.zarr', [
+    ['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr'],
+    '/pmglocal/xf2217/get_data/hg38.zarr', [
         '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather'],
-        peak_name='peaks_p0.01', max_peak_length=10000, center_expand_target=None)
+        peak_name='peaks_q0.01', max_peak_length=10000, center_expand_target=None)
 
 #%%
 # from get_model.dataset.zarr_dataset import PreloadDataPack
@@ -32,7 +32,7 @@ while pdp.next_sample < len(pdp):
 pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr',
                             '/pmglocal/xf2217/get_data/bingren_adult_dense.zarr'],
                            '/pmglocal/xf2217/get_data/hg38.zarr', [
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_p0.01', preload_count=50, n_packs=2,
+                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue', preload_count=400, n_packs=1,
                            max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=5, n_peaks_upper_bound=200)
 pretrain.__len__()
 #%%
@@ -53,8 +53,8 @@ sns.distplot(np.concatenate(peak_len))
 data_loader_train = torch.utils.data.DataLoader(
     pretrain,
     batch_size=32,
-    num_workers=64,
-    pin_memory=False,
+    num_workers=16,
+    pin_memory=True,
     drop_last=True,
     collate_fn=get_rev_collate_fn
 )
@@ -118,4 +118,7 @@ with torch.amp.autocast('cuda', dtype=torch.bfloat16):
 a[0].shape
 # %%
 a[2].device
+# %%
+import pandas as pd 
+pd.read_csv('../log.txt', sep='loss', skiprows=442).iloc[:,1].str.split('(').str[1].str.split(')').str[0].astype(float).plot()
 # %%
