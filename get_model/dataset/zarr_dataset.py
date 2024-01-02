@@ -18,7 +18,7 @@ import zarr
 from caesar.io.zarr_io import CelltypeDenseZarrIO, DenseZarrIO
 from pyranges import PyRanges as pr
 from scipy.sparse import csr_matrix, vstack
-from torch.utils.data import Dataset, get_worker_info
+from torch.utils.data import Dataset
 from tqdm import tqdm
 
 from get_model.dataset.io import (generate_paths, get_hierachical_ctcf_pos,
@@ -329,7 +329,7 @@ class PreloadDataPack(object):
         return df.set_index('key').to_dict()['index_peak']
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None, n_workers=32, n_ranks=4):
+    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None):
         super().__init__()
         """
         Pretrain dataset for GET model.

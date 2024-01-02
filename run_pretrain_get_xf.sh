@@ -15,14 +15,15 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 --rdzv-endpoint=localhost:$PORT ge
     --mask_ratio 0.5 \
     --model get_pretrain_motif_base \
     --batch_size 16 \
-    --num_workers 32 \
+    --num_workers 64 \
     --preload_count 200 \
+    --peak_name "peaks_q0.01_tissue" \
     --n_packs 1 \
     --flash_attn \
     --lr 1e-3 \
     --opt adamw \
     --opt_betas 0.9 0.95 \
-    --warmup_steps 100000 \
+    --warmup_epochs 1 \
     --epochs 100 \
     --num_region_per_sample 200 \
     --output_dir ${OUTPUT_DIR} 
