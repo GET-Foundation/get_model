@@ -5,9 +5,8 @@ OUTPUT_DIR='/pmglocal/xf2217/output_pretrain_rev/'
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
 
-
 # batch_size can be adjusted according to the graphics card
-OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 --rdzv-endpoint=localhost:$PORT get_model/pretrain.py \
+OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/pretrain.py \
     --data_set "Pretrain" \
     --data_path ${DATA_PATH} \
     --input_dim 1274 \
@@ -17,6 +16,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 --rdzv-endpoint=localhost:$PORT ge
     --batch_size 16 \
     --num_workers 64 \
     --preload_count 200 \
+    --pin_mem \
     --peak_name "peaks_q0.01_tissue" \
     --n_packs 1 \
     --flash_attn \

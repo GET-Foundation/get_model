@@ -12,6 +12,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import utils
 from dataset.dataset import build_dataset_zarr as build_dataset
+from dataset.zarr_dataset import worker_init_fn_get
 from get_model.dataset.collate import get_rev_collate_fn
 from engine import pretrain_one_epoch as train_one_epoch
 from optim import create_optimizer
@@ -357,7 +358,8 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        collate_fn = get_rev_collate_fn
+        collate_fn = get_rev_collate_fn,
+        worker_init_fn=worker_init_fn_get,
     )
 
     model.to(device)

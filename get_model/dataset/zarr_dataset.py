@@ -11,6 +11,7 @@ from glob import glob
 from math import log
 from posixpath import basename
 from queue import Queue
+import torch
 
 import numpy as np
 import pandas as pd
@@ -401,9 +402,6 @@ class PretrainDataset(Dataset):
         self.avaliable_packs = list(range(n_packs))
 
     def __getitem__(self, index: int):
-        if self.preload_data_packs is None:
-            self.preload_data_packs = [PreloadDataPack(self.preload_count, self.datapool, self.padding, self.mask_ratio,
-            self.n_peaks_lower_bound, self.n_peaks_upper_bound) for _ in range(self.n_packs)]
         try:
             return self._getitem(index)
         except Exception as e:
@@ -446,5 +444,10 @@ class PretrainDataset(Dataset):
         self.avaliable_packs.append(slot)
 
 
-# %%
- 
+def worker_init_fn_get(worker_id):
+    np.random.seed(np.random.get_state()[1][0] + worker_id)
+    worker_info = torch.utils.data.get_worker_info()
+    dataset = worker_info.dataset
+    if dataset.preload_data_packs is None:
+        dataset.preload_data_packs = [PreloadDataPack(dataset.preload_count, dataset.datapool, dataset.padding, dataset.mask_ratio,
+        dataset.n_peaks_lower_bound, dataset.n_peaks_upper_bound) for _ in range(dataset.n_packs)]

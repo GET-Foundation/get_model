@@ -105,7 +105,6 @@ def pretrain_one_epoch(
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
-
         optimizer.zero_grad()
         # this attribute is added by timm on one optimizer (adahessian)
         is_second_order = (
@@ -161,7 +160,7 @@ def pretrain_one_epoch(
         if lr_scheduler is not None:
             lr_scheduler.step_update(start_steps + step)
     # gather the stats from all processes
-    #metric_logger.synchronize_between_processes()
+    metric_logger.synchronize_between_processes()
     #print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
