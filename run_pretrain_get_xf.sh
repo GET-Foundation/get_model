@@ -5,6 +5,15 @@ OUTPUT_DIR='/pmglocal/xf2217/output_pretrain_rev/'
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
 
+export NCCL_DEBUG=INFO
+export NCCL_DEBUG_SUBSYS=ALL
+export TORCH_DISTRIBUTED_DEBUG=INFO
+
+export NCCL_P2P_LEVEL=NVL
+# export NCCL_P2P_DISABLE=1
+
+
+
 # batch_size can be adjusted according to the graphics card
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/pretrain.py \
     --data_set "Pretrain" \
@@ -22,6 +31,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --flash_attn \
     --lr 1e-3 \
     --opt adamw \
+    --wandb_project_name "get_pretrain" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 1 \
     --epochs 100 \

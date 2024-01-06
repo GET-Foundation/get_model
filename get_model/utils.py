@@ -219,8 +219,11 @@ class WandBLogger(object):
     def __init__(self, wandb_obj):
         self.wandb = wandb_obj
 
-    def update(self, head="scalar", step=None, **kwargs):
-        self.wandb.log(kwargs, step=step)
+    def update(self, head="scalar", print_freq=10, step=None, **kwargs):
+        if step % print_freq ==0:
+            self.wandb.log(kwargs, step=step, commit = True)
+        else:
+            self.wandb.log(kwargs, step=step, commit = False)
 
     def flush(self):
         pass

@@ -11,6 +11,7 @@ from glob import glob
 from math import log
 from posixpath import basename
 from queue import Queue
+from polars import col
 import torch
 
 import numpy as np
@@ -209,6 +210,7 @@ class PreloadDataPack(object):
             window_index = np.random.randint(0, self.zarr_data_pool.total_chunk_length, size=self.preload_count)
         self.window_index = window_index
         self.preload_data(window_index)
+
         logging.info('PreloadDataPack initialized')
 
     def __len__(self):
@@ -219,11 +221,10 @@ class PreloadDataPack(object):
     
     def get_next_sample(self):
         if self.next_sample >= self.insulation_peak_counts.shape[0]:
-            raise ValueError('No more samples')
+            return None
         else:
             sample = self.get_sample_with_idx(self.next_sample)
             self.next_sample += 1
-            # self.next_sample = index % (self.insulation_peak_counts.shape[0])
             return sample
     
     def preload_data(self, window_index=None):
@@ -235,6 +236,10 @@ class PreloadDataPack(object):
             self.preloaded_data_window_indices_mapping[window_index] = i
         # trigger the computation of peak_num_per_sample
         self.insulation_peak_counts = self._calculate_peak_num_per_sample()
+        if self.insulation_peak_counts.shape[0] == 0:
+            logging.info('No valid insulation peak count')
+            return PreloadDataPack(self.preload_count, self.zarr_data_pool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound)
+        
 
     def get_sample_with_idx(self, idx):
         return self._get_sample_with_key(self.insulation_peak_counts.iloc[idx]['key'])
@@ -317,6 +322,8 @@ class PreloadDataPack(object):
         # Convert to DataFrame and sort
         insulation_pool_peak_num_df = pd.DataFrame.from_dict(
             insulation_pool_peak_num, orient='index').reset_index()
+        if insulation_pool_peak_num_df.shape[0] == 0:
+            return pd.DataFrame(columns = ['key', 'peak_num'])
         insulation_pool_peak_num_df.columns = ['key', 'peak_num']
         # insulation_pool_peak_num_df.sort_values('peak_num', inplace=True)
         # shuffle the dataframe
@@ -402,36 +409,32 @@ class PretrainDataset(Dataset):
         self.avaliable_packs = list(range(n_packs))
 
     def __getitem__(self, index: int):
-        try:
-            return self._getitem(index)
-        except Exception as e:
-            logging.info(f'Error: {e}')
+        return self._getitem(index)
 
     def _getitem(self, index: int):
         """
         Load item from current preload data pack, after
         the current pack is used up, switch to the next avaliable pack and reload the current pack
         """
-        while self.current_pack not in self.avaliable_packs:
-            time.sleep(0.5)
-            return self._getitem(index)
+        sample = self.preload_data_packs[self.current_pack].get_next_sample()
 
-        try:
-            return self.preload_data_packs[self.current_pack].get_next_sample()
-        except ValueError:
+        if sample is None:
+            # remove the current pack from avaliable packs
             self.avaliable_packs.remove(self.current_pack)
             #  reload the current pack
             self.reload_data(self.current_pack)
             # switch to the next avaliable pack
             self.current_pack = (self.current_pack+1) % self.n_packs
             return self._getitem(index)
+        else:
+            return sample
             
 
     def __len__(self):
         # Return the length of the dataset
         # Implement based on how you define the length of your dataset
         # Could be based on total windows, number of samples per window, etc.
-        return 1_000_000
+        return 8000
 
 
     def reload_data(self, slot):
@@ -440,6 +443,7 @@ class PretrainDataset(Dataset):
         # reload by reinitializing the preload data pack and put it back to the preload_data_packs
         self.preload_data_packs[slot] = PreloadDataPack(
             self.preload_count, self.datapool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound)
+        # self.preload_data_packs[slot].preload_data()
         # add the index back to avaliable packs
         self.avaliable_packs.append(slot)
 

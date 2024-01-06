@@ -34,6 +34,7 @@ def pretrain_one_epoch(
     wd_schedule_values=None,
 ):
     model.train()
+    
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", utils.SmoothedValue(window_size=1, fmt="{value:.6f}"))
     metric_logger.add_meter(
@@ -147,15 +148,14 @@ def pretrain_one_epoch(
             log_writer.update(grad_norm=grad_norm, head="opt")
             log_writer.set_step()
         elif log_writer is not None and isinstance(log_writer, utils.WandBLogger):
-            log_writer.update(
-                {'loss': loss_value,
+            log_writer.update(data={'loss': loss_value,
                  'loss_scale': loss_scale_value,
                  'lr': max_lr,
                  'min_lr': min_lr,
                  'epoch': epoch,
                  'weight_decay': weight_decay_value,
                  'grad_norm': grad_norm},
-                step=it)
+                step=it, print_freq=print_freq)
 
         if lr_scheduler is not None:
             lr_scheduler.step_update(start_steps + step)

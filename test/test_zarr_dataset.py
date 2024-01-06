@@ -1,5 +1,7 @@
 # %%
+import imp
 import logging
+from matplotlib import pyplot as plt
 
 import numpy as np
 import seaborn as sns
@@ -32,15 +34,13 @@ while pdp.next_sample < len(pdp):
 pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr',
                             '/pmglocal/xf2217/get_data/bingren_adult_dense.zarr'],
                            '/pmglocal/xf2217/get_data/hg38.zarr', [
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue', preload_count=400, n_packs=1,
+                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue', preload_count=1, n_packs=1,
                            max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=5, n_peaks_upper_bound=200)
 pretrain.__len__()
 #%%
 pretrain.__len__
 #%%
 for i in range(1000):
-    print(i)
-    print(pretrain.avaliable_packs)
     a = pretrain.__getitem__(0)
 # %%
 #check maximum peak length
@@ -50,20 +50,22 @@ for i, df in zdp.peaks_dict.items():
 #%%
 sns.distplot(np.concatenate(peak_len))
 # %%
+from get_model.dataset.zarr_dataset import worker_init_fn_get
 data_loader_train = torch.utils.data.DataLoader(
     pretrain,
     batch_size=32,
-    num_workers=16,
+    num_workers=2,
     pin_memory=True,
     drop_last=True,
-    collate_fn=get_rev_collate_fn
+    collate_fn=get_rev_collate_fn,
+    worker_init_fn=worker_init_fn_get,
 )
 
 # %%
 for i, batch in tqdm(enumerate(data_loader_train)):
     sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len = batch
-    if min(chunk_size)<0:
-        continue
+    # if min(chunk_size)<0:
+        # continue
     # if max_n_peaks>200:
     #     break
 # %%
@@ -120,5 +122,9 @@ a[0].shape
 a[2].device
 # %%
 import pandas as pd 
-pd.read_csv('../log.txt', sep='loss', skiprows=442).iloc[:,1].str.split('(').str[1].str.split(')').str[0].astype(float).plot()
+import numpy as np
+y = pd.read_csv('../log.txt', sep='loss', skiprows=445).iloc[:,1].str.split('(').str[0].str.split(':').str[1].astype(float)
+y_conv = np.convolve(y, np.ones(20)/20, mode='valid')
+import matplotlib.pyplot as plt
+plt.plot(y_conv)
 # %%
