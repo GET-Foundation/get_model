@@ -294,7 +294,7 @@ def build_dataset_zarr(is_train, args):
         hg38.load_to_memory_dense()
         dataset = ZarrPretrainDataset([f'{root}/shendure_fetal_dense.zarr',
                             f'{root}/bingren_adult_dense.zarr'],
-                           f'{root}/hg38.zarr'
+                           f'{root}/hg38.zarr',
                            f'{root}/hg38_motif_result.zarr', [
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
