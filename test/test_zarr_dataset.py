@@ -16,7 +16,10 @@ logging.basicConfig(level=logging.INFO,
 # %%
 zdp = ZarrDataPool(
     ['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr'],
-    '/pmglocal/xf2217/get_data/hg38.zarr', [
+    
+    '/pmglocal/xf2217/get_data/hg38.zarr', 
+    
+    [
         '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather'],
         peak_name='peaks_q0.01', max_peak_length=10000, center_expand_target=None)
 
@@ -32,7 +35,8 @@ while pdp.next_sample < len(pdp):
 #%%
 pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr',
                             '/pmglocal/xf2217/get_data/bingren_adult_dense.zarr'],
-                           '/pmglocal/xf2217/get_data/hg38.zarr', [
+                           '/pmglocal/xf2217/get_data/hg38.zarr', 
+                           '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue', preload_count=1, n_packs=1,
                            max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=5, n_peaks_upper_bound=200)
 pretrain.__len__()
@@ -62,7 +66,7 @@ data_loader_train = torch.utils.data.DataLoader(
 
 # %%
 for i, batch in tqdm(enumerate(data_loader_train)):
-    sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len = batch
+    sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std = batch
     # if min(chunk_size)<0:
         # continue
     # if max_n_peaks>200:
