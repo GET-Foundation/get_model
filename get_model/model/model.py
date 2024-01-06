@@ -267,11 +267,14 @@ class GETPretrain(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, peak_seq, atac, mask, chunk_size, n_peaks, max_n_peaks):
+    def forward(self, peak_seq, atac, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
         """forward function with hooks to return embedding or attention weights."""
         # peak_seq: [B, L, 4]
         # [B, L, 4] --> [B, L, 1274]
         x = self.motif_scanner(peak_seq)
+        x = x - motif_mean_std[:,0, :].unsqueeze(1)
+        x = x / motif_mean_std[:,1, :].unsqueeze(1)
+        x = F.relu(x)
         # [B, L, 1274] --> [B, R, 1274]
         # gloabl pooling inner product with peak
         x = self.atac_attention(x, atac)

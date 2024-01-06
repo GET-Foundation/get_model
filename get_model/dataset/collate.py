@@ -34,11 +34,12 @@ def sparse_batch_collate(batch: list):
 
 def get_rev_collate_fn(batch):
     # zip and convert to list
-    sample_track, sample_peak_sequence, sample_metadata, celltype_peaks = zip(*batch)
+    sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, motif_mean_std = zip(*batch)
     celltype_peaks = list(celltype_peaks)
     sample_track = list(sample_track)
     sample_peak_sequence = list(sample_peak_sequence)
     sample_metadata = list(sample_metadata)
+    motif_mean_std = list(motif_mean_std)
     batch_size = len(celltype_peaks)
     mask_ratio = sample_metadata[0]['mask_ratio']
 
@@ -66,6 +67,8 @@ def get_rev_collate_fn(batch):
     sample_peak_sequence = np.hstack(sample_peak_sequence)
     sample_peak_sequence = torch.from_numpy(sample_peak_sequence).view(-1, batch_size, 4)
     sample_peak_sequence = sample_peak_sequence.transpose(0,1)
+    motif_mean_std = np.stack(motif_mean_std, axis=0)
+    motif_mean_std = torch.FloatTensor(motif_mean_std)
     peak_len = celltype_peaks[:,:,1]-celltype_peaks[:,:,0]
     padded_peak_len = peak_len + 100
     total_peak_len = peak_len.sum(1)
@@ -87,4 +90,4 @@ def get_rev_collate_fn(batch):
 
     
 
-    return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len
+    return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std

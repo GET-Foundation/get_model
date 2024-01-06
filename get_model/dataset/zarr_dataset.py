@@ -37,16 +37,28 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 sys.path.append('/manitou/pmg/users/xf2217/get_model')
 
            
+class MotifMeanStd(object):
+    """A class that reads the mean and std of motif scores from a zarr file.
+    e.g. z['mean_std/chr1']
+    """
+    def __init__(self, zarr_path):
+        import glob
+        self.zarr_path = zarr_path
+        self.zarr = zarr.open(zarr_path, mode='r')
+        self.chromosomes = [basename(path) for path in glob.glob(os.path.join(zarr_path, 'mean_std/*'))]
+        self.data_dict = {chromosome: self.zarr['mean_std/'+chromosome][:] for chromosome in self.chromosomes}
+
 class ZarrDataPool(object):
     """A class to handle data loading for a slot."""
     def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks',insulation_subsample_ratio=0.1,
-                 max_peak_length=None, center_expand_target=None, sequence_obj=None):
+                 max_peak_length=None, center_expand_target=None, sequence_obj=None, motif_mean_std_obj=None):
         logging.info('Initializing ZarrDataPool')
         if sequence_obj is None:
             self.sequence = DenseZarrIO(genome_seq_zarr, dtype='int8', mode='r')
             self.sequence.load_to_memory_dense()
         else:
             self.sequence = sequence_obj
+        self.motif_mean_std_obj = motif_mean_std_obj
         self.zarr_dirs = zarr_dirs
         self.insulation_paths = insulation_paths
         self.insulation_subsample_ratio = insulation_subsample_ratio
@@ -93,7 +105,11 @@ class ZarrDataPool(object):
         item_insulation['key'] = str(
             window_index) + '_' + item_insulation['index'].astype(str)
         celltype_peaks = celltype_peaks.reset_index(drop=True).reset_index()
-        return window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks
+        if self.motif_mean_std_obj is not None:
+            motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chunk_idx:chunk_idx+2].reshape(2, 2, -1).mean(0)
+        else:
+            motif_mean_std = np.zeros((2, 1274))
+        return window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
     
     def _load_peaks(self):
         """
@@ -109,16 +125,16 @@ class ZarrDataPool(object):
                     peak = peak.query(
                         'End-Start<@self.max_peak_length').reset_index(drop=True)
                 if self.center_expand_target is not None:
-                    peak_shorter = peak.query(
-                        'End-Start<@self.center_expand_target').reset_index(drop=True)
-                    peak_longer = peak.query(
-                        'End-Start>=@self.center_expand_target').reset_index(drop=True)
-                    peak_longer['Start'] = (peak_longer['Start'] + peak_longer['End']) // 2 - \
+                    # peak_shorter = peak.query(
+                        # 'End-Start<@self.center_expand_target').reset_index(drop=True)
+                    # peak_longer = peak.query(
+                        # 'End-Start>=@self.center_expand_target').reset_index(drop=True)
+                    peak['Start'] = (peak['Start'] + peak['End']) // 2 - \
                         self.center_expand_target // 2
-                    peak_longer['End'] = peak_longer['Start'] + \
+                    peak['End'] = peak['Start'] + \
                         self.center_expand_target
-                    peak = pd.concat([peak_shorter, peak_longer]).sort_values(
-                        ['Chromosome', 'Start']).reset_index(drop=True)
+                    # peak = pd.concat([peak_shorter, peak_longer]).sort_values(
+                        # ['Chromosome', 'Start']).reset_index(drop=True)
                 peaks_dict[celltype_id] = peak
         
 
@@ -270,7 +286,7 @@ class PreloadDataPack(object):
         it attempts to load data from another randomly selected window.
         """
         # window_index, chr_name, start, end, celltype_id, track, peak_sequence, insulations, celltype_peaks = window
-        window_index, chr_name, start, end, celltype_id, track, insulations, celltype_peaks = window
+        window_index, chr_name, start, end, celltype_id, track, insulations, celltype_peaks, motif_mean_std = window
         if len(insulations) == 0:
             raise ValueError('Empty insulation')
         i_start, i_end = self._insulation_sampler(insulations, insulation_index)
@@ -299,7 +315,7 @@ class PreloadDataPack(object):
             'start': start, 'end': end, 'i_start': wi_start, 'i_end': wi_end, 'mask_ratio': self.mask_ratio
         }
 
-        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks
+        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, motif_mean_std
     
     def _insulation_sampler(self, insulation_df, insulation_index=None):
         """
@@ -313,7 +329,7 @@ class PreloadDataPack(object):
 
     def _calculate_peak_num_per_sample(self):
         insulation_pool_peak_num = {}
-        for window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks in self.preloaded_data:
+        for window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std in self.preloaded_data:
             try:
                 insulation_pool_peak_num.update(
                     self._get_peak_count(item_insulation, celltype_peaks))
@@ -337,7 +353,7 @@ class PreloadDataPack(object):
         return df.set_index('key').to_dict()['index_peak']
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None):
+    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -400,7 +416,9 @@ class PretrainDataset(Dataset):
             self.sequence.load_to_memory_dense()
         else:
             self.sequence = sequence_obj
-        self.datapool = ZarrDataPool(zarr_dirs, genome_seq_zarr, insulation_paths, peak_name=peak_name, max_peak_length=max_peak_length, center_expand_target=center_expand_target, sequence_obj=self.sequence)
+        self.mms = MotifMeanStd(genome_motif_zarr)
+        self.datapool = ZarrDataPool(zarr_dirs, genome_seq_zarr, insulation_paths, peak_name=peak_name, max_peak_length=max_peak_length, center_expand_target=center_expand_target, sequence_obj=self.sequence,
+                                     motif_mean_std_obj=self.mms)
 
         # initialize n_packs preload data packs
         self.preload_data_packs = None
