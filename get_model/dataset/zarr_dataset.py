@@ -4,14 +4,12 @@ import os.path
 import random
 import re
 import sys
-import threading
 import time
 import warnings
 from glob import glob
 from math import log
 from posixpath import basename
 from queue import Queue
-from polars import col
 import torch
 
 import numpy as np
@@ -468,6 +466,8 @@ class PretrainDataset(Dataset):
 
 def worker_init_fn_get(worker_id):
     np.random.seed(np.random.get_state()[1][0] + worker_id)
+    torch.manual_seed(torch.initial_seed() % 2**32 + worker_id)
+    
     worker_info = torch.utils.data.get_worker_info()
     dataset = worker_info.dataset
     if dataset.preload_data_packs is None:
