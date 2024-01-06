@@ -424,6 +424,8 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
+            np.random.seed(epoch + args.seed)
+            torch.manual_seed(epoch + args.seed)
         if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
             log_writer.set_step(epoch * num_training_steps_per_epoch)
         train_stats = train_one_epoch(

@@ -466,7 +466,7 @@ class PretrainDataset(Dataset):
 
 def worker_init_fn_get(worker_id):
     np.random.seed(np.random.get_state()[1][0] + worker_id)
-    torch.manual_seed(torch.initial_seed() % 2**32 + worker_id)
+    torch.manual_seed(torch.initial_seed() + worker_id)
     
     worker_info = torch.utils.data.get_worker_info()
     dataset = worker_info.dataset
