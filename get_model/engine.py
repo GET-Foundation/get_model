@@ -157,11 +157,14 @@ def pretrain_one_epoch(
                  'grad_norm': grad_norm},
                 step=it, print_freq=print_freq)
 
+        torch.distributed.barrier()
         if lr_scheduler is not None:
             lr_scheduler.step_update(start_steps + step)
+
+    # torch.distributed.barrier()
     # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    #print("Averaged stats:", metric_logger)
+    # metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 

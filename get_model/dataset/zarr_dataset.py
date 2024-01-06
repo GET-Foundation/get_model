@@ -434,7 +434,7 @@ class PretrainDataset(Dataset):
         # Return the length of the dataset
         # Implement based on how you define the length of your dataset
         # Could be based on total windows, number of samples per window, etc.
-        return 8000
+        return 655_360
 
 
     def reload_data(self, slot):
