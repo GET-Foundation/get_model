@@ -20,3 +20,4 @@ data/cell_type_pretrain_exp.txt
 data/motif_cluster_original_id.txt
 test/hail*
 test/data
+run_pretrain_get_xf.unnorm.sh
