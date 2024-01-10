@@ -59,6 +59,8 @@ def get_rev_collate_fn(batch):
         real_cov = sample_track[i].sum()
         conv = int(min(500, max(100, int(cov/(real_cov+20)))))
         sample_track[i] = np.convolve(np.array(sample_track[i]).reshape(-1), np.ones(conv), mode='same')
+        if sample_track[i].max()>0:
+            sample_track[i] = sample_track[i]/sample_track[i].max()
 
     celltype_peaks = np.stack(celltype_peaks, axis=0)
     celltype_peaks = torch.from_numpy(celltype_peaks)
