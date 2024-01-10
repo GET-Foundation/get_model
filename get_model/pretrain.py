@@ -40,6 +40,12 @@ def get_args_parser():
     )
 
     parser.add_argument(
+        "--compile_model",
+        action="store_true",
+        help="compile model with torch compile",
+    )
+
+    parser.add_argument(
         "--num_region_per_sample",
         default=200,
         type=int,
@@ -367,6 +373,13 @@ def main(args):
     )
 
     model.to(device)
+
+    # compile model using torch.compile
+    if args.compile_model:
+        model = torch.compile(model)
+    # ddp 
+    
+
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -444,7 +457,7 @@ def main(args):
             start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values,
             wd_schedule_values=wd_schedule_values,
-            normlize_target=args.normlize_target,
+            normalize_target=args.normlize_target,
         )
         if args.output_dir:
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:

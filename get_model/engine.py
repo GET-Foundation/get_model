@@ -26,7 +26,7 @@ def pretrain_one_epoch(
     epoch: int,
     loss_scaler,
     max_norm: float = 0,
-    normlize_target: bool = True,
+    normalize_target: bool = True,
     log_writer=None,
     lr_scheduler=None,
     start_steps=0,
@@ -78,7 +78,7 @@ def pretrain_one_epoch(
         # target generation
         with torch.no_grad():
             unnorm_targets = target
-            if normlize_target:
+            if normalize_target:
                 regions_squeeze = unnorm_targets
                 regions_norm = (
                     regions_squeeze - regions_squeeze.mean(dim=-2, keepdim=True)
