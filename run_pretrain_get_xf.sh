@@ -1,6 +1,6 @@
 #!/bin/bash
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/xf2217/output_pretrain_rev_test/'
+OUTPUT_DIR='/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool/'
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
@@ -19,6 +19,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --batch_size 16 \
     --num_workers 64 \
     --preload_count 200 \
+    --normalize_target False \
     --pin_mem \
     --peak_name "peaks_q0.01_tissue_open" \
     --n_packs 1 \
