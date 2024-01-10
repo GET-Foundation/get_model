@@ -76,7 +76,7 @@ class ATACSplitPool(nn.Module):
         self.patch_pool = nn.MaxPool1d(50, stride=50)
 
     def forward(self, x, atac, peak_split, n_peaks, max_n_peaks):
-        atac = atac #/ atac.max(1, keepdim=True)[0]
+        atac = atac / (atac.max(1, keepdim=True)[0]+1e-5)
         x_region = self.forward_x(x, peak_split, n_peaks, max_n_peaks)
         joint_region = self.forward_joint(x, atac, peak_split, n_peaks, max_n_peaks)
         x = torch.cat([x_region, joint_region], dim=2)
