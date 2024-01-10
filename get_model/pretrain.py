@@ -135,9 +135,8 @@ def get_args_parser():
 
     parser.add_argument(
         "--normalize_target",
-        default=True,
-        type=bool,
-        help="normalized the target patch pixels",
+        action="store_true",
+        default=False,
     )
 
     # Optimizer parameters
@@ -435,6 +434,9 @@ def main(args):
         optimizer=optimizer,
         loss_scaler=loss_scaler,
     )
+
+    if args.normalize_target:
+        print("Normalize target!")
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()

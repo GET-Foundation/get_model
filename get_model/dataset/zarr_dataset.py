@@ -410,7 +410,7 @@ class PretrainDataset(Dataset):
 
         self.n_packs = n_packs
         if sequence_obj is None:
-            self.sequence = DenseZarrIO(genome_seq_zarr)
+            self.sequence = DenseZarrIO(genome_seq_zarr, dtype='int8', mode='r')
             self.sequence.load_to_memory_dense()
         else:
             self.sequence = sequence_obj

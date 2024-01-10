@@ -79,6 +79,7 @@ class ATACSplitPool(nn.Module):
         atac = atac / (atac.max(1, keepdim=True)[0]+1e-5)
         x_region = self.forward_x(x, peak_split, n_peaks, max_n_peaks)
         joint_region = self.forward_joint(x, atac, peak_split, n_peaks, max_n_peaks)
+        joint_region = torch.log10(joint_region+1)
         x = torch.cat([x_region, joint_region], dim=2)
         return x
 

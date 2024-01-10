@@ -79,6 +79,7 @@ def pretrain_one_epoch(
         with torch.no_grad():
             unnorm_targets = target
             if normalize_target:
+                print('normalize target')
                 regions_squeeze = unnorm_targets
                 regions_norm = (
                     regions_squeeze - regions_squeeze.mean(dim=-2, keepdim=True)
