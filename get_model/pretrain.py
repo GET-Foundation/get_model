@@ -457,7 +457,7 @@ def main(args):
             start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values,
             wd_schedule_values=wd_schedule_values,
-            normalize_target=args.normlize_target,
+            normalize_target=args.normalize_target,
         )
         if args.output_dir:
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:

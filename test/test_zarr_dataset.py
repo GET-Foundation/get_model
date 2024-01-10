@@ -128,10 +128,10 @@ with torch.amp.autocast('cuda', dtype=torch.bfloat16):
         sample_peak_sequence = sample_peak_sequence.bfloat16().cuda()
         sample_track = sample_track.bfloat16().cuda()
         output_masked, _, target = model.forward(sample_peak_sequence, sample_track, bool_mask_pos.bool().cuda(), chunk_size, n_peaks.cuda(), max_n_peaks, motif_mean_std.cuda())
-        normlize_target = True
+        normalize_target = True
         with torch.no_grad():
             unnorm_targets = target
-            if normlize_target:
+            if normalize_target:
                 regions_squeeze = unnorm_targets
                 regions_norm = (
                     regions_squeeze - regions_squeeze.mean(dim=-2, keepdim=True)
