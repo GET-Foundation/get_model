@@ -1,17 +1,20 @@
 #!/bin/bash
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/xf2217/output_pretrain_rev/'
+OUTPUT_DIR='/pmglocal/xf2217/output_pretrain_rev_test/'
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
 
 export NCCL_P2P_LEVEL=NVL
+export TORCH_DISTRIBUTED_DEBUG=INFO
+export CUDA_LAUNCH_BLOCKING=1
 
 # batch_size can be adjusted according to the graphics card
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/pretrain.py \
     --data_set "Pretrain" \
     --data_path ${DATA_PATH} \
     --input_dim 1274 \
+    --output_dim 1280 \
     --num_motif 637 \
     --mask_ratio 0.5 \
     --model get_pretrain_motif_base \

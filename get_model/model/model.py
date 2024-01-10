@@ -9,7 +9,7 @@ from timm.models.registry import register_model
 from get_model.model.position_encoding import CTCFPositionalEncoding, AbsolutePositionalEncoding
 from get_model.model.motif import parse_meme_file
 from get_model.model.transformer import GETTransformer
-from get_model.model.pooling import SplitPool
+from get_model.model.pooling import SplitPool, ATACSplitPool
 
 class SequenceEncoder(nn.Module):
     """A sequence encoder based on Conv1D.
@@ -214,6 +214,10 @@ class GETPretrain(nn.Module):
         pos_emb_components=["CTCF", "Rotary", "Absolute"],
         atac_attention=True,
         flash_attn=False,
+        atac_kernel_num=6,
+        atac_kernel_size=3,
+        joint_kernel_num=6,
+        joint_kernel_size=3,
     ):
         super().__init__()
         self.num_regions = num_regions
@@ -227,12 +231,16 @@ class GETPretrain(nn.Module):
         self.dropout = dropout
         self.output_dim = output_dim
         self.pos_emb_components = pos_emb_components
+        self.atac_kernel_num = atac_kernel_num
+        self.atac_kernel_size = atac_kernel_size
+        self.joint_kernel_num = joint_kernel_num
+        self.joint_kernel_size = joint_kernel_size
         self.motif_scanner = MotifScanner(
             num_motif=num_motif, target_dim=motif_dim, include_reverse_complement=True
         )
-        self.atac_attention = ATACAttention() if atac_attention else None
-        self.split_pool = SplitPool()
-        self.region_embed = RegionEmbed(num_regions, motif_dim, embed_dim)
+        self.atac_attention = ATACSplitPool()# if atac_attention else None
+        # self.split_pool = SplitPool()
+        self.region_embed = RegionEmbed(num_regions, output_dim, embed_dim)
         self.pos_embed = []
         if "CTCF" in self.pos_emb_components: 
             self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
@@ -277,8 +285,9 @@ class GETPretrain(nn.Module):
         x = F.relu(x)
         # [B, L, 1274] --> [B, R, 1274]
         # gloabl pooling inner product with peak
-        x = self.atac_attention(x, atac)
-        x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
+        x_original = self.atac_attention(x, atac, chunk_size, n_peaks, max_n_peaks)
+        # x = self.atac_attention(x, atac)
+        # x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
 
         x = self.region_embed(x_original)
         B, N, C = x_original.shape

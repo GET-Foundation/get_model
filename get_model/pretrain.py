@@ -116,6 +116,10 @@ def get_args_parser():
     )
 
     parser.add_argument(
+        "--output_dim", default=111, type=int, help="output dimension size for backbone"
+    )
+
+    parser.add_argument(
         "--drop_path",
         type=float,
         default=0.0,
@@ -287,11 +291,11 @@ def get_model(args):
         motif_dim=args.input_dim,
         num_region_per_sample=args.num_region_per_sample,
         encoder_in_chans=args.input_dim,
-        encoder_num_classes=args.input_dim,
+        encoder_num_classes=args.output_dim,
         pretrained=False,
         drop_path_rate=args.drop_path,
         drop_block_rate=None,
-        output_dim=args.input_dim,
+        output_dim=args.output_dim,
         flash_attn=args.flash_attn,
     )
 
