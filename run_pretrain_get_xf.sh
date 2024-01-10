@@ -6,8 +6,6 @@ DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
 
 export NCCL_P2P_LEVEL=NVL
-export TORCH_DISTRIBUTED_DEBUG=INFO
-export CUDA_LAUNCH_BLOCKING=1
 
 # batch_size can be adjusted according to the graphics card
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/pretrain.py \
@@ -21,6 +19,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --batch_size 16 \
     --num_workers 64 \
     --preload_count 200 \
+    --center_expand_target 500 \
     --pin_mem \
     --peak_name "peaks_q0.01_tissue_open" \
     --n_packs 1 \

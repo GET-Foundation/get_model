@@ -128,7 +128,7 @@ def get_args_parser():
     )
 
     parser.add_argument(
-        "--normlize_target",
+        "--normalize_target",
         default=True,
         type=bool,
         help="normalized the target patch pixels",
