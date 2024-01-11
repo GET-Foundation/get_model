@@ -28,13 +28,14 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --wandb_project_name "get_finetune" \
     --wandb_run_name "ATACSplitPool_finetune" \
     --eval_freq 1 \
+    --dist_eval \
     --eval_nonzero \
     --leave_out_celltypes "Astrocyte" \
-    --leave_out_chromosomes "chr1,chr3,chr6,chr8,chr20" \
+    --leave_out_chromosomes "chr11" \
     --criterion "poisson" \
-    --resume "/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm/checkpoint-2.pth" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 1 \
     --epochs 100 \
     --num_region_per_sample 200 \
     --output_dir ${OUTPUT_DIR} 
+    # --resume "/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm/checkpoint-2.pth" \

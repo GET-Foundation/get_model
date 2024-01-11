@@ -410,8 +410,8 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
     obs = []
     preds_atac = []
     obs_atac = []
-
-    for batch in data_loader:
+    from tqdm import tqdm
+    for batch in tqdm(data_loader):
         sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
         if min(chunk_size)<0:
             continue
@@ -423,7 +423,8 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         labels_data = labels_data.to(device, non_blocking=True).bfloat16()
 
         # compute output
-        loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, criterion)
+        loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
+        , None, labels_data, criterion)
 
         preds.append(exp.reshape(-1).detach().cpu().numpy())
         obs.append(exp_target.reshape(-1).detach().cpu().numpy())
@@ -431,7 +432,6 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         # obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
 
         metric_logger.update(loss=loss.item())
-        torch.distributed.barrier()
 
     preds = np.concatenate(preds, axis=0).reshape(-1)
     obs = np.concatenate(obs, axis=0).reshape(-1)

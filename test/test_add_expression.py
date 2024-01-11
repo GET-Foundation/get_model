@@ -47,3 +47,16 @@ for id in tqdm(cdz.ids):
                 overwrite=True)
 
 # %%
+cdz = CelltypeDenseZarrIO(
+    '/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr', 'r'
+)
+# %%
+cdz = cdz.subset_celltypes_with_data_name('peaks_q0.01_tissue_open_exp')
+# %%
+peaks = cdz.get_peaks(cdz.ids[0], 'peaks_q0.01_tissue_open_exp')
+# %%
+import seaborn as sns
+sns.displot(peaks['Expression_negative'])
+# %%
+peaks[(peaks['Expression_negative']>0) | (peaks['Expression_positive']>0) ].Expression_negative.hist()
+# %%
