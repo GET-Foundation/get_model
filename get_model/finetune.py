@@ -5,7 +5,7 @@ import os
 import time
 from collections import OrderedDict
 from pathlib import Path
-
+from get_model.dataset.zarr_dataset import DenseZarrIO
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
@@ -291,9 +291,16 @@ def get_args():
 
     parser.add_argument(
         "--data_set",
-        default="Expression",
+        default="Expression_Finetune_Fetal",
         type=str,
-        help="ImageNet dataset path",
+        help="Training dataset path",
+    )
+
+    parser.add_argument(
+        "--eval_data_set",
+        default="Expression_Finetune_Fetal.adult_eval",
+        type=str,
+        help="Evaluation dataset path",
     )
     parser.add_argument(
         "--output_dir", default="", help="path where to save, empty for no saving"
@@ -426,12 +433,15 @@ def main(args, ds_init):
     np.random.seed(seed)
     # random.seed(seed)
 
+    sequence_obj = DenseZarrIO(f'{args.data_path}/hg38.zarr', dtype='int8')
+    sequence_obj.load_to_memory_dense()
+
     cudnn.benchmark = True
-    dataset_train = build_dataset(is_train=True, args=args)
+    dataset_train = build_dataset(is_train=True, args=args, sequence_obj=sequence_obj)
     if args.disable_eval_during_finetuning:
         dataset_val = None
     else:
-        dataset_val = build_dataset(is_train=False, args=args)
+        dataset_val = build_dataset(is_train=False, args=args, sequence_obj=sequence_obj)
 
     if args.distributed:
         num_tasks = utils.get_world_size()

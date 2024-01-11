@@ -14,6 +14,7 @@ export CUDA_LAUNCH_BLOCKING=1
 # batch_size can be adjusted according to the graphics card
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
     --data_set "Expression_Finetune_Fetal" \
+    --eval_data_set "Expression_Finetune_Fetal.adult_eval" \
     --data_path ${DATA_PATH} \
     --input_dim 1274 \
     --output_dim 2 \

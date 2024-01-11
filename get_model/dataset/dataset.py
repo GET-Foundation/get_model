@@ -282,7 +282,7 @@ def build_dataset(is_train, args):
     return dataset
 
 
-def build_dataset_zarr(is_train, args):
+def build_dataset_zarr(is_train, args, sequence_obj=None):
     if args.data_set == "Pretrain":
         transform = DataAugmentationForGETPeak(args)
         print("Data Aug = %s" % str(transform))
@@ -290,8 +290,11 @@ def build_dataset_zarr(is_train, args):
         # get FILEPATH
         codebase = os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__))))
-        hg38 = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
-        hg38.load_to_memory_dense()
+        if sequence_obj is None:
+            sequence_obj = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
+            sequence_obj.load_to_memory_dense()
+        else:
+            logging.info('sequence_obj is provided')
         dataset = ZarrPretrainDataset([f'{root}/shendure_fetal_dense.zarr',
                             f'{root}/bingren_adult_dense.zarr'],
                            f'{root}/hg38.zarr',
@@ -299,7 +302,7 @@ def build_dataset_zarr(is_train, args):
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, preload_count=args.preload_count, 
-                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, sequence_obj=hg38)
+                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, sequence_obj=sequence_obj)
     elif args.data_set == "Expression_Finetune_Fetal":
         transform = DataAugmentationForGETPeak(args)
         print("Data Aug = %s" % str(transform))
@@ -307,15 +310,38 @@ def build_dataset_zarr(is_train, args):
         # get FILEPATH
         codebase = os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__))))
-        hg38 = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
-        hg38.load_to_memory_dense()
+        if sequence_obj is None:
+            sequence_obj = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
+            sequence_obj.load_to_memory_dense()
+        else:
+            logging.info('sequence_obj is provided')
         dataset = ZarrPretrainDataset([f'{root}/shendure_fetal_dense.zarr'],
                            f'{root}/hg38.zarr',
                            f'{root}/hg38_motif_result.zarr', [
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, additional_peak_columns=['Expression_positive', 'Expression_negative'], preload_count=args.preload_count, 
-                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, sequence_obj=hg38, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=args.leave_out_chromosomes.split(','), is_train=is_train, dataset_size=1024)
+                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=args.leave_out_chromosomes.split(','), is_train=is_train, dataset_size=65536)
+    elif not is_train and args.eval_data_set == "Expression_Finetune_Fetal.adult_eval":
+        transform = DataAugmentationForGETPeak(args)
+        print("Data Aug = %s" % str(transform))
+        root = args.data_path
+        # get FILEPATH
+        codebase = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
+        if sequence_obj is None:
+            sequence_obj = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
+            sequence_obj.load_to_memory_dense()
+        else:
+            logging.info('sequence_obj is provided')
+        dataset = ZarrPretrainDataset([f'{root}/bingren_adult_dense.zarr'],
+                           f'{root}/hg38.zarr',
+                           f'{root}/hg38_motif_result.zarr', [
+                           f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
+                           f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
+                           peak_name=args.peak_name, additional_peak_columns=['Expression_positive', 'Expression_negative'], preload_count=args.preload_count, 
+                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, sequence_obj=sequence_obj, leave_out_celltypes=None,
+                           leave_out_chromosomes=args.leave_out_chromosomes.split(','), is_train=is_train, dataset_size=8192)
         
     else:
         raise NotImplementedError()
