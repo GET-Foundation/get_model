@@ -6,10 +6,6 @@ DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
 
 export NCCL_P2P_LEVEL=NVL
-# debug
-export NCCL_DEBUG=INFO
-export TORCH_DISTRIBUTED_DEBUG=INFO
-export CUDA_LAUNCH_BLOCKING=1
 
 # batch_size can be adjusted according to the graphics card
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
@@ -27,7 +23,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --peak_name "peaks_q0.01_tissue_open_exp" \
     --n_packs 1 \
     --flash_attn \
-    --lr 1e-3 \
+    --lr 5e-4 \
     --opt adamw \
     --wandb_project_name "get_finetune" \
     --wandb_run_name "ATACSplitPool_finetune" \
