@@ -181,7 +181,10 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     mask_for_loss[mask_for_loss!=1]=0
     mask_for_loss = mask_for_loss.to(exp.device, non_blocking=True).unsqueeze(-1)
     exp = exp * mask_for_loss
+    indices = torch.where(mask_for_loss==1)
+    exp = exp[indices[0], indices[1], :].flatten()
     exp_target = exp_target * mask_for_loss
+    exp_target = exp_target[indices[0], indices[1], :].flatten()
     loss_exp = criterion(exp, exp_target)
     # loss = loss_atac + loss_exp
     loss = loss_exp
@@ -226,12 +229,12 @@ def finetune_train_one_epoch(
     for data_iter_step, batch in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
     ):  
-        logging.info("data_iter_step: {}".format(data_iter_step))
-        logging.info("start getting batch")
+        # logging.info("data_iter_step: {}".format(data_iter_step))
+        # logging.info("start getting batch")
         sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
         if min(chunk_size)<0:
             continue
-        logging.info("Got batch")
+        # logging.info("Got batch")
         step = data_iter_step // update_freq
         
         if step >= num_training_steps_per_epoch:
@@ -249,7 +252,7 @@ def finetune_train_one_epoch(
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
 
-        logging.info("start cuda computing")
+        # logging.info("start cuda computing")
         sample_track = sample_track.to(device, non_blocking=True).bfloat16()
         peak_seq = peak_seq.to(device, non_blocking=True).bfloat16()
         motif_mean_std = motif_mean_std.to(device, non_blocking=True).bfloat16()
@@ -266,7 +269,7 @@ def finetune_train_one_epoch(
 
         loss_value = loss.item()
 
-        logging.info("Got loss")
+        # logging.info("Got loss")
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)

@@ -53,7 +53,7 @@ class ZarrDataPool(object):
                  max_peak_length=None, center_expand_target=None, sequence_obj=None, motif_mean_std_obj=None,
                  additional_peak_columns=None,
                  leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True):
-        logging.info('Initializing ZarrDataPool')
+        # logging.info('Initializing ZarrDataPool')
         if sequence_obj is None:
             self.sequence = DenseZarrIO(genome_seq_zarr, dtype='int8', mode='r')
             self.sequence.load_to_memory_dense()
@@ -72,7 +72,7 @@ class ZarrDataPool(object):
         self.is_train = is_train
         self.initialize_datasets()
         self.calculate_metadata()
-        logging.info('ZarrDataPool initialized')
+        # logging.info('ZarrDataPool initialized')
     
     def initialize_datasets(self):
         self.zarr_dict = {cdz.data_key: cdz for zarr_dir in self.zarr_dirs for cdz in [
@@ -239,7 +239,7 @@ class PreloadDataPack(object):
     """A class to store preloaded data for a slot."""
     def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, padding=50, mask_ratio=0.5,
                  n_peaks_lower_bound=5, n_peaks_upper_bound=200, window_index=None):
-        logging.info('Initializing PreloadDataPack')
+        # logging.info('Initializing PreloadDataPack')
         self.preload_count = preload_count
         self.zarr_data_pool = zarr_data_pool
         self.preloaded_data = []
@@ -256,7 +256,7 @@ class PreloadDataPack(object):
         self.window_index = window_index
         self.preload_data(window_index)
 
-        logging.info('PreloadDataPack initialized')
+        # logging.info('PreloadDataPack initialized')
 
     def __len__(self):
         return self.insulation_peak_counts.shape[0]
@@ -390,7 +390,7 @@ class PreloadDataPack(object):
         return df.set_index('key').to_dict()['index_peak']
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None,
+    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None,
                 leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True, dataset_size=655_360):
         super().__init__()
         """
@@ -445,6 +445,7 @@ class PretrainDataset(Dataset):
         self.mask_ratio = mask_ratio
 
         self.peak_name = peak_name
+        self.insulation_subsample_ratio = insulation_subsample_ratio
         self.n_peaks_lower_bound = n_peaks_lower_bound
         self.n_peaks_upper_bound = n_peaks_upper_bound
 
@@ -460,7 +461,8 @@ class PretrainDataset(Dataset):
         else:
             self.sequence = sequence_obj
         self.mms = MotifMeanStd(genome_motif_zarr)
-        self.datapool = ZarrDataPool(zarr_dirs, genome_seq_zarr, insulation_paths, peak_name=peak_name, max_peak_length=max_peak_length, center_expand_target=center_expand_target, sequence_obj=self.sequence,
+        self.datapool = ZarrDataPool(zarr_dirs, genome_seq_zarr, insulation_paths, peak_name=peak_name, 
+                                     insulation_subsample_ratio=self.insulation_subsample_ratio, max_peak_length=max_peak_length, center_expand_target=center_expand_target, sequence_obj=self.sequence,
                                      motif_mean_std_obj=self.mms,
                                      additional_peak_columns=self.additional_peak_columns,
                                      leave_out_celltypes=self.leave_out_celltypes, 
