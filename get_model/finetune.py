@@ -10,8 +10,11 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import utils
-from dataset.dataset import build_dataset#, sparse_batch_collate
-from engine import evaluate_all, finetune_train_one_epoch as train_one_epoch
+from dataset.dataset import build_dataset_zarr as build_dataset
+from dataset.zarr_dataset import worker_init_fn_get
+from get_model.dataset.collate import get_rev_collate_fn
+from engine import evaluate_all
+from engine import finetune_train_one_epoch as train_one_epoch
 from optim import (
     LayerDecayValueAssigner,
     create_optimizer,
@@ -21,43 +24,99 @@ from timm.data.mixup import Mixup
 from timm.models import create_model
 from timm.utils import ModelEma
 from utils import NativeScalerWithGradNormCount as NativeScaler
-
-import get_model.model.model
 import wandb
-import warnings
+import get_model.model.model
 
-# Suppress FutureWarnings
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore", category=FutureWarning)
 torch.autograd.set_detect_anomaly(True)
 
 
 def get_args():
     parser = argparse.ArgumentParser(
-        "GeneFormer fine-tuning and evaluation script for gene expression prediction",
+        "GET fine-tuning and evaluation script for gene expression prediction",
         add_help=False,
     )
     parser.add_argument("--batch_size", default=64, type=int)
     parser.add_argument("--epochs", default=30, type=int)
     parser.add_argument("--update_freq", default=1, type=int)
-    parser.add_argument("--save_ckpt_freq", default=20, type=int)
+    parser.add_argument("--save_ckpt_freq", default=1, type=int)
+    # wandb params
+    parser.add_argument("--wandb_project_name", type=str, default="get-finetune", help="wandb project name")
+    parser.add_argument("--wandb_run_name", type=str, default=None, help="wandb run name")
+
 
     parser.add_argument("--setting", default="ood", type=str)
-    parser.add_argument(
-        "--spike_in", default=1.0, type=float, help="ratio of spike fetal finetuning"
-    )
+
 
     # Model parameters
     parser.add_argument(
         "--model",
-        default="deit_base_patch16_224",
+        default="get_finetune_motif",
         type=str,
         metavar="MODEL",
         help="Name of model to train",
     )
+    # torch compile
+    parser.add_argument(
+        "--compile_model",
+        action="store_true",
+        help="compile model with torch compile",
+    )
+    # Dataset parameters
+    parser.add_argument(
+        "--num_region_per_sample",
+        default=200,
+        type=int,
+        help="number of regions for each sample",
+    )
 
-    parser.add_argument("--input_size", default=224, type=int, help="images input size")
-    parser.add_argument("--input_dim", default=111, type=int, help="input dim")
+    parser.add_argument(
+        "--peak_name",
+        default="peaks_p0.01",
+        type=str,
+        help="peak name to use",
+    )
+
+    parser.add_argument(
+        "--preload_count",
+        default=200,
+        type=int,
+        help="number of samples to preload",
+    )
+
+    parser.add_argument(
+        "--n_packs",
+        default=5,
+        type=int,
+        help="number of samples per window",
+    )
+
+    parser.add_argument(
+        "--max_peak_length",
+        default=5000,
+        type=int,
+        help="maximum peak length",
+    )
+
+    parser.add_argument(
+        "--center_expand_target",
+        default=1000,
+        type=int,
+        help="center expand target",
+    )
+
+    parser.add_argument(
+        "--n_peaks_lower_bound",
+        default=5,
+        type=int,
+        help="lower bound of number of peaks",
+    )
+
+    parser.add_argument(
+        "--n_peaks_upper_bound",
+        default=200,
+        type=int,
+        help="upper bound of number of peaks",
+    )
     parser.add_argument(
         "--last_layer", default=False, type=bool, help="train only last layers"
     )
@@ -68,6 +127,20 @@ def get_args():
         metavar="PCT",
         help="Dropout rate (default: 0.)",
     )
+    parser.add_argument(
+        "--num_motif",
+        default=1273,
+        type=int,
+        help="number of motifs for each region",
+    )
+    parser.add_argument(
+        "--input_dim", default=111, type=int, help="input dimension size for backbone"
+    )
+
+    parser.add_argument(
+        "--output_dim", default=111, type=int, help="output dimension size for backbone"
+    )
+
     parser.add_argument(
         "--attn_drop_rate",
         type=float,
@@ -161,7 +234,7 @@ def get_args():
     parser.add_argument(
         "--min_lr",
         type=float,
-        default=1e-6,
+        default=1e-5,
         metavar="LR",
         help="lower lr bound for cyclic schedulers that hit 0 (1e-5)",
     )
@@ -169,7 +242,7 @@ def get_args():
     parser.add_argument(
         "--warmup_epochs",
         type=int,
-        default=5,
+        default=1,
         metavar="N",
         help="epochs to warmup LR, if scheduler supports",
     )
@@ -180,28 +253,14 @@ def get_args():
         metavar="N",
         help="num of steps to warmup LR, will overload warmup_epochs if set > 0",
     )
-
-    # Augmentation parameters
     parser.add_argument(
-        "--color_jitter",
+        "--mask_ratio",
+        default=0.5,
         type=float,
-        default=0.4,
-        metavar="PCT",
-        help="Color jitter factor (default: 0.4)",
-    )
-
-    parser.add_argument(
-        "--smoothing", type=float, default=0.1, help="Label smoothing (default: 0.1)"
-    )
-    parser.add_argument(
-        "--train_interpolation",
-        type=str,
-        default="bicubic",
-        help='Training interpolation (random, bilinear, bicubic default: "bicubic")',
+        help="ratio of the visual tokens/patches need be masked",
     )
 
     # Evaluation parameters
-    parser.add_argument("--crop_pct", type=float, default=None)
     parser.add_argument(
         "--criterion",
         default="mse",
@@ -210,35 +269,11 @@ def get_args():
         help='Criterion (default: "mse"',
     )
 
-    # * Random Erase params
-    parser.add_argument(
-        "--reprob",
-        type=float,
-        default=0.25,
-        metavar="PCT",
-        help="Random erase prob (default: 0.25)",
-    )
-    parser.add_argument(
-        "--remode",
-        type=str,
-        default="pixel",
-        help='Random erase mode (default: "pixel")',
-    )
-    parser.add_argument(
-        "--recount", type=int, default=1, help="Random erase count (default: 1)"
-    )
-    parser.add_argument(
-        "--resplit",
-        action="store_true",
-        default=False,
-        help="Do not random erase first (clean) augmentation split",
-    )
-
     # * Finetuning params
     parser.add_argument("--finetune", default="", help="finetune from checkpoint")
     parser.add_argument("--model_key", default="model|module", type=str)
     parser.add_argument("--model_prefix", default="", type=str)
-    parser.add_argument("--init_scale", default=0.001, type=float)
+    # cls token and mean pooling
     parser.add_argument("--use_mean_pooling", action="store_true")
     parser.set_defaults(use_mean_pooling=True)
     parser.add_argument("--use_cls", action="store_false", dest="use_mean_pooling")
@@ -246,25 +281,17 @@ def get_args():
     # Dataset parameters
     parser.add_argument(
         "--data_path",
-        default="/datasets01/imagenet_full_size/061417/",
+        default="/pmglocal/xf2217/get_data/",
         type=str,
         help="dataset path",
     )
     parser.add_argument(
         "--eval_data_path", default=None, type=str, help="dataset path for evaluation"
     )
-    parser.add_argument("--nb_classes", default=1, type=int, help="1 for regression")
-    parser.add_argument(
-        "--num_region_per_sample",
-        default=600,
-        type=int,
-        help="number of regions for each sample",
-    )
 
     parser.add_argument(
         "--data_set",
         default="Expression",
-        choices=["Expression", "Expression_v2", "Expression_v3", "TFBS"],
         type=str,
         help="ImageNet dataset path",
     )
@@ -291,7 +318,7 @@ def get_args():
     parser.add_argument("--eval", action="store_true", help="Perform evaluation only")
     parser.add_argument(
         "--eval_freq",
-        default=5,
+        default=1,
         type=int,
         metavar="N",
     )
@@ -308,10 +335,13 @@ def get_args():
         help="Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.",
     )
     parser.add_argument("--no_pin_mem", action="store_false", dest="pin_mem")
-    parser.add_argument("--split_ratio", default=0.7, type=float)
     parser.set_defaults(pin_mem=True)
+    parser.add_argument("--flash_attn", action="store_true", default=False, help="flash attention")
+
+    parser.add_argument("--split_ratio", default=0.7, type=float)
 
     # distributed training parameters
+    parser.add_argument("--distributed", default=True, action="store_true")
     parser.add_argument(
         "--world_size", default=1, type=int, help="number of distributed processes"
     )
@@ -342,7 +372,9 @@ def get_args():
         type=str,
         help="dataset type",
     )
-    # parser.add_argument('--spike_in', default=1, type=float, help='spike in ratio')
+    parser.add_argument(
+        "--spike_in", default=1.0, type=float, help="ratio of spike fetal finetuning"
+    )
     parser.add_argument("--plot_scatter", action="store_true", default=False)
     parser.add_argument("--use_natac", action="store_true", default=False)
     parser.add_argument("--mask_tss", action="store_true", default=False)
@@ -353,8 +385,6 @@ def get_args():
     parser.add_argument("--target_sequence_length", default=200, type=int)
 
     # wandb params
-    parser.add_argument("--wandb_project_name", type=str, default="get-finetune", help="wandb project name")
-    parser.add_argument("--wandb_run_name", type=str, default=None, help="wandb run name")
     known_args, _ = parser.parse_known_args()
 
     if known_args.enable_deepspeed:
@@ -424,13 +454,19 @@ def main(args, ds_init):
             sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        sampler_val = torch.utils.data.RandomSampler(dataset_val)
 
-    if args.log_dir is not None:
+    log_writer = None
+    if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
         log_writer = utils.TensorboardLogger(log_dir=args.log_dir)
-    else:
-        log_writer = None
+    elif global_rank == 0 and args.wandb_project_name is not None:
+        wandb.login()
+        run = wandb.init(
+            project=args.wandb_project_name,
+            name=args.wandb_run_name,
+        )
+        log_writer = utils.WandBLogger(run)
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
@@ -439,49 +475,42 @@ def main(args, ds_init):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        # collate_fn=sparse_batch_collate,
+        collate_fn = get_rev_collate_fn,
+        worker_init_fn=worker_init_fn_get,
     )
 
     if dataset_val is not None:
         data_loader_val = torch.utils.data.DataLoader(
             dataset_val,
             sampler=sampler_val,
-            batch_size=int(1.5 * args.batch_size),
+            batch_size=int(args.batch_size),
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
-            drop_last=False,
-            # collate_fn=sparse_batch_collate,
-        )
+            drop_last=True,
+            collate_fn = get_rev_collate_fn,
+            worker_init_fn=worker_init_fn_get,
+    )
     else:
         data_loader_val = None
-
-    mixup_fn = None
-    # mixup_active = args.mixup > 0 or args.cutmix > 0.0 or args.cutmix_minmax is not None
-    # if mixup_active:
-    #     print("Mixup is activated!")
-    #     mixup_fn = Mixup(
-    #         mixup_alpha=args.mixup,
-    #         cutmix_alpha=args.cutmix,
-    #         cutmix_minmax=args.cutmix_minmax,
-    #         prob=args.mixup_prob,
-    #         switch_prob=args.mixup_switch_prob,
-    #         mode=args.mixup_mode,
-    #         label_smoothing=args.smoothing,
-    #         num_classes=args.nb_classes,
-    #     )
 
     model = create_model(
         args.model,
         pretrained=False,
-        in_chans=args.input_dim,
-        num_classes=args.nb_classes,
+        num_region_per_sample=args.num_region_per_sample,
+        num_motif=args.num_motif,
+        motif_dim=args.input_dim,
+        output_dim=args.output_dim,
+        flash_attn=args.flash_attn,
+
         drop_rate=args.drop,
         drop_path_rate=args.drop_path,
         attn_drop_rate=args.attn_drop_rate,
         drop_block_rate=None,
+
         use_mean_pooling=args.use_mean_pooling,
-        init_scale=args.init_scale,
         setting=args.setting,
+
+
     )
 
     num_region_per_sample = args.num_region_per_sample
@@ -523,38 +552,6 @@ def main(args, ds_init):
             else:
                 new_dict[key] = checkpoint_model[key]
         checkpoint_model = new_dict
-
-        # interpolate position embedding
-        # if "pos_embed" in checkpoint_model:
-        #     pos_embed_checkpoint = checkpoint_model["pos_embed"]
-        #     embedding_size = pos_embed_checkpoint.shape[-1]
-        #     num_patches = model.patch_embed.num_patches
-        #     num_extra_tokens = model.pos_embed.shape[-2] - num_patches
-        #     # height (== width) for the checkpoint position embedding
-        #     orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
-        #     # height (== width) for the new position embedding
-        #     new_size = int(num_patches**0.5)
-        #     # class_token and dist_token are kept unchanged
-        #     if orig_size != new_size:
-        #         print(
-        #             "Position interpolate from %dx%d to %dx%d"
-        #             % (orig_size, orig_size, new_size, new_size)
-        #         )
-        #         extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
-        #         # only the position tokens are interpolated
-        #         pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
-        #         pos_tokens = pos_tokens.reshape(
-        #             -1, orig_size, orig_size, embedding_size
-        #         ).permute(0, 3, 1, 2)
-        #         pos_tokens = torch.nn.functional.interpolate(
-        #             pos_tokens,
-        #             size=(new_size, new_size),
-        #             mode="bicubic",
-        #             align_corners=False,
-        #         )
-        #         pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
-        #         new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
-        #         checkpoint_model["pos_embed"] = new_pos_embed
 
         utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
         if args.last_layer:
@@ -639,7 +636,6 @@ def main(args, ds_init):
         assert model.gradient_accumulation_steps() == args.update_freq
     else:
         if args.distributed:
-            # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
             model = torch.nn.parallel.DistributedDataParallel(
                 model, device_ids=[args.gpu],
                 find_unused_parameters=True,
@@ -737,7 +733,7 @@ def main(args, ds_init):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
-        if log_writer is not None:
+        if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
             log_writer.set_step(epoch * num_training_steps_per_epoch * args.update_freq)
         train_stats = train_one_epoch(
             model,
@@ -750,7 +746,6 @@ def main(args, ds_init):
             loss_scaler,
             args.clip_grad,
             model_ema,
-            mixup_fn,
             log_writer=log_writer,
             start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values,
@@ -862,7 +857,7 @@ def main(args, ds_init):
             wandb.log(log_stats)
         
         if args.output_dir and utils.is_main_process():
-            if log_writer is not None:
+            if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
                 log_writer.flush()
             with open(
                 os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8"

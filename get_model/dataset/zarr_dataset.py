@@ -1,5 +1,6 @@
 # %%
 import logging
+from operator import is_
 import os.path
 import random
 import re
@@ -49,7 +50,9 @@ class MotifMeanStd(object):
 class ZarrDataPool(object):
     """A class to handle data loading for a slot."""
     def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks',insulation_subsample_ratio=0.1,
-                 max_peak_length=None, center_expand_target=None, sequence_obj=None, motif_mean_std_obj=None):
+                 max_peak_length=None, center_expand_target=None, sequence_obj=None, motif_mean_std_obj=None,
+                 additional_peak_columns=None,
+                 leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True):
         logging.info('Initializing ZarrDataPool')
         if sequence_obj is None:
             self.sequence = DenseZarrIO(genome_seq_zarr, dtype='int8', mode='r')
@@ -63,17 +66,37 @@ class ZarrDataPool(object):
         self.peak_name = peak_name
         self.max_peak_length = max_peak_length
         self.center_expand_target = center_expand_target
+        self.leave_out_celltypes = leave_out_celltypes
+        self.leave_out_chromosomes = leave_out_chromosomes
+        self.additional_peak_columns = additional_peak_columns
+        self.is_train = is_train
         self.initialize_datasets()
         self.calculate_metadata()
         logging.info('ZarrDataPool initialized')
     
     def initialize_datasets(self):
         self.zarr_dict = {cdz.data_key: cdz for zarr_dir in self.zarr_dirs for cdz in [
-            CelltypeDenseZarrIO(zarr_dir)]}
+            CelltypeDenseZarrIO(zarr_dir).subset_celltypes_with_data_name(self.peak_name)]}
+        
+        # remove the leave out celltypes using subset
+        if self.leave_out_celltypes is not None and isinstance(self.leave_out_celltypes, list):
+            for data_key, cdz in self.zarr_dict.items():
+                self.zarr_dict.update({data_key: cdz.leave_out_celltypes(self.leave_out_celltypes, inverse = not self.is_train)})
+        elif isinstance(self.leave_out_celltypes, str):
+            # remove the leave out celltypes using substring
+            for data_key, cdz in self.zarr_dict.items():
+                self.zarr_dict.update({data_key: cdz.leave_out_celltypes_with_pattern(self.leave_out_celltypes, inverse = not self.is_train)})
+
         self.data_keys = list(self.zarr_dict.keys())
         self.peaks_dict = self._load_peaks()
         self.insulation = self._load_insulation(
             self.insulation_paths).sample(frac=self.insulation_subsample_ratio).reset_index(drop=True)
+        # remove the leave out chromosomes from insulation
+        if self.leave_out_chromosomes is not None and isinstance(self.leave_out_chromosomes, list):
+            if self.is_train:
+                self.insulation = self.insulation.query('Chromosome not in @self.leave_out_chromosomes').reset_index(drop=True)
+            else:
+                self.insulation = self.insulation.query('Chromosome in @self.leave_out_chromosomes').reset_index(drop=True)
         
     def calculate_metadata(self):
         first_zarr = next(iter(self.zarr_dict.values()))
@@ -109,6 +132,10 @@ class ZarrDataPool(object):
             motif_mean_std = np.zeros((2, 1274))
         return window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
     
+    def _get_peak_names(self, data_key, celltype_id):
+        """Return a list of peak names for a celltype, use glob peaks*"""
+        return [key for key in self.zarr_dict[data_key].dataset[celltype_id].keys() if 'peaks' in key]
+
     def _load_peaks(self):
         """
         Load peaks data which is a dictionary of pandas dataframe feather
@@ -117,6 +144,9 @@ class ZarrDataPool(object):
         peaks_dict = {}
         for data_key, cdz in self.zarr_dict.items():
             for celltype_id in cdz.ids:
+                # check if the peak name exists in the zarr
+                if self.peak_name not in self._get_peak_names(data_key, celltype_id):
+                    continue
                 peak = cdz.get_peaks(
                     celltype_id, self.peak_name)
                 if self.max_peak_length is not None:
@@ -220,6 +250,7 @@ class PreloadDataPack(object):
         self.mask_ratio = mask_ratio
         self.n_peaks_lower_bound = n_peaks_lower_bound
         self.n_peaks_upper_bound = n_peaks_upper_bound
+        self.additional_peak_columns = self.zarr_data_pool.additional_peak_columns
         if window_index is None:
             window_index = np.random.randint(0, self.zarr_data_pool.total_chunk_length, size=self.preload_count)
         self.window_index = window_index
@@ -288,8 +319,15 @@ class PreloadDataPack(object):
         if len(insulations) == 0:
             raise ValueError('Empty insulation')
         i_start, i_end = self._insulation_sampler(insulations, insulation_index)
-        celltype_peaks = celltype_peaks.query(
-            'Start>@i_start and End<@i_end')[['Start', 'End']].to_numpy()
+        celltype_peaks = celltype_peaks.query('Start>@i_start and End<@i_end')
+        
+        if self.additional_peak_columns is not None:
+            # assume numeric columns
+            additional_peak_columns_data = celltype_peaks[self.additional_peak_columns].to_numpy().astype(np.float32)
+        else:
+            additional_peak_columns_data = None
+        
+        celltype_peaks = celltype_peaks[['Start', 'End']].to_numpy().astype(np.int64)
         if len(celltype_peaks) == 0:
             raise ValueError('No peaks in insulation region')
 
@@ -313,7 +351,7 @@ class PreloadDataPack(object):
             'start': start, 'end': end, 'i_start': wi_start, 'i_end': wi_end, 'mask_ratio': self.mask_ratio
         }
 
-        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, motif_mean_std
+        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, motif_mean_std, additional_peak_columns_data
     
     def _insulation_sampler(self, insulation_df, insulation_index=None):
         """
@@ -351,7 +389,8 @@ class PreloadDataPack(object):
         return df.set_index('key').to_dict()['index_peak']
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None):
+    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None,
+                leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True, dataset_size=655_360):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -408,7 +447,12 @@ class PretrainDataset(Dataset):
         self.n_peaks_lower_bound = n_peaks_lower_bound
         self.n_peaks_upper_bound = n_peaks_upper_bound
 
+        self.leave_out_celltypes = leave_out_celltypes
+        self.leave_out_chromosomes = leave_out_chromosomes
+        self.is_train = is_train
+        self.dataset_size = dataset_size
         self.n_packs = n_packs
+        self.additional_peak_columns = additional_peak_columns
         if sequence_obj is None:
             self.sequence = DenseZarrIO(genome_seq_zarr, dtype='int8', mode='r')
             self.sequence.load_to_memory_dense()
@@ -416,7 +460,11 @@ class PretrainDataset(Dataset):
             self.sequence = sequence_obj
         self.mms = MotifMeanStd(genome_motif_zarr)
         self.datapool = ZarrDataPool(zarr_dirs, genome_seq_zarr, insulation_paths, peak_name=peak_name, max_peak_length=max_peak_length, center_expand_target=center_expand_target, sequence_obj=self.sequence,
-                                     motif_mean_std_obj=self.mms)
+                                     motif_mean_std_obj=self.mms,
+                                     additional_peak_columns=self.additional_peak_columns,
+                                     leave_out_celltypes=self.leave_out_celltypes, 
+                                     leave_out_chromosomes=self.leave_out_chromosomes,
+                                     is_train=self.is_train)
 
         # initialize n_packs preload data packs
         self.preload_data_packs = None
@@ -450,7 +498,7 @@ class PretrainDataset(Dataset):
         # Return the length of the dataset
         # Implement based on how you define the length of your dataset
         # Could be based on total windows, number of samples per window, etc.
-        return 655_360
+        return self.dataset_size
 
 
     def reload_data(self, slot):

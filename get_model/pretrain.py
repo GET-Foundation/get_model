@@ -1,8 +1,6 @@
-#%%
 import argparse
 import datetime
 import json
-from math import log
 import os
 import time
 from pathlib import Path
@@ -20,10 +18,9 @@ from timm.models import create_model
 from utils import NativeScalerWithGradNormCount as NativeScaler
 import wandb
 import get_model.model.model
-#%%
 
 def get_args_parser():
-    parser = argparse.ArgumentParser("GeneFormer pre-training script", add_help=False)
+    parser = argparse.ArgumentParser("GET pre-training script", add_help=False)
     parser.add_argument("--batch_size", default=64, type=int)
     parser.add_argument("--epochs", default=300, type=int)
     parser.add_argument("--save_ckpt_freq", default=1, type=int)
@@ -33,18 +30,17 @@ def get_args_parser():
     # Model parameters
     parser.add_argument(
         "--model",
-        default="get_pretraine_motif",
+        default="get_pretrain_motif",
         type=str,
         metavar="MODEL",
         help="Name of model to train",
     )
-
     parser.add_argument(
         "--compile_model",
         action="store_true",
         help="compile model with torch compile",
     )
-
+    # Dataset parameters
     parser.add_argument(
         "--num_region_per_sample",
         default=200,
@@ -213,7 +209,7 @@ def get_args_parser():
     parser.add_argument(
         "--warmup_epochs",
         type=int,
-        default=40,
+        default=1,
         metavar="N",
         help="epochs to warmup LR, if scheduler supports",
     )
@@ -228,7 +224,7 @@ def get_args_parser():
     # Dataset parameters
     parser.add_argument(
         "--data_path",
-        default="/datasets01/imagenet_full_size/061417/train",
+        default="/pmglocal/xf2217/get_data/",
         type=str,
         help="dataset path",
     )

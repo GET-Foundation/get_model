@@ -34,12 +34,14 @@ def sparse_batch_collate(batch: list):
 
 def get_rev_collate_fn(batch):
     # zip and convert to list
-    sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, motif_mean_std = zip(*batch)
+    sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, motif_mean_std, additional_peak_columns_data  = zip(*batch)
     celltype_peaks = list(celltype_peaks)
     sample_track = list(sample_track)
     sample_peak_sequence = list(sample_peak_sequence)
     sample_metadata = list(sample_metadata)
     motif_mean_std = list(motif_mean_std)
+    additional_peak_columns_data = list(additional_peak_columns_data)
+    
     batch_size = len(celltype_peaks)
     mask_ratio = sample_metadata[0]['mask_ratio']
 
@@ -90,6 +92,13 @@ def get_rev_collate_fn(batch):
         idx = np.random.choice(maskable_pos_i, size=np.ceil(mask_ratio*len(maskable_pos_i)).astype(int), replace=False)
         mask[i,idx] = 1
 
-    
+    if additional_peak_columns_data[0] is not None:
+        # pad each element to max_n_peaks using zeros
+        for i in range(len(additional_peak_columns_data)):
+            additional_peak_columns_data[i] = np.pad(additional_peak_columns_data[i], ((0, max_n_peaks - len(additional_peak_columns_data[i])), (0,0)))
+        additional_peak_columns_data = np.stack(additional_peak_columns_data, axis=0)
+        additional_peak_columns_data = torch.from_numpy(additional_peak_columns_data)
+    else:
+        additional_peak_columns_data = 0
 
-    return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std
+    return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, additional_peak_columns_data

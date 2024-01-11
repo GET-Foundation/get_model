@@ -112,6 +112,7 @@ class Attention_Flash(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x, attention_mask=None):
+        # TODO: add attention mask support
         B, N, C = x.shape
         qkv_bias = None
         if self.q_bias is not None:

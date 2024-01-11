@@ -46,10 +46,10 @@ def pretrain_one_epoch(
     loss_masked = nn.MSELoss()
     #loss_atac = nn.PoissonNLLLoss(log_input=False, reduction="mean")
 
-    for step, (batch) in enumerate(
+    for step, batch in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
     ):
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _ = batch
         if min(chunk_size)<0:
             continue
         # assign learning rate & weight decay for each step
@@ -170,13 +170,21 @@ def pretrain_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def train_class_batch(model, peak, seq, mask, ctcf_pos, atac_target, exp_target, criterion):
-    atac, exp = model(peak, seq, mask, ctcf_pos)
+def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, criterion):
+    with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
+        atac, exp = model(peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
     # loss_atac = criterion(atac, atac_target)
+        
+    mask_for_loss = mask.clone()
+    mask_for_loss[mask_for_loss!=-10000]=1
+    mask_for_loss[mask_for_loss!=1]=0
+    mask_for_loss = mask_for_loss.to(exp.device, non_blocking=True).unsqueeze(-1)
+    exp = exp * mask_for_loss
+    exp_target = exp_target * mask_for_loss
     loss_exp = criterion(exp, exp_target)
     # loss = loss_atac + loss_exp
     loss = loss_exp
-    return loss, atac, exp
+    return loss, atac, exp, exp_target 
 
 
 def finetune_train_one_epoch(
@@ -214,10 +222,14 @@ def finetune_train_one_epoch(
     else:
         optimizer.zero_grad()
 
-    for data_iter_step, (peaks, seq, mask, ctcf_pos, exp_targets) in enumerate(
+    for data_iter_step, batch in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
     ):
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
+        if min(chunk_size)<0:
+            continue
         step = data_iter_step // update_freq
+        
         if step >= num_training_steps_per_epoch:
             continue
         it = start_steps + step  # global training iteration
@@ -233,20 +245,19 @@ def finetune_train_one_epoch(
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
 
-        peaks = peaks.to(device, non_blocking=True)
-        peaks = peaks.float()
-        seq = seq.to(device, non_blocking=True)
-        mask = mask.to(device, non_blocking=True).bool().squeeze(-1)
-        exp_targets = exp_targets.to(device, non_blocking=True)
-        exp_targets = exp_targets.float()
-        ctcf_pos = ctcf_pos.to(device, non_blocking=True).bool()
-        atac_targets = peaks[:, :, -1]
+        sample_track = sample_track.to(device, non_blocking=True).bfloat16()
+        peak_seq = peak_seq.to(device, non_blocking=True).bfloat16()
+        motif_mean_std = motif_mean_std.to(device, non_blocking=True).bfloat16()
+        # chunk_size = chunk_size.to(device, non_blocking=True)
+        n_peaks = n_peaks.to(device, non_blocking=True)
+        labels_data = labels_data.to(device, non_blocking=True).bfloat16()
+
 
         if loss_scaler is None:
             peaks = peaks.half()
-            loss, atac, exp = train_class_batch(model, peaks, seq, mask, ctcf_pos, atac_targets, exp_targets, criterion)
+            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, criterion)
         else:
-            loss, atac, exp = train_class_batch(model, peaks, seq, mask, ctcf_pos, atac_targets, exp_targets, criterion)
+            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, criterion)
 
         loss_value = loss.item()
 
@@ -286,22 +297,18 @@ def finetune_train_one_epoch(
                     model_ema.update(model)
             loss_scale_value = loss_scaler.state_dict()["scale"]
 
+
         torch.cuda.synchronize()
 
+        
         # NOTE: evaluation
-
+        # EMA
         if (data_iter_step + 1) % update_freq == 0 and args.eval_each_step:
             test_stats = evaluate_all(
                 data_loader_val, model, device, criterion, args, printlog=False
             )
         else:
             test_stats = None
-        # if mixup_fn is None:
-        #     r2score = score_r2(output, targets)
-        #     spearmanr_score = score_spearmanr(output, targets)
-        # else:
-        #     r2score = None
-        #     spearmanr_score = None
 
         metric_logger.update(loss=loss_value)
         if test_stats is not None:
@@ -324,7 +331,7 @@ def finetune_train_one_epoch(
         metric_logger.update(weight_decay=weight_decay_value)
         metric_logger.update(grad_norm=grad_norm)
 
-        if log_writer is not None:
+        if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
             log_writer.update(loss=loss_value, head="loss")
             if test_stats is not None:
                 log_writer.update(r2score=test_stats["r2score"], head="loss")
@@ -334,14 +341,29 @@ def finetune_train_one_epoch(
                 log_writer.update(
                     spearmanr_score=test_stats["spearmanr_score"], head="loss"
                 )
-
             log_writer.update(loss_scale=loss_scale_value, head="opt")
             log_writer.update(lr=max_lr, head="opt")
             log_writer.update(min_lr=min_lr, head="opt")
             log_writer.update(weight_decay=weight_decay_value, head="opt")
             log_writer.update(grad_norm=grad_norm, head="opt")
-
             log_writer.set_step()
+        elif log_writer is not None and isinstance(log_writer, utils.WandBLogger):
+            log_writer.update(data={
+                'training_loss': loss_value,
+                'loss_scale': loss_scale_value,
+                'lr': max_lr,
+                'min_lr': min_lr,
+                'epoch': epoch,
+                'weight_decay': weight_decay_value,
+                'grad_norm': grad_norm},
+                step=it, print_freq=print_freq)
+            if test_stats is not None:
+                log_writer.update(data={
+                    'r2score': test_stats["r2score"],
+                    'pearsonr_score': test_stats["pearsonr_score"],
+                    'spearmanr_score': test_stats["spearmanr_score"],
+                    'epoch': epoch},
+                    step=it, print_freq=print_freq)
 
     # gather the stats from all processes
     #metric_logger.synchronize_between_processes()
@@ -349,13 +371,13 @@ def finetune_train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def cal_score_stats(preds, obs, data_loader, args, eval_nonzero=False, eval_tss=False):
+def cal_score_stats(preds, obs, data_loader, args):
 
-    if eval_nonzero:
+    if args.eval_nonzero:
         r2score = score_r2(preds[obs > 0], obs[obs > 0])
         spearmanr_score = score_spearmanr(preds[obs > 0], obs[obs > 0])
         pearsonr_score = score_pearsonr(preds[obs > 0], obs[obs > 0])
-    if eval_tss:
+    elif args.eval_tss:
         gene_idx = np.where(data_loader.dataset.tssidxs.reshape(-1)>0)[0]
         r2score = score_r2(preds[gene_idx][obs[gene_idx]>0], obs[gene_idx][obs[gene_idx]>0])
         spearmanr_score = score_spearmanr(preds[gene_idx][obs[gene_idx]>0], obs[gene_idx][obs[gene_idx]>0])
@@ -381,25 +403,21 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
     preds_atac = []
     obs_atac = []
 
-    for (peaks, seq, mask, ctcf_pos, exp_targets) in data_loader:
-        peaks = peaks.to(device, non_blocking=True)
-        peaks = peaks.float()
-        seq = seq.to(device, non_blocking=True)
-        mask = mask.to(device, non_blocking=True).bool().squeeze(-1)
-        exp_targets = exp_targets.to(device, non_blocking=True)
-        exp_targets = exp_targets.float()
-        ctcf_pos = ctcf_pos.to(device, non_blocking=True).bool()
-        atac_targets = peaks[:, :, -1]
+    for batch in data_loader:
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
+        
+        sample_track = sample_track.to(device, non_blocking=True).bfloat16()
+        peak_seq = peak_seq.to(device, non_blocking=True).bfloat16()
+        motif_mean_std = motif_mean_std.to(device, non_blocking=True).bfloat16()
+        # chunk_size = chunk_size.to(device, non_blocking=True)
+        n_peaks = n_peaks.to(device, non_blocking=True)
+        labels_data = labels_data.to(device, non_blocking=True).bfloat16()
+
         # compute output
-        # with torch.amp.autocast('cuda', dtype=torch.bfloat16):
-        atac, exp = model(peaks, seq, mask, ctcf_pos)
-        # loss_atac = criterion(atac, atac_targets)
-        loss_exp = criterion(exp, exp_targets)
-        # loss = loss_atac + loss_exp
-        loss = loss_exp
+        loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, criterion)
 
         preds.append(exp.reshape(-1).detach().cpu().numpy())
-        obs.append(exp_targets.reshape(-1).detach().cpu().numpy())
+        obs.append(exp_target.reshape(-1).detach().cpu().numpy())
         # preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
         # obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
 
@@ -410,11 +428,11 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
     # preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
     # obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
 
-    r2score, pearsonr_score, spearmanr_score = cal_score_stats(preds, obs, data_loader, args, eval_tss=True)
+    r2score, pearsonr_score, spearmanr_score = cal_score_stats(preds, obs, data_loader, args)
     # r2score_atac, pearsonr_score_atac, spearmanr_score_atac = cal_score_stats(preds_atac, obs_atac, data_loader, args)
 
     # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
+    # metric_logger.synchronize_between_processes()
 
     metric_logger.meters["r2score"].update(r2score, n=1)
     metric_logger.meters["pearsonr_score"].update(pearsonr_score, n=1)
