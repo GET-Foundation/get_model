@@ -9,6 +9,7 @@ export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
+    --resume "/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm/checkpoint-2.pth" \
     --data_set "Expression_Finetune_Fetal" \
     --eval_data_set "Expression_Finetune_Fetal.adult_eval" \
     --data_path ${DATA_PATH} \
@@ -38,4 +39,3 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --epochs 100 \
     --num_region_per_sample 200 \
     --output_dir ${OUTPUT_DIR} 
-    # --resume "/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm/checkpoint-2.pth" \
