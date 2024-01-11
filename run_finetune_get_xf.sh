@@ -6,6 +6,10 @@ DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
 
 export NCCL_P2P_LEVEL=NVL
+# debug
+export NCCL_DEBUG=INFO
+export TORCH_DISTRIBUTED_DEBUG=INFO
+export CUDA_LAUNCH_BLOCKING=1
 
 # batch_size can be adjusted according to the graphics card
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \

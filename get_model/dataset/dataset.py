@@ -315,7 +315,7 @@ def build_dataset_zarr(is_train, args):
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, additional_peak_columns=['Expression_positive', 'Expression_negative'], preload_count=args.preload_count, 
-                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, sequence_obj=hg38, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=args.leave_out_chromosomes.split(','), is_train=is_train, dataset_size=65536)
+                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, sequence_obj=hg38, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=args.leave_out_chromosomes.split(','), is_train=is_train, dataset_size=1024)
         
     else:
         raise NotImplementedError()

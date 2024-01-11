@@ -46,7 +46,8 @@ def get_rev_collate_fn(batch):
     mask_ratio = sample_metadata[0]['mask_ratio']
 
     n_peak_max = max([len(x) for x in celltype_peaks])
-    sample_len_max = max([len(x.getnnz(1)) for x in sample_peak_sequence])
+    # calculate max length of the sample sequence using peak coordinates, padding is 100 per peak
+    sample_len_max = max([(x[:,1]-x[:,0]).sum()+100*x.shape[0] for x in celltype_peaks])
     sample_track_boundary = []
     sample_peak_sequence_boundary = []
     # pad each peaks in the end with 0

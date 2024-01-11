@@ -338,6 +338,7 @@ class PreloadDataPack(object):
 
         wi_start, wi_end = i_start - start, i_end - start
         celltype_peaks = celltype_peaks - i_start
+        # TODO: padding might lead to out of bound of window
 
         
         sample_track = track[wi_start:wi_end]
@@ -464,7 +465,7 @@ class PretrainDataset(Dataset):
                                      additional_peak_columns=self.additional_peak_columns,
                                      leave_out_celltypes=self.leave_out_celltypes, 
                                      leave_out_chromosomes=self.leave_out_chromosomes,
-                                     is_train=self.is_train)
+                                     is_train=self.is_train, )
 
         # initialize n_packs preload data packs
         self.preload_data_packs = None

@@ -5,6 +5,7 @@
 # https://github.com/facebookresearch/deit
 # https://github.com/facebookresearch/dino
 # --------------------------------------------------------'
+import logging
 import math
 import sys
 from typing import Iterable, Optional
@@ -224,10 +225,13 @@ def finetune_train_one_epoch(
 
     for data_iter_step, batch in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
-    ):
+    ):  
+        logging.info("data_iter_step: {}".format(data_iter_step))
+        logging.info("start getting batch")
         sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
         if min(chunk_size)<0:
             continue
+        logging.info("Got batch")
         step = data_iter_step // update_freq
         
         if step >= num_training_steps_per_epoch:
@@ -245,6 +249,7 @@ def finetune_train_one_epoch(
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
 
+        logging.info("start cuda computing")
         sample_track = sample_track.to(device, non_blocking=True).bfloat16()
         peak_seq = peak_seq.to(device, non_blocking=True).bfloat16()
         motif_mean_std = motif_mean_std.to(device, non_blocking=True).bfloat16()
@@ -261,6 +266,7 @@ def finetune_train_one_epoch(
 
         loss_value = loss.item()
 
+        logging.info("Got loss")
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
@@ -364,6 +370,8 @@ def finetune_train_one_epoch(
                     'spearmanr_score': test_stats["spearmanr_score"],
                     'epoch': epoch},
                     step=it, print_freq=print_freq)
+        
+        print("Finished one iteration")
 
     # gather the stats from all processes
     #metric_logger.synchronize_between_processes()
@@ -405,7 +413,8 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
 
     for batch in data_loader:
         sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
-        
+        if min(chunk_size)<0:
+            continue
         sample_track = sample_track.to(device, non_blocking=True).bfloat16()
         peak_seq = peak_seq.to(device, non_blocking=True).bfloat16()
         motif_mean_std = motif_mean_std.to(device, non_blocking=True).bfloat16()
@@ -422,6 +431,7 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         # obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
 
         metric_logger.update(loss=loss.item())
+        torch.distributed.barrier()
 
     preds = np.concatenate(preds, axis=0).reshape(-1)
     obs = np.concatenate(obs, axis=0).reshape(-1)
