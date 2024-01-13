@@ -9,9 +9,9 @@ export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
-    --resume "/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm/checkpoint-2.pth" \
+    --finetune "/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm/checkpoint-2.pth" \
     --data_set "Expression_Finetune_Fetal" \
-    --eval_data_set "Expression_Finetune_Fetal.adult_eval" \
+    --eval_data_set "Expression_Finetune_Fetal.fetal_eval" \
     --data_path ${DATA_PATH} \
     --input_dim 1274 \
     --output_dim 2 \
@@ -19,6 +19,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --model get_finetune_motif \
     --batch_size 16 \
     --num_workers 64 \
+    --n_peaks_lower_bound 50 \
     --preload_count 200 \
     --pin_mem \
     --peak_name "peaks_q0.01_tissue_open_exp" \
@@ -32,7 +33,6 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --dist_eval \
     --eval_nonzero \
     --leave_out_celltypes "Astrocyte" \
-    --leave_out_chromosomes "chr11" \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 1 \

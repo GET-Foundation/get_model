@@ -53,10 +53,20 @@ cdz = CelltypeDenseZarrIO(
 # %%
 cdz = cdz.subset_celltypes_with_data_name('peaks_q0.01_tissue_open_exp')
 # %%
-peaks = cdz.get_peaks(cdz.ids[0], 'peaks_q0.01_tissue_open_exp')
+cid = 'Fetal Erythroblast 1.shendure_fetal.sample_40_liver.4096'
+peaks = cdz.get_peaks(cid, 'peaks_q0.01_tissue_open_exp')
+accessibility = cdz.get_peak_counts(cid, 'peaks_q0.01_tissue_open_exp')
+peaks = pd.concat([peaks, accessibility], axis=1)
+peaks['Exp'] = peaks['Expression_positive'] + peaks['Expression_negative']
+
+#%%
+peaks['aTPM'] = np.log10(peaks['Count']/peaks['Count'].sum()*1e5+1)
+#%%
+peaks.loc[peaks.aTPM<0.2, 'Exp'] = 0
+peaks.query('Exp>0').plot(x='Exp', y='aTPM', kind='scatter', s=0.15)
 # %%
-import seaborn as sns
-sns.displot(peaks['Expression_negative'])
-# %%
-peaks[(peaks['Expression_negative']>0) | (peaks['Expression_positive']>0) ].Expression_negative.hist()
+# pearson correlation
+from scipy.stats import pearsonr
+pearsonr(peaks.query('Exp>0')['Exp'], peaks.query('Exp>0')['aTPM'])
+
 # %%
