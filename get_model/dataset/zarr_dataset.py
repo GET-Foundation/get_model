@@ -92,6 +92,11 @@ class ZarrDataPool(object):
         self.insulation = self._load_insulation(
             self.insulation_paths).sample(frac=self.insulation_subsample_ratio).reset_index(drop=True)
         # remove the leave out chromosomes from insulation
+        if isinstance(self.leave_out_chromosomes, str):
+            if ',' in self.leave_out_chromosomes:
+                self.leave_out_chromosomes = self.leave_out_chromosomes.split(',')
+            else:
+                self.leave_out_chromosomes = [self.leave_out_chromosomes]
         if self.leave_out_chromosomes is not None and isinstance(self.leave_out_chromosomes, list):
             if self.is_train:
                 self.insulation = self.insulation.query('Chromosome not in @self.leave_out_chromosomes').reset_index(drop=True)
