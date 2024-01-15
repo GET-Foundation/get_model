@@ -302,7 +302,7 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, preload_count=args.preload_count, 
-                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, sequence_obj=sequence_obj)
+                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj)
     elif is_train and args.data_set == "Expression_Finetune_Fetal":
         transform = DataAugmentationForGETPeak(args)
         print("Data Aug = %s" % str(transform))
@@ -323,7 +323,7 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, insulation_subsample_ratio=0.8,
                            additional_peak_columns=['Expression_positive', 'Expression_negative'], preload_count=args.preload_count, 
-                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=args.leave_out_chromosomes, is_train=is_train, non_redundant='max_depth', dataset_size=65536*2)
+                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=args.leave_out_chromosomes, is_train=is_train, non_redundant='max_depth', dataset_size=65536)
     elif not is_train and args.eval_data_set == "Expression_Finetune_Fetal.fetal_eval":
         transform = DataAugmentationForGETPeak(args)
         print("Data Aug = %s" % str(transform))
@@ -344,8 +344,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, insulation_subsample_ratio=0.8, additional_peak_columns=['Expression_positive', 'Expression_negative'], preload_count=args.preload_count, 
-                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes,
-                           leave_out_chromosomes='chr1', is_train=is_train,non_redundant='max_depth', dataset_size=4096)
+                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, leave_out_celltypes='Erythroblast',
+                           leave_out_chromosomes=args.leave_out_chromosomes, is_train=is_train, non_redundant='max_depth', dataset_size=4096)
         
     else:
         raise NotImplementedError()

@@ -18,8 +18,8 @@ pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr
                             ],
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=5, n_peaks_upper_bound=200, leave_out_celltypes='Astrocyte',
+                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=100, n_packs=1,
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=5, n_peaks_upper_bound=50, use_insulation=False, leave_out_celltypes='Astrocyte',
                            leave_out_chromosomes='chr1,chr2', is_train=False, dataset_size=65536, additional_peak_columns=['Expression_positive', 'Expression_negative'])
 pretrain.__len__()
 #%%
@@ -35,11 +35,11 @@ data_loader_train = torch.utils.data.DataLoader(
 )
 
 # %%
-from get_model.model.model import GETFinetune  
+from get_model.model.model import GETPretrain  
 from get_model.utils import load_state_dict
 import torch.nn as nn
 loss_masked = nn.MSELoss()
-model = GETFinetune(
+model = GETPretrain(
         num_regions=200,
         num_res_block=0,
         motif_prior=False,
@@ -49,7 +49,7 @@ model = GETFinetune(
         flash_attn=True,
         nhead=12,
         dropout=0.1,
-        output_dim=2,
+        output_dim=1280,
         pos_emb_components=[],
     )
 #%%

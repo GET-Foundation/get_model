@@ -118,6 +118,12 @@ def get_args():
         help="upper bound of number of peaks",
     )
     parser.add_argument(
+        "--use_insulation",
+        action="store_true",
+        default=False,
+        help="use insulation score",
+    )
+    parser.add_argument(
         "--last_layer", default=False, type=bool, help="train only last layers"
     )
     parser.add_argument(
@@ -577,10 +583,10 @@ def main(args, ds_init):
 
         # model.load_state_dict(checkpoint_model, strict=False)
         # TODO: temporarily freeze atac_attention 
-        for name, param in model.named_parameters():
-            if "atac_attention" in name:
-                param.requires_grad = False
-                print(f"Freezed weights of {name}")
+        # for name, param in model.named_parameters():
+        #     if "atac_attention" in name:
+        #         param.requires_grad = False
+        #         print(f"Freezed weights of {name}")
             
 
     model.to(device)

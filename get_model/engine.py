@@ -374,7 +374,7 @@ def finetune_train_one_epoch(
                     'epoch': epoch},
                     step=it, print_freq=print_freq)
         
-        print("Finished one iteration")
+        # print("Finished one iteration")
 
     # gather the stats from all processes
     #metric_logger.synchronize_between_processes()
