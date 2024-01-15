@@ -29,7 +29,7 @@ pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=5, n_peaks_upper_bound=200, leave_out_celltypes='Astrocyte', leave_out_chromosomes='chr1', is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative'])
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=50, n_peaks_upper_bound=200, leave_out_celltypes=None, leave_out_chromosomes='chr1', is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative'])
 pretrain.__len__()
 # %%
 pretrain.datapool.insulation
@@ -72,7 +72,7 @@ model = GETFinetune(
         pos_emb_components=[],
     )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm_finetune_fetal/checkpoint-20.pth')
+checkpoint = torch.load('/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm_finetune_fetal_Astrocyte_ood/checkpoint-45.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=False)
 
@@ -134,11 +134,15 @@ xs = np.concatenate(xs).flatten()
 ys = np.concatenate(ys).flatten()
 # %%
 
-sns.scatterplot(x=ys, y=xs, s=5)
+sns.scatterplot(x=ys, y=xs, s=1, alpha=0.5)
 # add correlation as text
 corr = np.corrcoef(xs, ys)[0,1]
 corr = round(corr, 2)
 plt.title(f'Correlation: {corr}')
 # %%
 np.mean(losses)
+# %%
+# r^2
+from sklearn.metrics import r2_score
+r2_score(ys, xs)
 # %%

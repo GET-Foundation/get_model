@@ -1,6 +1,6 @@
 #!/bin/bash
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm_finetune_fetal/'
+OUTPUT_DIR='/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm_finetune_fetal_Astrocyte_ood/'
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
@@ -28,14 +28,16 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --lr 5e-4 \
     --opt adamw \
     --wandb_project_name "get_finetune" \
-    --wandb_run_name "ATACSplitPool_finetune" \
+    --wandb_run_name "ATACSplitPool_finetune_maxdepth" \
     --eval_freq 1 \
+    --eval \
     --dist_eval \
     --eval_nonzero \
     --leave_out_celltypes "Astrocyte" \
+    --leave_out_chromosomes "chr11" \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
-    --warmup_epochs 1 \
+    --warmup_epochs 5 \
     --epochs 100 \
     --num_region_per_sample 200 \
     --output_dir ${OUTPUT_DIR} 

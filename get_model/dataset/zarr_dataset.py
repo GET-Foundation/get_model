@@ -52,7 +52,7 @@ class ZarrDataPool(object):
     def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks',insulation_subsample_ratio=0.1,
                  max_peak_length=None, center_expand_target=None, sequence_obj=None, motif_mean_std_obj=None,
                  additional_peak_columns=None,
-                 leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True):
+                 leave_out_celltypes=None, leave_out_chromosomes=None, non_redundant='max_depth', is_train=True):
         # logging.info('Initializing ZarrDataPool')
         if sequence_obj is None:
             self.sequence = DenseZarrIO(genome_seq_zarr, dtype='int8', mode='r')
@@ -70,6 +70,7 @@ class ZarrDataPool(object):
         self.leave_out_chromosomes = leave_out_chromosomes
         self.additional_peak_columns = additional_peak_columns
         self.is_train = is_train
+        self.non_redundant = non_redundant
         self.initialize_datasets()
         self.calculate_metadata()
         # logging.info('ZarrDataPool initialized')
@@ -86,6 +87,11 @@ class ZarrDataPool(object):
             # remove the leave out celltypes using substring
             for data_key, cdz in self.zarr_dict.items():
                 self.zarr_dict.update({data_key: cdz.leave_out_celltypes_with_pattern(self.leave_out_celltypes, inverse = not self.is_train)})
+        
+        # remove redundant celltype instances, keep only one depth and one sample
+        if self.non_redundant:
+            for data_key, cdz in self.zarr_dict.items():
+                self.zarr_dict.update({data_key: cdz.non_redundant_celltypes(self.non_redundant)})
 
         self.data_keys = list(self.zarr_dict.keys())
         self.peaks_dict = self._load_peaks()
@@ -395,8 +401,7 @@ class PreloadDataPack(object):
         return df.set_index('key').to_dict()['index_peak']
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None,
-                leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True, dataset_size=655_360):
+    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True, non_redundant=False,dataset_size=655_360):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -409,41 +414,27 @@ class PretrainDataset(Dataset):
         Parameters:
         zarr_dirs (list): A list of paths to zarr files.
         genome_seq_zarr (str): Path to the genome sequence zarr file.
+        genome_motif_zarr (str): Path to the genome motif zarr file.
         insulation_paths (list): A list of paths to insulation data.
-        preload_count (int): Number of windows to preload.
-        samples_per_window (int): Number of samples to generate from each window.
-
-        Attributes:
-        zarr_dirs (list): A list of paths to zarr files.
-        genome_seq_zarr (str): Path to the genome sequence zarr file.
-        insulation_paths (list): A list of paths to insulation data.
-        preload_count (int): Number of windows to preload.
-        samples_per_window (int): Number of samples to generate from each window.
-        sequence (DenseZarrIO): An instance of DenseZarrIO for genome sequence.
-        zarr_dict (dict): A dictionary of CelltypeDenseZarrIO instances for zarr files.
-        data_keys (list): A list of data keys for zarr files.
-        n_celltypes (int): Number of cell types.
-        chunk_size (int): Chunk size.
-        chrom_n_chunks (dict): A dictionary of chromosome names and number of chunks.
-        genome_chunk_length (int): Total number of chunks in the genome.
-        total_chunk_length (int): Total number of chunks in the genome multiplied by number of cell types.
-        preloaded_data (list): A list of preloaded data for windows.
-        usage_counters (list): A list of usage counters for preloaded data.
-        locks (list): A list of locks for preloaded data.
-        reload_queue (Queue): A queue for reloading data.
-        reload_thread (threading.Thread): A thread for reloading data.
-        peaks_dict (dict): A dictionary of pandas dataframes for peaks data.
-        insulation (pd.DataFrame): A pandas dataframe for insulation data.
-
-        Note:
-        This implementation features a preloading mechanism to speed up data loading.
-        It preloads a fixed number of windows and generates samples from the preloaded data.
-        When a window is used up, it reloads the data for the window in a separate thread.
-        Note that a window is 4Mbp in size while a chunk in zarr is 2Mbp in size, so each window contains two consecutive chunks.
+        peak_name (str): The name of the peak track in the zarr files.
+        preload_count (int): The number of windows to preload.
+        padding (int): The number of nucleotides to pad around each peak.
+        mask_ratio (float): The ratio of nucleotides to mask in the peak sequence.
+        n_packs (int): The number of data packs to preload.
+        max_peak_length (int): The maximum length of peaks to include in the dataset.
+        center_expand_target (int): The target length of peaks to center and expand.
+        insulation_subsample_ratio (float): The ratio of insulation data to use.
+        n_peaks_lower_bound (int): The lower bound of number of peaks in a sample.
+        n_peaks_upper_bound (int): The upper bound of number of peaks in a sample.
+        sequence_obj (DenseZarrIO): A DenseZarrIO object for genome sequence.
+        leave_out_celltypes (list): A list of cell type IDs to leave out.
+        leave_out_chromosomes (list): A list of chromosome names to leave out.
+        is_train (bool): Whether to use the dataset for training.
+        non_redundant (bool): Whether to remove redundant cell type instances.
+        dataset_size (int): The size of the dataset.
 
         Returns:
-        tuple: A tuple containing the extracted sample track, peak sequence, and a dictionary with metadata
-            about the extracted sample, including cell type ID, chromosome name, and positions.
+        PretrainDataset: A PretrainDataset object.
         """
         self.preload_count = preload_count
         self.padding = padding
@@ -457,6 +448,7 @@ class PretrainDataset(Dataset):
         self.leave_out_celltypes = leave_out_celltypes
         self.leave_out_chromosomes = leave_out_chromosomes
         self.is_train = is_train
+        self.non_redundant = non_redundant
         self.dataset_size = dataset_size
         self.n_packs = n_packs
         self.additional_peak_columns = additional_peak_columns
@@ -472,7 +464,7 @@ class PretrainDataset(Dataset):
                                      additional_peak_columns=self.additional_peak_columns,
                                      leave_out_celltypes=self.leave_out_celltypes, 
                                      leave_out_chromosomes=self.leave_out_chromosomes,
-                                     is_train=self.is_train, )
+                                     is_train=self.is_train, non_redundant=self.non_redundant)
 
         # initialize n_packs preload data packs
         self.preload_data_packs = None
