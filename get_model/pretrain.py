@@ -232,8 +232,8 @@ def get_args_parser():
     parser.add_argument("--data_type", default="fetal", type=str, help="dataset type")
     parser.add_argument("--use_natac", action="store_true", default=False)
     parser.add_argument("--data_set", default="Pretrain", type=str)
-    parser.add_argument("--leave_out_celltypes", default="", type=str)
-    parser.add_argument("--leave_out_chromosomes", default="", type=str)
+    parser.add_argument("--leave_out_celltypes", default=None)
+    parser.add_argument("--leave_out_chromosomes", default=None)
     parser.add_argument("--use_seq", default=False, action="store_true")
     parser.add_argument("--sampling_step", default=100, type=int)
     parser.add_argument(

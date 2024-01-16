@@ -431,10 +431,7 @@ class PreloadDataPack(object):
         """
         Return the number of samples in the preload data pack.
         """
-        if self.use_insulation:
-            return self.insulation_peak_counts.shape[0]
-        else:
-            return self._calculate_total_samples()
+        return self._calculate_total_samples()
 
     # def __iter__(self):
     #     return self
@@ -446,7 +443,7 @@ class PreloadDataPack(object):
         Returns:
         tuple: A tuple containing the extracted sample track, peak sequence, and a dictionary with metadata
         """
-        if self.next_sample >= self.insulation_peak_counts.shape[0]:
+        if self.next_sample >= self.__len__():
             return None
         else:
             sample = self.get_sample_with_idx(self.next_sample)
@@ -532,7 +529,7 @@ class PreloadDataPack(object):
             about the extracted sample, including cell type ID, chromosome name, and positions.
         """
         window_index, chr_name, start, end, celltype_id, track, insulations, celltype_peaks, motif_mean_std = window
-        peak_start = peak_index * self.n_peaks_upper_bound
+        peak_start = peak_index * self.n_peaks_upper_bound 
         peak_end = peak_start + self.n_peaks_upper_bound
         celltype_peaks = celltype_peaks.iloc[peak_start:peak_end]
         track_start = celltype_peaks['Start'].min() - self.padding
@@ -669,7 +666,10 @@ class PreloadDataPack(object):
         """
         Calculate the total number of samples in the preload data pack when not using insulation data.
         """
-        return sum(self.per_window_n_samples)
+        if self.use_insulation:
+            return self.insulation_peak_counts.shape[0]
+        else:
+            return sum(self.per_window_n_samples)
 
     def _get_peak_count(self, item_insulation, celltype_peaks):
         """
