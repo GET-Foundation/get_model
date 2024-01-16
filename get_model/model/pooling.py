@@ -66,7 +66,7 @@ class ATACSplitPool(nn.Module):
     splitting can be calculated by cumsum of the padded peak lengths. The output
     is a tensor of shape (batch, n_peak, dimension). 
     """
-    def __init__(self, pool_method='mean', atac_kernel_num=6, motif_dim=1274, joint_kernel_num=6, atac_kernel_size=3, joint_kernel_size=3):
+    def __init__(self, pool_method='mean', atac_kernel_num=16, motif_dim=639, joint_kernel_num=16, atac_kernel_size=3, joint_kernel_size=3):
         super().__init__()
         self.pool_method = pool_method
         self.atac_conv = nn.Conv1d(1, atac_kernel_num, atac_kernel_size, padding="same", bias=False)
@@ -76,10 +76,16 @@ class ATACSplitPool(nn.Module):
         self.patch_pool = nn.MaxPool1d(50, stride=50)
 
     def forward(self, x, atac, peak_split, n_peaks, max_n_peaks):
+        # normalize atac to [0,1], keeps mostly shape information
         atac = atac / (atac.max(1, keepdim=True)[0]+1e-5)
+        # split pool motif signal to region level
         x_region = self.forward_x(x, peak_split, n_peaks, max_n_peaks)
+        # jointly convolve atac and motif signal at 50bp bin level
         joint_region = self.forward_joint(x, atac, peak_split, n_peaks, max_n_peaks)
+        # log transform to make the signal < 10
         joint_region = torch.log10(joint_region+1)
+        # concatenate motif representation with joint representation
+        # shape (batch, n_peak, motif_dim + joint_kernel_num)
         x = torch.cat([x_region, joint_region], dim=2)
         return x
 

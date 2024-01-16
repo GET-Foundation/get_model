@@ -137,12 +137,15 @@ class MotifScanner(nn.Module):
     """
 
     def __init__(
-        self, num_motif=637, target_dim=1280, include_reverse_complement=True):
+        self, num_motif=637, include_reverse_complement=True, bidirectional_except_ctcf=False):
         super().__init__()
         self.num_motif = num_motif
-        if include_reverse_complement:
+        self.bidirectional_except_ctcf = bidirectional_except_ctcf
+        if include_reverse_complement and self.bidirectional_except_ctcf:
             self.num_motif *= 2
-        self.target_dim = target_dim
+        elif include_reverse_complement:
+            self.num_motif *= 2
+
         motifs = self.load_pwm_as_kernel(include_reverse_complement=include_reverse_complement)
         self.motif = nn.Sequential(
             nn.Conv1d(4, self.num_motif, 29, padding="same", bias=False),
@@ -177,6 +180,14 @@ class MotifScanner(nn.Module):
         B, L, _ = x.shape
         x = x.permute(0, 2, 1)                # (B * N, 4, L)
         x = self.motif(x)
+        if self.bidirectional_except_ctcf:
+            # get ctcf scanned score for both motif and reverse complement motif. idx of ctcf is 77 and 637+77=714
+            ctcf = x[:, 77, :]
+            ctcf_rev = x[:, 714, :]
+            # combine motif and reverse complement motif for all motifs
+            x = x[:, :637, :] + x[:, 637:, :]
+            # add ctcf/ctcf_rev score to the end
+            x = torch.cat([x, ctcf.unsqueeze(1), ctcf_rev.unsqueeze(1)], dim=1)
         x = x.permute(0, 2, 1)#.reshape(B, L, self.num_motif)     # (B, N, L, 1274)
 
         return x
@@ -202,7 +213,7 @@ class GETPretrain(nn.Module):
         self,
         num_regions=200,
         num_motif=637,
-        motif_dim=1274,
+        motif_dim=639,
         num_res_block=0,
         motif_prior=False,
         embed_dim=768,
@@ -236,7 +247,8 @@ class GETPretrain(nn.Module):
         self.joint_kernel_num = joint_kernel_num
         self.joint_kernel_size = joint_kernel_size
         self.motif_scanner = MotifScanner(
-            num_motif=num_motif, target_dim=motif_dim, include_reverse_complement=True
+            num_motif=num_motif, include_reverse_complement=True,
+            bidirectional_except_ctcf=True
         )
         self.atac_attention = ATACSplitPool()# if atac_attention else None
         # self.split_pool = SplitPool()
@@ -453,7 +465,8 @@ class GETFinetune(nn.Module):
         self.joint_kernel_num = joint_kernel_num
         self.joint_kernel_size = joint_kernel_size
         self.motif_scanner = MotifScanner(
-            num_motif=num_motif, target_dim=motif_dim, include_reverse_complement=True
+            num_motif=num_motif, include_reverse_complement=True,
+            bidirectional_except_ctcf=True
         )
         self.atac_attention = ATACSplitPool()# if atac_attention else None
         # self.split_pool = SplitPool()
