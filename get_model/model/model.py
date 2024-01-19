@@ -287,7 +287,7 @@ class GETPretrain(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, peak_seq, atac, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
         """forward function with hooks to return embedding or attention weights."""
         # peak_seq: [B, L, 4]
         # [B, L, 4] --> [B, L, 1274]
@@ -313,7 +313,7 @@ class GETPretrain(nn.Module):
             else:
                 x = pos_emb_component(x)
 
-        x, _ = self.encoder(x, mask=mask) # (N, D)
+        x, _ = self.encoder(x, mask=padding_mask) # (N, D)
         x_masked = self.head_mask(x) # (N, Motif)
         # x_masked = x_masked[mask].reshape(B, -1, C)
         # atac = F.softplus(self.head_atac(x.permute(0, 2, 1)).permute(0, 2, 1).squeeze(-1))
@@ -330,81 +330,6 @@ class GETPretrain(nn.Module):
     @torch.jit.ignore
     def no_weight_decay(self):
         return {"pos_embed", "cls_token"}
-
-
-class GETPretrainDecompose(GETPretrain):
-    """A GET model for pretraining using mask and prediction. Decompose local and global features.
-    Baseline ATAC should be able to be predicted by local features. To disentangle the global features,
-    we can shuffle the minibatch to break the correlation between regions.
-    """
-    def __init__(
-        self,
-        num_regions=200,
-        num_motif=637,
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=1,
-        pos_emb_components=["CTCF", "Rotary", "Absolute"],
-    ):
-        super().__init__(
-        num_regions=num_regions,
-        num_motif=num_motif,
-        num_res_block=num_res_block,
-        motif_prior=motif_prior,
-        embed_dim=embed_dim,
-        num_layers=num_layers,
-        d_model=d_model,
-        nhead=nhead,
-        dropout=dropout,
-        output_dim=output_dim,
-        pos_emb_components=pos_emb_components,
-        )
-        self.head_atac_local = nn.Conv1d(d_model, 1, 1)
-
-    def forward(self, peak, seq, mask, ctcf_pos):
-        """forward function with hooks to return embedding or attention weights."""
-        if seq is not None:
-            x = self.motif(
-                seq
-            )  # TODO ignore the nucleotide level output x for now, keeping only the region level output
-        else:
-            x = peak
-        x = self.region_embed(x)
-        local_atac = F.softplus(self.head_atac_local(x.permute(0, 2, 1)).permute(0, 2, 1).squeeze(-1))
-
-        B, N, C = peak.shape
-        mask_token = self.mask_token.expand(B, N, -1)
-        w = mask.unsqueeze(-1).type_as(mask_token)
-        x = x * (1 - w) + mask_token * w
-
-        for pos_emb_component in self.pos_embed:
-            if isinstance(pos_emb_component, CTCFPositionalEncoding):
-                x = pos_emb_component(x, ctcf_pos)
-            else:
-                x = pos_emb_component(x)
-
-        x, _ = self.encoder(x, mask=mask) # (N, D)
-        x_masked = self.head_mask(x) # (N, Motif)
-        x_masked = x_masked[mask].reshape(B, -1, C)
-        atac = local_atac + F.softplus(self.head_atac(x.permute(0, 2, 1)).permute(0, 2, 1).squeeze(-1))
-
-        return x_masked, atac, local_atac
-
-    def reset_head(self, output_dim, global_pool=""):
-        self.output_dim = output_dim
-        self.head = (
-            nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
-        )
-
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {"pos_embed", "cls_token"}
-
 
 class ExpressionHead(nn.Module):
     """Expression head"""
@@ -510,7 +435,7 @@ class GETFinetune(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, peak_seq, atac, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
         """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
         # peak_seq: [B, L, 4]
         # [B, L, 4] --> [B, L, 1274]
@@ -535,7 +460,7 @@ class GETFinetune(nn.Module):
                 x = pos_emb_component(x)
 
         tss_mask = None # TODO: Set tss_mask to None for now
-        x, _ = self.encoder(x, mask=tss_mask)
+        x, _ = self.encoder(x, mask=padding_mask)
         # atac = F.softplus(self.head_atac(x.permute(0, 2, 1))).permute(0, 2, 1).squeeze(-1)
         atac = None
 

@@ -25,8 +25,8 @@ sys.path.append('/manitou/pmg/users/xf2217/get_model')
 
 def get_padding_pos(mask):
     mask_ = mask.clone()
-    mask_[mask_!=-10000]=1
-    mask_[mask_!=1]=0
+    mask_[mask_!=-10000]=0
+    mask_[mask_!=0]=1
     return mask_
 
 def get_mask_pos(mask):

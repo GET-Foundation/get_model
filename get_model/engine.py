@@ -17,6 +17,7 @@ import utils
 from metrics import score_pearsonr, score_r2, score_spearmanr
 from timm.data import Mixup
 from timm.utils import ModelEma
+from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
 
 
 def pretrain_one_epoch(
@@ -65,16 +66,18 @@ def pretrain_one_epoch(
 
         sample_track = sample_track.to(device, non_blocking=True).bfloat16()
         peak_seq = peak_seq.to(device, non_blocking=True).bfloat16()
-        bool_mask_pos = mask.clone()
-        bool_mask_pos[bool_mask_pos==-10000]=0
-        bool_mask_pos = bool_mask_pos.to(device, non_blocking=True).bool()
+        # mask has 0, 1, -10000
+        mask_for_loss = get_mask_pos(mask)
+        padding_mask = get_padding_pos(mask)
+        mask_for_loss = mask_for_loss.to(device, non_blocking=True).bool()
+        padding_mask = padding_mask.to(device, non_blocking=True).bool()
         motif_mean_std = motif_mean_std.to(device, non_blocking=True).bfloat16()
         # chunk_size = chunk_size.to(device, non_blocking=True)
         n_peaks = n_peaks.to(device, non_blocking=True)
 
 
         with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
-            output_masked, _, target = model(peak_seq, sample_track, bool_mask_pos, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
+            output_masked, _, target = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
 
         # target generation
         with torch.no_grad():
@@ -95,9 +98,6 @@ def pretrain_one_epoch(
 
             B, _, C = regions_embed.shape
 
-        mask_for_loss = mask.clone()
-        # mask_for_loss[mask_for_loss!=-10000]=1
-        mask_for_loss[mask_for_loss!=1]=0
         mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
         loss_masked_value = loss_masked(input=output_masked*mask_for_loss, target=regions_embed*mask_for_loss)
         #loss_atac_value = loss_atac(atac, labels_atac)
@@ -172,14 +172,16 @@ def pretrain_one_epoch(
 
 
 def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, criterion):
+    device = peak_seq.device
+    padding_mask = get_padding_pos(mask)
+    mask_for_loss = 1-padding_mask
+    padding_mask = padding_mask.to(device, non_blocking=True).bool()
+    mask_for_loss = mask_for_loss.to(exp.device, non_blocking=True).unsqueeze(-1)
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
-        atac, exp = model(peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
+        atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
     # loss_atac = criterion(atac, atac_target)
         
-    mask_for_loss = mask.clone()
-    mask_for_loss[mask_for_loss!=-10000]=1
-    mask_for_loss[mask_for_loss!=1]=0
-    mask_for_loss = mask_for_loss.to(exp.device, non_blocking=True).unsqueeze(-1)
+
     exp = exp * mask_for_loss
     indices = torch.where(mask_for_loss==1)
     exp = exp[indices[0], indices[1], :].flatten()
