@@ -14,13 +14,13 @@ from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, Preloa
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 #%%
-pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr',
+pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/htan_gbm_dense.zarr',
                             ],
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=100, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=5, n_peaks_upper_bound=50, use_insulation=False, leave_out_celltypes='Astrocyte',
-                           leave_out_chromosomes='chr1,chr2', is_train=False, dataset_size=65536, additional_peak_columns=['Expression_positive', 'Expression_negative'])
+                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open', preload_count=100, n_packs=1,
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=5, n_peaks_upper_bound=100, use_insulation=False, leave_out_celltypes=None,
+                           leave_out_chromosomes=None, is_train=True, dataset_size=65536, additional_peak_columns=['Expression_positive', 'Expression_negative'])
 pretrain.__len__()
 #%%
 from get_model.dataset.zarr_dataset import worker_init_fn_get
@@ -40,7 +40,7 @@ from get_model.utils import load_state_dict
 import torch.nn as nn
 loss_masked = nn.MSELoss()
 model = GETPretrain(
-        num_regions=200,
+        num_regions=100,
         num_res_block=0,
         motif_prior=False,
         embed_dim=768,
@@ -49,11 +49,11 @@ model = GETPretrain(
         flash_attn=True,
         nhead=12,
         dropout=0.1,
-        output_dim=1280,
+        output_dim=655,
         pos_emb_components=[],
     )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm/checkpoint-2.pth')
+checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional/checkpoint-4.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=False)
 

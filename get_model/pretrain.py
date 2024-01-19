@@ -103,7 +103,12 @@ def get_args_parser():
         type=int,
         help="number of motifs for each region",
     )
-
+    parser.add_argument(
+        "--use_insulation",
+        action="store_true",
+        default=False,
+        help="use insulation score",
+    )
     parser.add_argument(
         "--mask_ratio",
         default=0.75,

@@ -225,9 +225,9 @@ class GETPretrain(nn.Module):
         pos_emb_components=["CTCF", "Rotary", "Absolute"],
         atac_attention=True,
         flash_attn=False,
-        atac_kernel_num=6,
+        atac_kernel_num=16,
         atac_kernel_size=3,
-        joint_kernel_num=6,
+        joint_kernel_num=16,
         joint_kernel_size=3,
     ):
         super().__init__()
@@ -430,7 +430,7 @@ class GETFinetune(nn.Module):
         self,
         num_regions=200,
         num_motif=637,
-        motif_dim=1274,
+        motif_dim=639,
         num_res_block=0,
         motif_prior=False,
         embed_dim=768,
@@ -442,9 +442,9 @@ class GETFinetune(nn.Module):
         pos_emb_components=["CTCF", "Rotary", "Absolute"],
         atac_attention=True,
         flash_attn=False,
-        atac_kernel_num=6,
+        atac_kernel_num=16,
         atac_kernel_size=3,
-        joint_kernel_num=6,
+        joint_kernel_num=16,
         joint_kernel_size=3,
         use_atac=False,
     ):

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/xf2217/output_rev_from_scratch_ATACSplitPool_unnorm_finetune_fetal_Erythroblast_leaveout_chr/'
+OUTPUT_DIR='/pmglocal/xf2217/output_rev_from_scratch_ATACSplitPool_unnorm_finetune_fetal_Erythroblast_leaveout_chr_bidirectional/'
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
@@ -8,11 +8,11 @@ PORT=7956
 export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
-OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
+OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
     --data_set "Expression_Finetune_Fetal" \
     --eval_data_set "Expression_Finetune_Fetal.fetal_eval" \
     --data_path ${DATA_PATH} \
-    --input_dim 1274 \
+    --input_dim 639 \
     --output_dim 2 \
     --num_motif 637 \
     --model get_finetune_motif \
@@ -28,7 +28,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --lr 5e-4 \
     --opt adamw \
     --wandb_project_name "get_finetune" \
-    --wandb_run_name "ATACSplitPool_finetune_from_scratch" \
+    --wandb_run_name "ATACSplitPool_finetune_from_scratch_bidirectional" \
     --eval_freq 1 \
     --dist_eval \
     --eval_nonzero \
@@ -37,6 +37,6 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 5 \
-    --epochs 100 \
+    --epochs 200 \
     --num_region_per_sample 100 \
     --output_dir ${OUTPUT_DIR} 

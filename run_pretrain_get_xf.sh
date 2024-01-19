@@ -1,6 +1,6 @@
 #!/bin/bash
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool/'
+OUTPUT_DIR='/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional/'
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
@@ -8,15 +8,15 @@ PORT=7956
 export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
-OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/pretrain.py \
+OMP_NUM_THREADS=1 torchrun --nproc_per_node=6 --rdzv-endpoint=localhost:$PORT get_model/pretrain.py \
     --data_set "Pretrain" \
     --data_path ${DATA_PATH} \
-    --input_dim 1274 \
+    --input_dim 639 \
     --output_dim 655 \
     --num_motif 637 \
     --mask_ratio 0.5 \
     --model get_pretrain_motif_base \
-    --batch_size 16 \
+    --batch_size 16
     --num_workers 64 \
     --n_peaks_lower_bound 10 \
     --n_peaks_upper_bound 100 \
@@ -28,6 +28,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --lr 1e-3 \
     --opt adamw \
     --wandb_project_name "get_pretrain" \
+    --wandb_run_name "get_pretrain_bidirection_no_insulation_100_peaks" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 1 \
     --epochs 100 \

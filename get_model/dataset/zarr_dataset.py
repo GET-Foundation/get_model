@@ -23,6 +23,16 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 sys.path.append('/manitou/pmg/users/xf2217/get_model')
 
+def get_padding_pos(mask):
+    mask_ = mask.clone()
+    mask_[mask_!=-10000]=1
+    mask_[mask_!=1]=0
+    return mask_
+
+def get_mask_pos(mask):
+    mask_ = mask.clone()
+    mask_[mask_==-10000]=0
+    return mask_
 
 class MotifMeanStd(object):
     """A class that reads the mean and std of motif scores from a zarr file.

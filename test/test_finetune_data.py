@@ -1,12 +1,10 @@
 # %%
 import logging
-from math import log
 from re import X
 from matplotlib import pyplot as plt
 
 import numpy as np
 import seaborn as sns
-from sympy import plot
 import torch
 from scipy.sparse import coo_matrix
 from tqdm import tqdm
@@ -29,7 +27,7 @@ pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=50, n_peaks_upper_bound=200, leave_out_celltypes=None, leave_out_chromosomes='chr1', is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative'])
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=50, n_peaks_upper_bound=100, leave_out_celltypes='Enterocyte', leave_out_chromosomes='chr11', is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative'], non_redundant='max_depth', use_insulation=False)
 pretrain.__len__()
 # %%
 pretrain.datapool.insulation
@@ -59,7 +57,7 @@ from get_model.utils import load_state_dict
 import torch.nn as nn
 loss_masked = nn.PoissonNLLLoss(log_input=False, reduce='mean')
 model = GETFinetune(
-        num_regions=200,
+        num_regions=100,
         num_res_block=0,
         motif_prior=False,
         embed_dim=768,
@@ -72,7 +70,7 @@ model = GETFinetune(
         pos_emb_components=[],
     )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/output_pretrain_rev_ATACSplitPool_unnorm_finetune_fetal_Astrocyte_ood/checkpoint-45.pth')
+checkpoint = torch.load('/pmglocal/xf2217/output_rev_from_scratch_ATACSplitPool_unnorm_finetune_fetal_Erythroblast_leaveout_chr_bidirectional/checkpoint-135.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=False)
 
@@ -134,7 +132,7 @@ xs = np.concatenate(xs).flatten()
 ys = np.concatenate(ys).flatten()
 # %%
 
-sns.scatterplot(x=ys, y=xs, s=1, alpha=0.5)
+sns.scatterplot(x=ys, y=xs, s=2, alpha=1)
 # add correlation as text
 corr = np.corrcoef(xs, ys)[0,1]
 corr = round(corr, 2)
