@@ -9,15 +9,19 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import utils
+from altair import sample
 from dataset.dataset import build_dataset_zarr as build_dataset
-from dataset.zarr_dataset import worker_init_fn_get
-from get_model.dataset.collate import get_rev_collate_fn
+from dataset.zarr_dataset import DenseZarrIO, worker_init_fn_get
+from engine import evaluate_pretrain
 from engine import pretrain_one_epoch as train_one_epoch
 from optim import create_optimizer
 from timm.models import create_model
 from utils import NativeScalerWithGradNormCount as NativeScaler
-import wandb
+
 import get_model.model.model
+import wandb
+from get_model.dataset.collate import get_rev_collate_fn
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser("GET pre-training script", add_help=False)
@@ -237,6 +241,14 @@ def get_args_parser():
     parser.add_argument("--data_type", default="fetal", type=str, help="dataset type")
     parser.add_argument("--use_natac", action="store_true", default=False)
     parser.add_argument("--data_set", default="Pretrain", type=str)
+    parser.add_argument(
+        "--eval_data_set",
+        default="Pretrain.GBM_eval",
+        type=str,
+        help="Evaluation dataset path",
+    )
+    parser.add_argument("--eval_nonzero", action="store_true", default=False)
+    parser.add_argument("--eval_tss", action="store_true", default=False)
     parser.add_argument("--leave_out_celltypes", default=None)
     parser.add_argument("--leave_out_chromosomes", default=None)
     parser.add_argument("--use_seq", default=False, action="store_true")
@@ -332,8 +344,11 @@ def main(args):
     args.region_size = num_region_per_sample
 
     # get dataset
-    dataset_train = build_dataset(is_train=True, args=args)
+    sequence_obj = DenseZarrIO(f'{args.data_path}/hg38.zarr', dtype='int8')
+    sequence_obj.load_to_memory_dense()
 
+    dataset_train = build_dataset(is_train=True, args=args, sequence_obj=sequence_obj)
+    dataset_eval = build_dataset(is_train=False, args=args, sequence_obj=sequence_obj)
     if args.distributed:
         num_tasks = utils.get_world_size()
         global_rank = utils.get_rank()
@@ -345,9 +360,13 @@ def main(args):
         sampler_train = torch.utils.data.DistributedSampler(
             dataset_train, num_replicas=num_tasks, rank=sampler_rank, shuffle=True
         )
+        sampler_eval = torch.utils.data.DistributedSampler(
+            dataset_eval, num_replicas=num_tasks, rank=sampler_rank, shuffle=True
+        )
         print("Sampler_train = %s" % str(sampler_train))
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
+        sampler_eval = torch.utils.data.RandomSampler(dataset_eval)
     
     log_writer = None
     if global_rank == 0 and args.log_dir is not None:
@@ -364,6 +383,17 @@ def main(args):
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
         sampler=sampler_train,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_mem,
+        drop_last=True,
+        collate_fn = get_rev_collate_fn,
+        worker_init_fn=worker_init_fn_get,
+    )
+
+    data_loader_eval = torch.utils.data.DataLoader(
+        dataset_eval,
+        sampler=sampler_eval,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
@@ -472,12 +502,24 @@ def main(args):
                     loss_scaler=loss_scaler,
                     epoch=epoch,
                 )
+        if (
+            data_loader_eval is not None
+        ):
+            print("*******Start evaluation********")
+            test_stats = evaluate_pretrain(
+                data_loader_eval, model, device, args, epoch, printlog=True
+            )
 
         log_stats = {
             **{f"train_{k}": v for k, v in train_stats.items()},
+            **{f"test_{k}": v for k, v in test_stats.items()},
             "epoch": epoch,
             "n_parameters": n_parameters,
         }
+
+        if utils.is_main_process():
+            wandb.log(log_stats)
+        
                 
         if args.output_dir and utils.is_main_process():
             if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
@@ -486,6 +528,8 @@ def main(args):
                 os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8"
             ) as f:
                 f.write(json.dumps(log_stats) + "\n")
+
+            
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

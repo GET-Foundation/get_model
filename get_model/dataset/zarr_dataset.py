@@ -475,7 +475,7 @@ class PreloadDataPack(object):
                 self.zarr_data_pool.load_window_data(window_index))
             self.preloaded_data_window_indices_mapping[window_index] = i
         # trigger the computation of peak_num_per_sample
-        self.insulation_peak_counts = self._calculate_peak_num_per_sample()
+        self._calculate_peak_num_per_sample()
         self._calculate_window_peak_counts()
         if self.insulation_peak_counts.shape[0] == 0:
             logging.info('No valid insulation peak count')
@@ -609,7 +609,7 @@ class PreloadDataPack(object):
             insulations, insulation_index)
         celltype_peaks = celltype_peaks.query('Start>@track_start and End<@track_end')
         if celltype_peaks.shape[0] < self.n_peaks_lower_bound:
-            raise ValueError('No enough peaks')
+            logging.info('No enough peaks')
         return self._generate_sample(chr_name, start, end, celltype_id, track, celltype_peaks, motif_mean_std,
                                      track_start, track_end)
 
@@ -651,10 +651,12 @@ class PreloadDataPack(object):
         insulation_pool_peak_num_df.columns = ['key', 'peak_num']
         # insulation_pool_peak_num_df.sort_values('peak_num', inplace=True)
         # shuffle the dataframe
+        # avoid boundary case by adding 2 to lower bound
         insulation_pool_peak_num_df = insulation_pool_peak_num_df.query(
             'peak_num>=@self.n_peaks_lower_bound and peak_num<=@self.n_peaks_upper_bound')
         insulation_pool_peak_num_df = insulation_pool_peak_num_df.sample(
             frac=1).reset_index(drop=True)
+        self.insulation_peak_counts = insulation_pool_peak_num_df
         return insulation_pool_peak_num_df
 
     def _calculate_window_peak_counts(self):
@@ -692,7 +694,7 @@ class PreloadDataPack(object):
         Returns:
         dict: A dictionary containing the number of peaks per sample.
         """
-        df = pr(item_insulation).join(pr(celltype_peaks), suffix="_peak").df.groupby(
+        df = pr(item_insulation).join(pr(celltype_peaks), suffix="_peak", apply_strand_suffix=True).df.groupby(
             'key').index_peak.count().reset_index()
         return df.set_index('key').to_dict()['index_peak']
 
@@ -804,6 +806,7 @@ class PretrainDataset(Dataset):
         # reload by reinitializing the preload data pack and put it back to the preload_data_packs
         self.preload_data_packs[slot] = PreloadDataPack(
             self.preload_count, self.datapool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound, self.use_insulation)
+        
         # self.preload_data_packs[slot].preload_data()
         # add the index back to avaliable packs
         self.avaliable_packs.append(slot)

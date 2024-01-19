@@ -79,32 +79,32 @@ def pretrain_one_epoch(
         with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
             output_masked, _, target = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
 
-        # target generation
-        with torch.no_grad():
-            unnorm_targets = target
-            if normalize_target:
-                print('normalize target')
-                regions_squeeze = unnorm_targets
-                regions_norm = (
-                    regions_squeeze - regions_squeeze.mean(dim=-2, keepdim=True)
-                ) / (
-                    regions_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt()
-                    + 1e-6
-                )
-                # we find that the mean is about 0.48 and standard deviation is about 0.08.
-                regions_embed = regions_norm
-            else:
-                regions_embed = unnorm_targets
+            # target generation
+            with torch.no_grad():
+                unnorm_targets = target
+                if normalize_target:
+                    print('normalize target')
+                    regions_squeeze = unnorm_targets
+                    regions_norm = (
+                        regions_squeeze - regions_squeeze.mean(dim=-2, keepdim=True)
+                    ) / (
+                        regions_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt()
+                        + 1e-6
+                    )
+                    # we find that the mean is about 0.48 and standard deviation is about 0.08.
+                    regions_embed = regions_norm
+                else:
+                    regions_embed = unnorm_targets
 
-            B, _, C = regions_embed.shape
+                B, _, C = regions_embed.shape
 
-        mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
-        loss_masked_value = loss_masked(input=output_masked*mask_for_loss, target=regions_embed*mask_for_loss)
-        #loss_atac_value = loss_atac(atac, labels_atac)
-        # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss
-        loss = loss_masked_value #+ loss_atac_value * 5
+            mask_for_loss = mask_for_loss.unsqueeze(-1)
+            loss_masked_value = loss_masked(input=output_masked*mask_for_loss, target=regions_embed*mask_for_loss)
+            #loss_atac_value = loss_atac(atac, labels_atac)
+            # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss
+            loss = loss_masked_value #+ loss_atac_value * 5
 
-        loss_value = loss.item()
+            loss_value = loss.item()
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
@@ -403,6 +403,80 @@ def cal_score_stats(preds, obs, data_loader, args):
     return r2score, spearmanr_score, pearsonr_score
 
 
+@torch.no_grad()
+def evaluate_pretrain(data_loader, model, device, args, epoch=0, printlog=True):
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = "Test:"
+
+    # switch to evaluation mode
+    model.eval()
+    output_masked_list = []
+    target_list = []
+    for i, batch in enumerate(data_loader):
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _ = batch
+        if min(chunk_size)<0:
+            continue
+    # for i in tqdm(range(100)):
+        mask_for_loss = get_mask_pos(mask)
+        padding_mask = get_padding_pos(mask)
+        mask_for_loss = mask_for_loss.to(device, non_blocking=True).bool()
+        padding_mask = padding_mask.to(device, non_blocking=True).bool()
+        peak_seq = peak_seq.bfloat16().cuda()
+        sample_track = sample_track.bfloat16().cuda()
+        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+            output_masked, _, target = model.forward(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks.cuda(), max_n_peaks, motif_mean_std.cuda())
+        normalize_target = False
+        unnorm_targets = target
+        if normalize_target:
+            regions_squeeze = unnorm_targets
+            regions_norm = (
+                regions_squeeze - regions_squeeze.mean(dim=-2, keepdim=True)
+            ) / (
+                regions_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt()
+                + 1e-6
+            )
+            # we find that the mean is about 0.48 and standard deviation is about 0.08.
+            regions_embed = regions_norm
+        else:
+            regions_embed = unnorm_targets
+
+        B, _, C = regions_embed.shape
+        mask_for_loss = mask_for_loss.unsqueeze(-1)
+        loss_masked = nn.MSELoss()
+        loss_masked_value = loss_masked(input=output_masked*mask_for_loss, target=regions_embed*mask_for_loss)
+        #loss_atac_value = loss_atac(atac, labels_atac)
+        # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss
+        loss = loss_masked_value #+ loss_atac_value * 5
+        target = (regions_embed*mask_for_loss).float().detach().cpu().numpy().flatten()
+        output_masked = (output_masked*mask_for_loss).float().detach().cpu().numpy().flatten()
+        output_masked = output_masked[target>0]
+        target = target[target>0]
+        output_masked_list.append(output_masked)
+        target_list.append(target)
+        loss_value = loss.item()
+        metric_logger.update(loss=loss_value)
+
+    output_masked_list = np.concatenate(output_masked_list).flatten()
+    target_list = np.concatenate(target_list).flatten()
+    r2score, pearsonr_score, spearmanr_score = cal_score_stats(output_masked_list, target_list, data_loader, args)
+
+    metric_logger.meters["r2score"].update(r2score, n=1)
+    metric_logger.meters["pearsonr_score"].update(pearsonr_score, n=1)
+    metric_logger.meters["spearmanr_score"].update(spearmanr_score, n=1)
+
+    if printlog:
+        print(
+            "* Score@R2 {r2:.3f} Score@pearsonr {pearson:.3f} Score@spearmanr {spearman:.3f}  loss {losses.global_avg:.3f}".format(
+                r2=r2score,
+                pearson=pearsonr_score,
+                spearman=spearmanr_score,
+                losses=metric_logger.loss,
+            )
+        )
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+    
 @torch.no_grad()
 def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=True):
     metric_logger = utils.MetricLogger(delimiter="  ")
