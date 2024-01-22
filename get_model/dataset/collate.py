@@ -79,7 +79,7 @@ def get_rev_collate_fn(batch):
     total_peak_len = peak_len.sum(1)
     n_peaks = (peak_len>0).sum(1)
     # max_n_peaks = n_peaks.max()
-    max_n_peaks = 200
+    max_n_peaks = n_peak_max
     peak_peadding_len = n_peaks*100
     tail_len = sample_peak_sequence.shape[1] - peak_peadding_len - peak_len.sum(1)
     # flatten the list
