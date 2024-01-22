@@ -71,7 +71,7 @@ model = GETFinetune(
 #%%
 checkpoint = torch.load('/pmglocal/xf2217/output_rev_from_scratch_ATACSplitPool_unnorm_finetune_fetal_Erythroblast_leaveout_chr_bidirectional/checkpoint-135.pth')
 #%%
-model.load_state_dict(checkpoint["model"], strict=False)
+model.load_state_dict(checkpoint["model"], strict=True)
 
 #%%
 model.eval()
@@ -88,58 +88,69 @@ plt.imshow(weight[:,0,:])
 for i in range(6):
     plt.imshow(weight[i,0:100,:])
 #%%
-# %%
+from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
+
+def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, criterion):
+    device = peak_seq.device
+    padding_mask = get_padding_pos(mask)
+    mask_for_loss = 1-padding_mask
+    padding_mask = padding_mask.to(device, non_blocking=True).bool()
+    print(padding_mask.sum())
+    mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
+    with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
+        atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
+    exp = exp * mask_for_loss
+    indices = torch.where(mask_for_loss==1)
+    exp = exp[indices[0], indices[1], :].flatten()
+    exp_target = exp_target * mask_for_loss
+    exp_target = exp_target[indices[0], indices[1], :].flatten()
+    loss_exp = criterion(exp, exp_target)
+    # loss = loss_atac + loss_exp
+    loss = loss_exp
+    return loss, atac, exp, exp_target 
+    # loss_atac = criterion(atac, atac_target)
+criterion = nn.PoissonNLLLoss(log_input=False, reduce='mean')
+#%%
 losses = []
-xs = []
-ys = []
+preds = []
+obs = []
 with torch.amp.autocast('cuda', dtype=torch.bfloat16):
     for i, batch in tqdm(enumerate(data_loader_train)):
         if i > 100:
             break
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
         if min(chunk_size)<0:
             continue
+        device  = 'cuda'
+        sample_track = sample_track.to(device, non_blocking=True).bfloat16()
+        peak_seq = peak_seq.to(device, non_blocking=True).bfloat16()
+        motif_mean_std = motif_mean_std.to(device, non_blocking=True).bfloat16()
+        # chunk_size = chunk_size.to(device, non_blocking=True)
+        n_peaks = n_peaks.to(device, non_blocking=True)
+        labels_data = labels_data.to(device, non_blocking=True).bfloat16()
 
-        bool_mask_pos = mask.clone()
-        bool_mask_pos[bool_mask_pos != -10000] = 1
-        bool_mask_pos[bool_mask_pos != 1] = 0
-        bool_mask_pos = bool_mask_pos.bool().to('cuda', non_blocking=True).unsqueeze(-1)
-        peak_seq = peak_seq.bfloat16().cuda()
-        sample_track = sample_track.bfloat16().cuda()
-        labels = labels.bfloat16().cuda()
-        atac, exp = model.forward(peak_seq, sample_track, bool_mask_pos, chunk_size, n_peaks.cuda(), max_n_peaks, motif_mean_std.cuda())
-        # mask_for_loss = mask.clone()
+        # compute output
+        loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
+        , None, labels_data, criterion)
 
-        # mask_for_loss[mask_for_loss!=1]=0
-        exp = exp * bool_mask_pos
-        indices = torch.where(bool_mask_pos==1)
-        exp = exp[indices[0], indices[1], :].flatten()
-        exp_target = labels * bool_mask_pos
-        exp_target = exp_target[indices[0], indices[1], :].flatten()
-        loss_masked_value = loss_masked(exp , exp_target)
-        #loss_atac_value = loss_atac(atac, labels_atac)
-        # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss
-        loss = loss_masked_value.item() #+ loss_atac_value * 5
-        losses.append(loss)
-        x = exp.float().detach().cpu().numpy().flatten()
-        y = exp_target.float().detach().cpu().numpy().flatten()
-        x = x[y>0]
-        y = y[y>0]
-        xs.append(x.flatten())
-        ys.append(y.flatten())
-xs = np.concatenate(xs).flatten()
-ys = np.concatenate(ys).flatten()
+        preds.append(exp.reshape(-1).detach().cpu().numpy())
+        obs.append(exp_target.reshape(-1).detach().cpu().numpy())
+        # preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
+        # obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
+
+        # metric_logger.update(loss=loss.item())
+
+    preds = np.concatenate(preds, axis=0).reshape(-1)
+    obs = np.concatenate(obs, axis=0).reshape(-1)
+    # preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
+    # obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
 # %%
 
-sns.scatterplot(x=ys, y=xs, s=2, alpha=1)
+sns.scatterplot(x=preds, y=obs, s=2, alpha=1)
 # add correlation as text
-corr = np.corrcoef(xs, ys)[0,1]
+corr = np.corrcoef(preds, obs)[0,1]
 corr = round(corr, 2)
 plt.title(f'Correlation: {corr}')
 # %%
 np.mean(losses)
-# %%
-# r^2
-from sklearn.metrics import r2_score
-r2_score(ys, xs)
 # %%

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional/'
+OUTPUT_DIR='/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional_no_insulation/'
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
@@ -8,7 +8,7 @@ PORT=7956
 export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
-OMP_NUM_THREADS=1 torchrun --nproc_per_node=1 --rdzv-endpoint=localhost:$PORT get_model/pretrain.py \
+OMP_NUM_THREADS=1 torchrun --nproc_per_node=6 --rdzv-endpoint=localhost:$PORT get_model/pretrain.py \
     --data_set "Pretrain" \
     --eval_data_set "Pretrain.GBM_eval" \
     --data_path ${DATA_PATH} \
@@ -23,7 +23,6 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=1 --rdzv-endpoint=localhost:$PORT ge
     --n_peaks_upper_bound 100 \
     --preload_count 200 \
     --pin_mem \
-    --use_insulation \
     --eval_nonzero \
     --peak_name "peaks_q0.01_tissue_open" \
     --n_packs 1 \

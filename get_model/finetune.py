@@ -582,12 +582,12 @@ def main(args, ds_init):
                     param.requires_grad = False
 
         # model.load_state_dict(checkpoint_model, strict=False)
-        # TODO: temporarily freeze atac_attention 
-        # for name, param in model.named_parameters():
-        #     if "atac_attention" in name:
-        #         param.requires_grad = False
-        #         print(f"Freezed weights of {name}")
-            
+#        # TODO: temporarily freeze atac_attention 
+#        for name, param in model.named_parameters():
+#            if "atac_attention" in name:
+#                param.requires_grad = False
+#                print(f"Freezed weights of {name}")
+#            
 
     model.to(device)
 

@@ -176,7 +176,7 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     padding_mask = get_padding_pos(mask)
     mask_for_loss = 1-padding_mask
     padding_mask = padding_mask.to(device, non_blocking=True).bool()
-    mask_for_loss = mask_for_loss.to(exp.device, non_blocking=True).unsqueeze(-1)
+    mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
         atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
     # loss_atac = criterion(atac, atac_target)
