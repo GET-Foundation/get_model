@@ -19,7 +19,7 @@ pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/htan_gbm_dense.zarr',
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open', preload_count=100, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=5, n_peaks_upper_bound=100, use_insulation=False, leave_out_celltypes=None,
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=10, n_peaks_upper_bound=100, use_insulation=False, leave_out_celltypes=None,
                            leave_out_chromosomes=None, is_train=True, dataset_size=65536, additional_peak_columns=None)
 pretrain.__len__()
 #%%
@@ -57,7 +57,7 @@ model = GETPretrain(
         pos_emb_components=[],
     )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_norm_bidirectional_no_insulation/checkpoint-5.pth')
+checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_norm_bidirectional_no_insulation/checkpoint-9.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=False)
 
@@ -66,15 +66,6 @@ model.eval()
 model.bfloat16().cuda()
 
 #%%
-
-for i, batch in tqdm(enumerate(data_loader_train)):
-    if i > 2:
-        break
-    sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
-    if min(chunk_size)<0:
-        continue
-#%%
-
 loss_values = []
 output_masked_list = []
 target_list = []
@@ -148,11 +139,12 @@ np.save('regions_embed_values_gbm.npy', regions_embed_values)
 # load
 import numpy as np
 import seaborn as sns
-output_masked_values_fetal = np.load('output_masked_values_rcc.npy')#[:,:,100]#.flatten()
-regions_embed_values_fetal = np.load('regions_embed_values_rcc.npy')#[:,:,100]#.flatten()
-output_masked_values_gbm = np.load('output_masked_values_gbm.npy')#[:,:,100]#.flatten()
-regions_embed_values_gbm = np.load('regions_embed_values_gbm.npy')#[:,:,100]#.flatten()
-
+# output_masked_values_fetal = np.load('output_masked_values_rcc.npy')#[:,:,100]#.flatten()
+# regions_embed_values_fetal = np.load('regions_embed_values_rcc.npy')#[:,:,100]#.flatten()
+output_masked_values_gbm = np.load('output_masked_values_gbm.npy')[:,:,0:639].flatten()
+regions_embed_values_gbm = np.load('regions_embed_values_gbm.npy')[:,:,0:639].flatten()
+output_masked_values = output_masked_values_gbm
+regions_embed_values = regions_embed_values_gbm
 #%%
 filter = (output_masked_values>0 ) & (regions_embed_values>0)
 output_masked_values = output_masked_values[filter]
@@ -163,7 +155,7 @@ output_masked_values = output_masked_values[idx]
 regions_embed_values = regions_embed_values[idx]
 from matplotlib import pyplot as plt
 # kde plot with shade 
-sns.scatterplot(x = output_masked_values, y = regions_embed_values,s=1, alpha=0.5)
+sns.scatterplot(x = output_masked_values, y = regions_embed_values,s=3, alpha=1)
 # xlim and ylim 0, 0.8
 plt.xlim(0, 0.8)
 plt.ylim(0, 0.8)
@@ -174,7 +166,7 @@ from scipy.stats import pearsonr
 from sklearn.metrics import r2_score
 pearson_r, _ = pearsonr(output_masked_values, regions_embed_values)
 r2 = r2_score(output_masked_values, regions_embed_values)
-plt.text(0.1, 0.7, f'Pearson r={pearson_r:.3f}', fontsize=10)
+plt.text(0.1, 0.7, f'Pearson r={pearson_r:.3f}; R2={r2:.3f}', fontsize=10)
 # x label
 plt.xlabel('Predicted', fontsize=10)
 # y label
