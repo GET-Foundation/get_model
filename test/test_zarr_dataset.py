@@ -13,14 +13,14 @@ from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, Preloa
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
-#%%
+#%% 
 pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/htan_gbm_dense.zarr',
                             ],
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open', preload_count=100, n_packs=1,
                            max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=5, n_peaks_upper_bound=100, use_insulation=False, leave_out_celltypes=None,
-                           leave_out_chromosomes=None, is_train=True, dataset_size=65536, additional_peak_columns=['Expression_positive', 'Expression_negative'])
+                           leave_out_chromosomes=None, is_train=True, dataset_size=65536, additional_peak_columns=None)
 pretrain.__len__()
 #%%
 from get_model.dataset.zarr_dataset import worker_init_fn_get
@@ -46,20 +46,24 @@ model = GETPretrain(
         embed_dim=768,
         num_layers=12,
         d_model=768,
-        flash_attn=True,
+        flash_attn=False,
         nhead=12,
         dropout=0.1,
-        output_dim=655,
+        output_dim=800,
+        atac_kernel_num = 161,
+        atac_kernel_size = 3,
+        joint_kernel_num = 161,
+        joint_kernel_size = 3,
         pos_emb_components=[],
     )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional/checkpoint-4.pth')
+checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_norm_bidirectional_no_insulation/checkpoint-5.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=False)
 
 #%%
 model.eval()
-model.cuda()
+model.bfloat16().cuda()
 
 #%%
 
@@ -74,20 +78,21 @@ for i, batch in tqdm(enumerate(data_loader_train)):
 loss_values = []
 output_masked_list = []
 target_list = []
-
+from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
+model.bfloat16().cuda()
 with torch.amp.autocast('cuda', dtype=torch.bfloat16):
     for i, batch in tqdm(enumerate(data_loader_train)):
-        if i > 50:
+        if i > 100:
             break
         sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _ = batch
         if min(chunk_size)<0:
             continue
     # for i in tqdm(range(100)):
-        bool_mask_pos = mask.clone()
-        bool_mask_pos[bool_mask_pos == -10000] = 0
+        mask_for_loss = get_mask_pos(mask).bool().cuda()
+        padding_mask = get_padding_pos(mask).bool().cuda()
         peak_seq = peak_seq.bfloat16().cuda()
         sample_track = sample_track.bfloat16().cuda()
-        output_masked, _, target = model.forward(peak_seq, sample_track, bool_mask_pos.bool().cuda(), chunk_size, n_peaks.cuda(), max_n_peaks, motif_mean_std.cuda())
+        output_masked, _, target = model.forward(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks.cuda(), max_n_peaks, motif_mean_std.cuda())
         normalize_target = False
         with torch.no_grad():
             unnorm_targets = target
@@ -127,7 +132,7 @@ regions_embed_values = np.concatenate(target_list, axis=0)
 plt.figure(figsize=(10,10))
 
 # kde plot with shade using matplotlib
-sns.kdeplot(x = output_masked_values.flatten(), y = regions_embed_values.flatten(), shade=True, thresh=0.05, levels=10, cmap="mako")
+sns.scatterplot(x = output_masked_values.flatten(), y = regions_embed_values.flatten(), )
 # # equal aspect ratio
 # plt.gca().set_aspect('equal', adjustable='box')
 # # x lim
@@ -137,24 +142,28 @@ sns.kdeplot(x = output_masked_values.flatten(), y = regions_embed_values.flatten
 # plt.ylabel('Target')
 #%%
 # save concatenated output and target as npy
-np.save('output_masked_values_rcc.npy', output_masked_values)
-np.save('regions_embed_values_rcc.npy', regions_embed_values)
+np.save('output_masked_values_gbm.npy', output_masked_values)
+np.save('regions_embed_values_gbm.npy', regions_embed_values)
 # %%
 # load
 import numpy as np
 import seaborn as sns
-output_masked_values = np.load('output_masked_values_rcc.npy').flatten()
-regions_embed_values = np.load('regions_embed_values_rcc.npy').flatten()
+output_masked_values_fetal = np.load('output_masked_values_rcc.npy')#[:,:,100]#.flatten()
+regions_embed_values_fetal = np.load('regions_embed_values_rcc.npy')#[:,:,100]#.flatten()
+output_masked_values_gbm = np.load('output_masked_values_gbm.npy')#[:,:,100]#.flatten()
+regions_embed_values_gbm = np.load('regions_embed_values_gbm.npy')#[:,:,100]#.flatten()
+
+#%%
 filter = (output_masked_values>0 ) & (regions_embed_values>0)
 output_masked_values = output_masked_values[filter]
 regions_embed_values = regions_embed_values[filter]
 # random sample 10000 points
-idx = np.random.choice(len(output_masked_values), 100000, replace=False)
+idx = np.random.choice(len(output_masked_values), 10000, replace=False)
 output_masked_values = output_masked_values[idx]
 regions_embed_values = regions_embed_values[idx]
 from matplotlib import pyplot as plt
 # kde plot with shade 
-sns.kdeplot(x = output_masked_values, y = regions_embed_values, shade=True, thresh=0.05, levels=10, cmap="mako_r")
+sns.scatterplot(x = output_masked_values, y = regions_embed_values,s=1, alpha=0.5)
 # xlim and ylim 0, 0.8
 plt.xlim(0, 0.8)
 plt.ylim(0, 0.8)
@@ -170,4 +179,11 @@ plt.text(0.1, 0.7, f'Pearson r={pearson_r:.3f}', fontsize=10)
 plt.xlabel('Predicted', fontsize=10)
 # y label
 plt.ylabel('Masked Target', fontsize=10)
+# %%
+idx_x = np.random.choice(len(regions_embed_values_gbm), 80, replace=False)
+idx_y = np.random.choice(len(regions_embed_values_gbm), 80, replace=False)
+g=sns.scatterplot(x=regions_embed_values_gbm[idx_x].reshape(-1, 655).std(0)/regions_embed_values_fetal[idx_y].reshape(-1, 655).std(0), y=np.arange(655))
+# y range
+g.set_ylim(0, 655)
+g.set_xlim(0.5,1.5)
 # %%

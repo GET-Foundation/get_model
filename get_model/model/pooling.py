@@ -73,7 +73,9 @@ class ATACSplitPool(nn.Module):
         self.atac_bn = nn.BatchNorm1d(atac_kernel_num)
         self.joint_conv = nn.Conv1d(motif_dim + atac_kernel_num, joint_kernel_num, joint_kernel_size, padding="same", bias=False)
         self.joint_bn = nn.BatchNorm1d(joint_kernel_num)
-        self.patch_pool = nn.MaxPool1d(50, stride=50)
+        self.patch_pool = nn.MaxPool1d(25, stride=25)
+        self.final_bn = nn.BatchNorm1d(motif_dim + joint_kernel_num)
+
 
     def forward(self, x, atac, peak_split, n_peaks, max_n_peaks):
         # normalize atac to [0,1], keeps mostly shape information
@@ -83,13 +85,15 @@ class ATACSplitPool(nn.Module):
         # jointly convolve atac and motif signal at 50bp bin level
         joint_region = self.forward_joint(x, atac, peak_split, n_peaks, max_n_peaks)
         # log transform to make the signal < 10
-        joint_region = torch.log10(joint_region+1)
+        joint_region = torch.log2(joint_region+1)
         # concatenate motif representation with joint representation
         # shape (batch, n_peak, motif_dim + joint_kernel_num)
-        x = torch.cat([x_region, joint_region], dim=2)
+        x = torch.cat([x_region, joint_region], dim=2).contiguous()
+        # batch norm
+        x = self.final_bn(x.transpose(1,2)).transpose(1,2)
         return x
 
-    def forward_joint(self, x, atac, peak_split, n_peaks, max_n_peaks, patch_size=50):
+    def forward_joint(self, x, atac, peak_split, n_peaks, max_n_peaks, patch_size=25):
         """
         x: (batch, length, dimension)
         atac: (batch, length, 1)
