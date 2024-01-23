@@ -70,11 +70,11 @@ class ATACSplitPool(nn.Module):
         super().__init__()
         self.pool_method = pool_method
         self.atac_conv = nn.Conv1d(1, atac_kernel_num, atac_kernel_size, padding="same", bias=False)
-        self.atac_bn = nn.BatchNorm1d(atac_kernel_num)
+        self.atac_bn = nn.BatchNorm1d(atac_kernel_num, affine=False)
         self.joint_conv = nn.Conv1d(motif_dim + atac_kernel_num, joint_kernel_num, joint_kernel_size, padding="same", bias=False)
-        self.joint_bn = nn.BatchNorm1d(joint_kernel_num)
+        self.joint_bn = nn.BatchNorm1d(joint_kernel_num, affine=False)
         self.patch_pool = nn.MaxPool1d(25, stride=25)
-        self.final_bn = nn.BatchNorm1d(motif_dim + joint_kernel_num)
+        self.final_bn = nn.BatchNorm1d(motif_dim + joint_kernel_num, affine=False)
 
 
     def forward(self, x, atac, peak_split, n_peaks, max_n_peaks):
