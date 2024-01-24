@@ -281,6 +281,47 @@ def build_dataset(is_train, args):
 
     return dataset
 
+def setup_zarr_dataset(zarr_list, is_train, args, sequence_obj=None, dataset_size=40960):
+    # get FILEPATH
+    root = args.data_path
+    codebase = os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))))
+    if sequence_obj is None:
+        sequence_obj = DenseZarrIO(f'{args.data_path}/hg38.zarr', dtype='int8')
+        sequence_obj.load_to_memory_dense()
+    else:
+        logging.info('sequence_obj is provided')
+    dataset = ZarrPretrainDataset(zarr_list,
+        f'{root}/hg38.zarr',
+        f'{root}/hg38_motif_result.zarr', [
+        f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
+        f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
+        peak_name=args.peak_name, insulation_subsample_ratio=0.8,
+        additional_peak_columns=['Expression_positive', 'Expression_negative'], preload_count=args.preload_count, 
+        n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=args.leave_out_chromosomes, is_train=is_train, non_redundant=args.non_redundant, dataset_size=dataset_size)
+    # log all settings
+    logging.info('data_path: %s' % str(args.data_path))
+    logging.info('zarr_list: %s' % str(zarr_list))
+    logging.info('peak_name: %s' % str(args.peak_name))
+    logging.info('insulation_subsample_ratio: %s' % str(0.8))
+    logging.info('additional_peak_columns: %s' % str(['Expression_positive', 'Expression_negative']))
+    logging.info('preload_count: %s' % str(args.preload_count))
+    logging.info('n_packs: %s' % str(args.n_packs))
+    logging.info('max_peak_length: %s' % str(args.max_peak_length))
+    logging.info('center_expand_target: %s' % str(args.center_expand_target))
+    logging.info('n_peaks_lower_bound: %s' % str(args.n_peaks_lower_bound))
+    logging.info('n_peaks_upper_bound: %s' % str(args.n_peaks_upper_bound))
+    logging.info('use_insulation: %s' % str(args.use_insulation))
+    logging.info('sequence_obj: %s' % str(sequence_obj))
+    logging.info('leave_out_celltypes: %s' % str(args.leave_out_celltypes))
+    logging.info('leave_out_chromosomes: %s' % str(args.leave_out_chromosomes))
+    logging.info('is_train: %s' % str(is_train))
+    logging.info('non_redundant: %s' % str(args.non_redundant))
+    logging.info('dataset_size: %s' % str(dataset_size))
+
+    return dataset
+
+
 
 def build_dataset_zarr(is_train, args, sequence_obj=None):
     if is_train and args.data_set == "Pretrain":
@@ -301,7 +342,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
                            f'{root}/hg38_motif_result.zarr', [
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
-                           peak_name=args.peak_name, preload_count=args.preload_count, insulation_subsample_ratio=0.8, n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, dataset_size=40960)
+                           peak_name=args.peak_name, preload_count=args.preload_count, insulation_subsample_ratio=0.8, n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes,
+                           leave_out_chromosomes=args.leave_out_chromosomes, is_train=is_train, dataset_size=40960, )
     elif not is_train and args.eval_data_set == "Pretrain.GBM_eval":
         transform = DataAugmentationForGETPeak(args)
         print("Data Aug = %s" % str(transform))
@@ -321,7 +363,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
                            f'{root}/hg38_motif_result.zarr', [
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
-                           peak_name=args.peak_name, preload_count=args.preload_count, insulation_subsample_ratio=0.8, n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, dataset_size=4096)
+                           peak_name=args.peak_name, preload_count=args.preload_count, insulation_subsample_ratio=0.8, n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes,
+                           leave_out_chromosomes=args.leave_out_chromosomes,  is_train=is_train, dataset_size=4096)
     elif is_train and args.data_set == "Expression_Finetune_Fetal":
         transform = DataAugmentationForGETPeak(args)
         print("Data Aug = %s" % str(transform))
@@ -344,7 +387,7 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, insulation_subsample_ratio=0.8,
                            additional_peak_columns=['Expression_positive', 'Expression_negative'], preload_count=args.preload_count, 
-                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=None, is_train=is_train, non_redundant=None, dataset_size=65536)
+                           n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=args.leave_out_chromosomes, is_train=is_train, non_redundant=args.non_redundant, dataset_size=65536)
     elif not is_train and args.eval_data_set == "Expression_Finetune_Fetal.fetal_eval":
         transform = DataAugmentationForGETPeak(args)
         print("Data Aug = %s" % str(transform))
@@ -368,7 +411,7 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, insulation_subsample_ratio=0.8, additional_peak_columns=['Expression_positive', 'Expression_negative'], preload_count=args.preload_count, 
                            n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes,
-                           leave_out_chromosomes=None, is_train=is_train, non_redundant=None, dataset_size=4096)
+                           leave_out_chromosomes=args.leave_out_chromosomes, is_train=is_train, non_redundant=args.non_redundant, dataset_size=4096)
         
     else:
         raise NotImplementedError()

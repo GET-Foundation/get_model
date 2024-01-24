@@ -100,7 +100,11 @@ def get_args_parser():
         type=int,
         help="upper bound of number of peaks",
     )
-
+    parser.add_argument(
+        "--non_redundant",
+        default=None,
+        choices=["max_depth", None],
+    )
     parser.add_argument(
         "--num_motif",
         default=1273,

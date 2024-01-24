@@ -1,6 +1,6 @@
 #!/bin/bash
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_norm_bidirectional_no_insulation/'
+OUTPUT_DIR='/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_norm_bidirectional_no_insulation_no_affine/'
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7956
@@ -29,9 +29,9 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=6 --rdzv-endpoint=localhost:$PORT ge
     --lr 1e-3 \
     --opt adamw \
     --wandb_project_name "get_pretrain" \
-    --wandb_run_name "get_pretrain_bidirection_no_insulation_100_peaks" \
+    --wandb_run_name "output_rev_pretrain_ATACSplitPool_norm_bidirectional_no_insulation_no_affine" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 1 \
-    --epochs 100 \
+    --epochs 400 \
     --num_region_per_sample 100 \
     --output_dir ${OUTPUT_DIR} 

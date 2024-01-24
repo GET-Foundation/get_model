@@ -21,12 +21,12 @@ cdz = cdz.leave_out_celltypes_with_pattern('Astrocyte')
 
 
 #%%
-pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr',
+pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/bingren_adult_dense.zarr',
                             ],
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=50, n_peaks_upper_bound=100, leave_out_celltypes='Enterocyte', leave_out_chromosomes='chr11', is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative'], non_redundant='max_depth', use_insulation=False)
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=50, n_peaks_upper_bound=100, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative'], non_redundant=None, use_insulation=False)
 pretrain.__len__()
 # %%
 pretrain.datapool.insulation
@@ -67,9 +67,12 @@ model = GETFinetune(
         dropout=0.1,
         output_dim=2,
         pos_emb_components=[],
+        atac_kernel_num = 161,
+        atac_kernel_size = 3,
+        joint_kernel_num = 161,
     )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/output_rev_from_scratch_ATACSplitPool_unnorm_finetune_fetal_Erythroblast_leaveout_chr_bidirectional/checkpoint-135.pth')
+checkpoint = torch.load('/manitou/pmg/users/xf2217/checkpoint-98.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=True)
 
@@ -85,8 +88,15 @@ import matplotlib.pyplot as plt
 plt.imshow(weight[:,0,:])
 #%%
 # plot as six line plot
-for i in range(6):
-    plt.imshow(weight[i,0:100,:])
+# plot as a panel horizontally
+fig, ax = plt.subplots(1, 10, figsize=(15, 2))
+for i in range(10):
+    # calculate reorder index
+    from scipy.cluster.hierarchy import linkage, dendrogram
+    Z = linkage((weight[i+10,:,:]), 'ward')
+    g = dendrogram(Z, no_plot=True)
+    ax[i].imshow((weight[i+10,:,:])[np.array(g['ivl']).astype('int')], aspect=0.01)
+    
 #%%
 from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
 
@@ -95,7 +105,6 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     padding_mask = get_padding_pos(mask)
     mask_for_loss = 1-padding_mask
     padding_mask = padding_mask.to(device, non_blocking=True).bool()
-    print(padding_mask.sum())
     mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
         atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
@@ -145,11 +154,17 @@ with torch.amp.autocast('cuda', dtype=torch.bfloat16):
     # preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
     # obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
 # %%
-
+preds = preds[obs>0]
+obs = obs[obs>0]
 sns.scatterplot(x=preds, y=obs, s=2, alpha=1)
 # add correlation as text
-corr = np.corrcoef(preds, obs)[0,1]
-corr = round(corr, 2)
+# set x lim
+plt.xlim([0, 4])
+# set y lim
+plt.ylim([0, 4])
+
+from scipy.stats import spearmanr, pearsonr
+corr = pearsonr(preds, obs)[0]
 plt.title(f'Correlation: {corr}')
 # %%
 np.mean(losses)

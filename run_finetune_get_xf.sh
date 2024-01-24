@@ -1,6 +1,6 @@
 #!/bin/bash
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/xf2217/output_rev_from_pretrain_ATACSplitPool_unnorm_finetune_fetal_Astrocyte_leaveout_chr_bidirectional.max_depth.no_freeze/'
+OUTPUT_DIR='/pmglocal/xf2217/output_rev_from_scratch_ATACSplitPool_norm_finetune_fetal_Astrocyte_leaveout_chr_bidirectional.no_freeze.161conv.no_affine/'
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7957
@@ -8,10 +8,9 @@ PORT=7957
 export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
-OMP_NUM_THREADS=1 torchrun --nproc_per_node=6 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
+OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
     --data_set "Expression_Finetune_Fetal" \
     --eval_data_set "Expression_Finetune_Fetal.fetal_eval" \
-    --finetune "/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional_no_insulation/checkpoint-80.pth" \
     --data_path ${DATA_PATH} \
     --input_dim 639 \
     --output_dim 2 \
@@ -28,7 +27,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=6 --rdzv-endpoint=localhost:$PORT ge
     --lr 5e-4 \
     --opt adamw \
     --wandb_project_name "get_finetune" \
-    --wandb_run_name "ATACSplitPool_finetune_from_pretrain_bidirectional_no_insulation.max_depth.no_freeze" \
+    --wandb_run_name "output_rev_from_scratch_ATACSplitPool_norm_finetune_fetal_Astrocyte_leaveout_chr_bidirectional.no_freeze.161conv.no_affine" \
     --eval_freq 1 \
     --dist_eval \
     --eval_nonzero \

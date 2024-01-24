@@ -14,7 +14,7 @@ from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, Preloa
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 #%% 
-pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/htan_gbm_dense.zarr',
+pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/bingren_adult_dense.zarr',
                             ],
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
@@ -57,63 +57,85 @@ model = GETPretrain(
         pos_emb_components=[],
     )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_norm_bidirectional_no_insulation/checkpoint-9.pth')
+checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional_no_insulation/checkpoint-80.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=False)
 
 #%%
 model.eval()
-model.bfloat16().cuda()
-
+model.cuda()
+#%%
+for i, j in model.atac_attention.joint_conv.named_parameters():
+    print(i, j.dtype)
+    weight = j.detach().cpu().numpy()
+    
+#%%
+import seaborn as sns
+# row index reordered
+# g.dendrogram_row.reordered_ind
+#%%
+# plot as a panel horizontally
+fig, ax = plt.subplots(1, 10, figsize=(15, 2))
+for i in range(10):
+    # calculate reorder index
+    from scipy.cluster.hierarchy import linkage, dendrogram
+    # Z = linkage((weight[i+10,:,:]-weight[3+10,:,:]), 'ward')
+    # g = dendrogram(Z, no_plot=True)
+    ax[i].imshow((weight[i+50,:,:])[np.array(g['ivl']).astype('int')], aspect=0.01)
+    
+#%%
+# compare two random weight[i].flatten() using scatter plot
+i = np.random.randint(0, 161)
+j = np.random.randint(0, 161)
+sns.scatterplot(x=weight[i][:,1].flatten(), y=weight[j][:,1].flatten())
 #%%
 loss_values = []
 output_masked_list = []
 target_list = []
 from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
-model.bfloat16().cuda()
-with torch.amp.autocast('cuda', dtype=torch.bfloat16):
-    for i, batch in tqdm(enumerate(data_loader_train)):
-        if i > 100:
-            break
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _ = batch
-        if min(chunk_size)<0:
-            continue
-    # for i in tqdm(range(100)):
-        mask_for_loss = get_mask_pos(mask).bool().cuda()
-        padding_mask = get_padding_pos(mask).bool().cuda()
-        peak_seq = peak_seq.bfloat16().cuda()
-        sample_track = sample_track.bfloat16().cuda()
-        output_masked, _, target = model.forward(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks.cuda(), max_n_peaks, motif_mean_std.cuda())
-        normalize_target = False
-        with torch.no_grad():
-            unnorm_targets = target
-            if normalize_target:
-                regions_squeeze = unnorm_targets
-                regions_norm = (
-                    regions_squeeze - regions_squeeze.mean(dim=-2, keepdim=True)
-                ) / (
-                    regions_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt()
-                    + 1e-6
-                )
-                # we find that the mean is about 0.48 and standard deviation is about 0.08.
-                regions_embed = regions_norm
-            else:
-                regions_embed = unnorm_targets
+# with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+for i, batch in tqdm(enumerate(data_loader_train)):
+    if i > 100:
+        break
+    sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _ = batch
+    if min(chunk_size)<0:
+        continue
+# for i in tqdm(range(100)):
+    mask_for_loss = get_mask_pos(mask).bool().cuda()
+    padding_mask = get_padding_pos(mask).bool().cuda()
+    peak_seq = peak_seq.float().cuda()
+    sample_track = sample_track.float().cuda()
+    output_masked, _, target = model.forward(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks.cuda(), max_n_peaks, motif_mean_std.cuda())
+    normalize_target = False
+    with torch.no_grad():
+        unnorm_targets = target
+        if normalize_target:
+            regions_squeeze = unnorm_targets
+            regions_norm = (
+                regions_squeeze - regions_squeeze.mean(dim=-2, keepdim=True)
+            ) / (
+                regions_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt()
+                + 1e-6
+            )
+            # we find that the mean is about 0.48 and standard deviation is about 0.08.
+            regions_embed = regions_norm
+        else:
+            regions_embed = unnorm_targets
 
-            B, _, C = regions_embed.shape
+        B, _, C = regions_embed.shape
 
-        mask_for_loss = mask.clone()
+    mask_for_loss = mask.clone()
 
-        mask_for_loss[mask_for_loss!=1]=0
-        mask_for_loss = mask_for_loss.to('cuda', non_blocking=True).unsqueeze(-1)
-        loss_masked_value = loss_masked(input=output_masked*mask_for_loss, target=regions_embed*mask_for_loss)
-        #loss_atac_value = loss_atac(atac, labels_atac)
-        # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss
-        loss = loss_masked_value #+ loss_atac_value * 5
-        output_masked_list.append((output_masked*mask_for_loss).float().detach().cpu().numpy())
-        target_list.append((regions_embed*mask_for_loss).float().detach().cpu().numpy())
-        loss_value = loss.item()
-        loss_values.append(loss_value)
+    mask_for_loss[mask_for_loss!=1]=0
+    mask_for_loss = mask_for_loss.to('cuda', non_blocking=True).unsqueeze(-1)
+    loss_masked_value = loss_masked(input=output_masked*mask_for_loss, target=regions_embed*mask_for_loss)
+    #loss_atac_value = loss_atac(atac, labels_atac)
+    # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss
+    loss = loss_masked_value #+ loss_atac_value * 5
+    output_masked_list.append((output_masked*mask_for_loss).float().detach().cpu().numpy())
+    target_list.append((regions_embed*mask_for_loss).float().detach().cpu().numpy())
+    loss_value = loss.item()
+    loss_values.append(loss_value)
 #%%
 plt.hist(loss_values, bins=10)
 #%%
@@ -123,7 +145,9 @@ regions_embed_values = np.concatenate(target_list, axis=0)
 plt.figure(figsize=(10,10))
 
 # kde plot with shade using matplotlib
-sns.scatterplot(x = output_masked_values.flatten(), y = regions_embed_values.flatten(), )
+# bias = model.atac_attention.final_bn.bias.detach().cpu().numpy()
+# weight = model.atac_attention.final_bn.weight.detach().cpu().numpy()
+# sns.scatterplot(x = (regions_embed_values[2,1,:]-bias)/weight, y = (regions_embed_values[2,7,:]-bias)/weight, )
 # # equal aspect ratio
 # plt.gca().set_aspect('equal', adjustable='box')
 # # x lim
@@ -133,48 +157,48 @@ sns.scatterplot(x = output_masked_values.flatten(), y = regions_embed_values.fla
 # plt.ylabel('Target')
 #%%
 # save concatenated output and target as npy
-np.save('output_masked_values_gbm.npy', output_masked_values)
-np.save('regions_embed_values_gbm.npy', regions_embed_values)
+np.save('output_masked_values_rcc.npy', output_masked_values)
+np.save('regions_embed_values_rcc.npy', regions_embed_values)
 # %%
 # load
 import numpy as np
 import seaborn as sns
 # output_masked_values_fetal = np.load('output_masked_values_rcc.npy')#[:,:,100]#.flatten()
 # regions_embed_values_fetal = np.load('regions_embed_values_rcc.npy')#[:,:,100]#.flatten()
-output_masked_values_gbm = np.load('output_masked_values_gbm.npy')[:,:,0:639].flatten()
-regions_embed_values_gbm = np.load('regions_embed_values_gbm.npy')[:,:,0:639].flatten()
-output_masked_values = output_masked_values_gbm
-regions_embed_values = regions_embed_values_gbm
+output_masked_values_gbm = np.load('output_masked_values_rcc.npy')[1,:,2].flatten()
+regions_embed_values_gbm = np.load('regions_embed_values_rcc.npy')[1,:,2].flatten()
+output_masked_values = output_masked_values_gbm[regions_embed_values_gbm!=0]
+regions_embed_values = regions_embed_values_gbm[regions_embed_values_gbm!=0]
 #%%
-filter = (output_masked_values>0 ) & (regions_embed_values>0)
-output_masked_values = output_masked_values[filter]
-regions_embed_values = regions_embed_values[filter]
+# filter = (output_masked_values>0 ) & (regions_embed_values>0)
+# output_masked_values = output_masked_values[filter]
+# regions_embed_values = regions_embed_values[filter]
 # random sample 10000 points
-idx = np.random.choice(len(output_masked_values), 10000, replace=False)
-output_masked_values = output_masked_values[idx]
-regions_embed_values = regions_embed_values[idx]
+# idx = np.random.choice(len(output_masked_values), 100, replace=False)
+# output_masked_values = output_masked_values[idx]
+# regions_embed_values = regions_embed_values[idx]
 from matplotlib import pyplot as plt
 # kde plot with shade 
 sns.scatterplot(x = output_masked_values, y = regions_embed_values,s=3, alpha=1)
 # xlim and ylim 0, 0.8
-plt.xlim(0, 0.8)
-plt.ylim(0, 0.8)
+# plt.xlim(0, 0.1)
+# plt.ylim(0, 0.1)
 # equal aspect ratio
-plt.gca().set_aspect('equal', adjustable='box')
+# plt.gca().set_aspect('equal', adjustable='box')
 # label R2 and pearson r
 from scipy.stats import pearsonr
 from sklearn.metrics import r2_score
 pearson_r, _ = pearsonr(output_masked_values, regions_embed_values)
 r2 = r2_score(output_masked_values, regions_embed_values)
-plt.text(0.1, 0.7, f'Pearson r={pearson_r:.3f}; R2={r2:.3f}', fontsize=10)
+# plt.text(0.1, 0.1, f'Pearson r={pearson_r:.3f}; R2={r2:.3f}', fontsize=10)
 # x label
 plt.xlabel('Predicted', fontsize=10)
 # y label
 plt.ylabel('Masked Target', fontsize=10)
-# %%
-idx_x = np.random.choice(len(regions_embed_values_gbm), 80, replace=False)
-idx_y = np.random.choice(len(regions_embed_values_gbm), 80, replace=False)
-g=sns.scatterplot(x=regions_embed_values_gbm[idx_x].reshape(-1, 655).std(0)/regions_embed_values_fetal[idx_y].reshape(-1, 655).std(0), y=np.arange(655))
+#%%
+# idx_x = np.random.choice(len(regions_embed_values_gbm), 80, replace=False)
+# idx_y = np.random.choice(len(regions_embed_values_gbm), 80, replace=False)
+# g=sns.scatterplot(x=regions_embed_values_gbm[idx_x].reshape(-1, 655).std(0)/regions_embed_values_fetal[idx_y].reshape(-1, 655).std(0), y=np.arange(655))
 # y range
 g.set_ylim(0, 655)
 g.set_xlim(0.5,1.5)
