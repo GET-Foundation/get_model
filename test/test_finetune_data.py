@@ -11,22 +11,22 @@ from tqdm import tqdm
 from get_model.dataset.collate import get_rev_collate_fn
 from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, PreloadDataPack, CelltypeDenseZarrIO
 
-# %%
-cdz = CelltypeDenseZarrIO('/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr')
-# %%
-cdz = cdz.subset_celltypes_with_data_name()
-#%%
-cdz = cdz.leave_out_celltypes_with_pattern('Astrocyte')
+# # %%
+# cdz = CelltypeDenseZarrIO('/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr')
+# # %%
+# cdz = cdz.subset_celltypes_with_data_name()
+# #%%
+# cdz = cdz.leave_out_celltypes_with_pattern('Astrocyte')
 
 
 
 #%%
-pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/bingren_adult_dense.zarr',
+pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr',
                             ],
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=50, n_peaks_upper_bound=100, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative'], non_redundant=None, use_insulation=False)
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=50, n_peaks_upper_bound=100, leave_out_celltypes='Astrocyte', leave_out_chromosomes='chr11', is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative'], non_redundant=None, use_insulation=False)
 pretrain.__len__()
 # %%
 pretrain.datapool.insulation
@@ -55,6 +55,7 @@ from get_model.model.model import GETFinetune
 from get_model.utils import load_state_dict
 import torch.nn as nn
 loss_masked = nn.PoissonNLLLoss(log_input=False, reduce='mean')
+#%%
 model = GETFinetune(
         num_regions=100,
         num_res_block=0,
@@ -62,7 +63,7 @@ model = GETFinetune(
         embed_dim=768,
         num_layers=12,
         d_model=768,
-        flash_attn=True,
+        flash_attn=False,
         nhead=12,
         dropout=0.1,
         output_dim=2,
@@ -70,9 +71,10 @@ model = GETFinetune(
         atac_kernel_num = 161,
         atac_kernel_size = 3,
         joint_kernel_num = 161,
+        final_bn = True,
     )
 #%%
-checkpoint = torch.load('/manitou/pmg/users/xf2217/checkpoint-98.pth')
+checkpoint = torch.load('/burg/home/xf2217/checkpoint-197.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=True)
 

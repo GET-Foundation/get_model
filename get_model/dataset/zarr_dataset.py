@@ -195,8 +195,7 @@ class ZarrDataPool(object):
         if self.motif_mean_std_obj is not None:
             motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chunk_idx:chunk_idx+2].reshape(
                 2, 2, -1).mean(0)
-        else:
-            motif_mean_std = np.zeros((2, 1274))
+
         return window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
 
     def _get_peak_names(self, data_key, celltype_id):

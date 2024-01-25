@@ -138,6 +138,9 @@ def get_args():
         "--last_layer", default=False, type=bool, help="train only last layers"
     )
     parser.add_argument(
+        "--final_bn", default=False, type=bool, help="Whether to BN motifxregion matrix before region embedding"
+    )
+    parser.add_argument(
         "--drop",
         type=float,
         default=0.0,
@@ -536,6 +539,7 @@ def main(args, ds_init):
 
         use_mean_pooling=args.use_mean_pooling,
         setting=args.setting,
+        final_bn=args.final_bn,
 
 
     )

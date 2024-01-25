@@ -14,7 +14,7 @@ from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, Preloa
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 #%% 
-pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/bingren_adult_dense.zarr',
+pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr',
                             ],
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
@@ -49,15 +49,15 @@ model = GETPretrain(
         flash_attn=False,
         nhead=12,
         dropout=0.1,
-        output_dim=800,
-        atac_kernel_num = 161,
+        output_dim=655,
+        atac_kernel_num = 16,
         atac_kernel_size = 3,
-        joint_kernel_num = 161,
+        joint_kernel_num = 16,
         joint_kernel_size = 3,
         pos_emb_components=[],
     )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional_no_insulation/checkpoint-80.pth')
+checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional_no_insulation/checkpoint-67.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=False)
 
@@ -141,20 +141,7 @@ plt.hist(loss_values, bins=10)
 #%%
 output_masked_values = np.concatenate(output_masked_list, axis=0)
 regions_embed_values = np.concatenate(target_list, axis=0)
-#%%
-plt.figure(figsize=(10,10))
 
-# kde plot with shade using matplotlib
-# bias = model.atac_attention.final_bn.bias.detach().cpu().numpy()
-# weight = model.atac_attention.final_bn.weight.detach().cpu().numpy()
-# sns.scatterplot(x = (regions_embed_values[2,1,:]-bias)/weight, y = (regions_embed_values[2,7,:]-bias)/weight, )
-# # equal aspect ratio
-# plt.gca().set_aspect('equal', adjustable='box')
-# # x lim
-# # x label
-# plt.xlabel('Output masked')
-# # y label
-# plt.ylabel('Target')
 #%%
 # save concatenated output and target as npy
 np.save('output_masked_values_rcc.npy', output_masked_values)
@@ -165,8 +152,8 @@ import numpy as np
 import seaborn as sns
 # output_masked_values_fetal = np.load('output_masked_values_rcc.npy')#[:,:,100]#.flatten()
 # regions_embed_values_fetal = np.load('regions_embed_values_rcc.npy')#[:,:,100]#.flatten()
-output_masked_values_gbm = np.load('output_masked_values_rcc.npy')[1,:,2].flatten()
-regions_embed_values_gbm = np.load('regions_embed_values_rcc.npy')[1,:,2].flatten()
+output_masked_values_gbm = np.load('output_masked_values_rcc.npy')[8,:,15].flatten()
+regions_embed_values_gbm = np.load('regions_embed_values_rcc.npy')[8,:,15].flatten()
 output_masked_values = output_masked_values_gbm[regions_embed_values_gbm!=0]
 regions_embed_values = regions_embed_values_gbm[regions_embed_values_gbm!=0]
 #%%

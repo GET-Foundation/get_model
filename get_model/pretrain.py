@@ -123,7 +123,9 @@ def get_args_parser():
         type=float,
         help="ratio of the visual tokens/patches need be masked",
     )
-
+    parser.add_argument(
+        "--final_bn", default=False, type=bool, help="Whether to BN motifxregion matrix before region embedding"
+    )
 
 
     parser.add_argument(
@@ -319,6 +321,7 @@ def get_model(args):
         drop_block_rate=None,
         output_dim=args.output_dim,
         flash_attn=args.flash_attn,
+        final_bn=args.final_bn,
     )
 
     return model

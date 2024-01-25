@@ -229,6 +229,7 @@ class GETPretrain(nn.Module):
         atac_kernel_size=3,
         joint_kernel_num=16,
         joint_kernel_size=3,
+        final_bn=False,
     ):
         super().__init__()
         self.num_regions = num_regions
@@ -256,6 +257,7 @@ class GETPretrain(nn.Module):
                                             joint_kernel_num=joint_kernel_num,
                                             atac_kernel_size=atac_kernel_size,
                                             joint_kernel_size=joint_kernel_size,
+                                            final_bn=final_bn,
                                             )
         # self.split_pool = SplitPool()
         self.region_embed = RegionEmbed(num_regions, motif_dim+joint_kernel_num, embed_dim)
@@ -378,6 +380,7 @@ class GETFinetune(nn.Module):
         joint_kernel_num=16,
         joint_kernel_size=3,
         use_atac=False,
+        final_bn=False,
     ):
         super().__init__()
         self.num_regions = num_regions
@@ -406,6 +409,7 @@ class GETFinetune(nn.Module):
             joint_kernel_num=joint_kernel_num,
             atac_kernel_size=atac_kernel_size,
             joint_kernel_size=joint_kernel_size,
+            final_bn=final_bn,
         )
         # self.split_pool = SplitPool()
         self.region_embed = RegionEmbed(num_regions, motif_dim+joint_kernel_num, embed_dim)
@@ -511,6 +515,7 @@ def get_pretrain_motif_base(pretrained=False, **kwargs):
         flash_attn=kwargs["flash_attn"],
         atac_kernel_num=161,
         joint_kernel_num=161,
+        final_bn=kwargs["final_bn"],
     )
     if pretrained:
         checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
@@ -536,6 +541,7 @@ def get_finetune_motif(pretrained=False, **kwargs):
         flash_attn=kwargs["flash_attn"],
         atac_kernel_num=161,
         joint_kernel_num=161,
+        final_bn=kwargs["final_bn"],
     )
     if pretrained:
         checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")

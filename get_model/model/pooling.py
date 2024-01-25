@@ -66,7 +66,7 @@ class ATACSplitPool(nn.Module):
     splitting can be calculated by cumsum of the padded peak lengths. The output
     is a tensor of shape (batch, n_peak, dimension). 
     """
-    def __init__(self, pool_method='mean', atac_kernel_num=16, motif_dim=639, joint_kernel_num=16, atac_kernel_size=3, joint_kernel_size=3):
+    def __init__(self, pool_method='mean', atac_kernel_num=16, motif_dim=639, joint_kernel_num=16, atac_kernel_size=3, joint_kernel_size=3, final_bn=False):
         super().__init__()
         self.pool_method = pool_method
         self.atac_conv = nn.Conv1d(1, atac_kernel_num, atac_kernel_size, padding="same", bias=False)
@@ -74,7 +74,8 @@ class ATACSplitPool(nn.Module):
         self.joint_conv = nn.Conv1d(motif_dim + atac_kernel_num, joint_kernel_num, joint_kernel_size, padding="same", bias=False)
         self.joint_bn = nn.BatchNorm1d(joint_kernel_num, affine=False)
         self.patch_pool = nn.MaxPool1d(25, stride=25)
-        self.final_bn = nn.BatchNorm1d(motif_dim + joint_kernel_num, affine=False)
+        if final_bn:
+            self.final_bn = nn.BatchNorm1d(motif_dim + joint_kernel_num, affine=False)
 
 
     def forward(self, x, atac, peak_split, n_peaks, max_n_peaks):
@@ -90,7 +91,8 @@ class ATACSplitPool(nn.Module):
         # shape (batch, n_peak, motif_dim + joint_kernel_num)
         x = torch.cat([x_region, joint_region], dim=2).contiguous()
         # batch norm
-        x = self.final_bn(x.transpose(1,2)).transpose(1,2)
+        if hasattr(self, 'final_bn'):
+            x = self.final_bn(x.transpose(1,2)).transpose(1,2)
         return x
 
     def forward_joint(self, x, atac, peak_split, n_peaks, max_n_peaks, patch_size=25):

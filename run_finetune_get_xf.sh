@@ -33,9 +33,10 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --eval_nonzero \
     --leave_out_celltypes "Astrocyte" \
     --leave_out_chromosomes "chr11" \
+    --final_bn True \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 5 \
-    --epochs 200 \
+    --epochs 400 \
     --num_region_per_sample 100 \
     --output_dir ${OUTPUT_DIR} 
