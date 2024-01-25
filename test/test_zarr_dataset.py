@@ -19,8 +19,7 @@ pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open', preload_count=100, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=10, n_peaks_upper_bound=100, use_insulation=False, leave_out_celltypes=None,
-                           leave_out_chromosomes=None, is_train=True, dataset_size=65536, additional_peak_columns=None)
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=10, n_peaks_upper_bound=100, use_insulation=False, leave_out_celltypes='Astrocyte', leave_out_chromosomes='chr1', is_train=False, dataset_size=65536, additional_peak_columns=None)
 pretrain.__len__()
 #%%
 from get_model.dataset.zarr_dataset import worker_init_fn_get
