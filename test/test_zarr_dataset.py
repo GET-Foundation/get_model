@@ -48,15 +48,16 @@ model = GETPretrain(
         flash_attn=False,
         nhead=12,
         dropout=0.1,
-        output_dim=655,
-        atac_kernel_num = 16,
+        output_dim=800,
+        atac_kernel_num = 161,
         atac_kernel_size = 3,
-        joint_kernel_num = 16,
+        joint_kernel_num = 161,
+        final_bn=False,
         joint_kernel_size = 3,
         pos_emb_components=[],
     )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional_no_insulation/checkpoint-67.pth')
+checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional_no_insulation_no_affine_no_final_bn/checkpoint-140.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=False)
 
@@ -80,7 +81,7 @@ for i in range(10):
     from scipy.cluster.hierarchy import linkage, dendrogram
     # Z = linkage((weight[i+10,:,:]-weight[3+10,:,:]), 'ward')
     # g = dendrogram(Z, no_plot=True)
-    ax[i].imshow((weight[i+50,:,:])[np.array(g['ivl']).astype('int')], aspect=0.01)
+    ax[i].imshow((weight[i+20,:,:])[np.array(g['ivl']).astype('int')], aspect=0.01)
     
 #%%
 # compare two random weight[i].flatten() using scatter plot
@@ -151,8 +152,8 @@ import numpy as np
 import seaborn as sns
 # output_masked_values_fetal = np.load('output_masked_values_rcc.npy')#[:,:,100]#.flatten()
 # regions_embed_values_fetal = np.load('regions_embed_values_rcc.npy')#[:,:,100]#.flatten()
-output_masked_values_gbm = np.load('output_masked_values_rcc.npy')[8,:,15].flatten()
-regions_embed_values_gbm = np.load('regions_embed_values_rcc.npy')[8,:,15].flatten()
+output_masked_values_gbm = np.load('output_masked_values_rcc.npy')[:,:,639:].flatten()
+regions_embed_values_gbm = np.load('regions_embed_values_rcc.npy')[:,:,639:].flatten()
 output_masked_values = output_masked_values_gbm[regions_embed_values_gbm!=0]
 regions_embed_values = regions_embed_values_gbm[regions_embed_values_gbm!=0]
 #%%
@@ -165,7 +166,7 @@ regions_embed_values = regions_embed_values_gbm[regions_embed_values_gbm!=0]
 # regions_embed_values = regions_embed_values[idx]
 from matplotlib import pyplot as plt
 # kde plot with shade 
-sns.scatterplot(x = output_masked_values, y = regions_embed_values,s=3, alpha=1)
+sns.scatterplot(x = output_masked_values, y = regions_embed_values,s=1, alpha=0.5)
 # xlim and ylim 0, 0.8
 # plt.xlim(0, 0.1)
 # plt.ylim(0, 0.1)

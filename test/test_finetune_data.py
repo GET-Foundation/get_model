@@ -26,7 +26,7 @@ pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=50, n_peaks_upper_bound=100, leave_out_celltypes='Astrocyte', leave_out_chromosomes='chr11', is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative'], non_redundant=None, use_insulation=False)
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=50, n_peaks_upper_bound=100, leave_out_celltypes='Astrocyte', leave_out_chromosomes='chr11', is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative'], non_redundant='depth_2048', use_insulation=False, dataset_size=4096)
 pretrain.__len__()
 # %%
 pretrain.datapool.insulation
@@ -74,7 +74,7 @@ model = GETFinetune(
         final_bn = True,
     )
 #%%
-checkpoint = torch.load('/burg/home/xf2217/checkpoint-197.pth')
+checkpoint = torch.load('/burg/home/xf2217/checkpoint.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=True)
 
@@ -127,7 +127,7 @@ preds = []
 obs = []
 with torch.amp.autocast('cuda', dtype=torch.bfloat16):
     for i, batch in tqdm(enumerate(data_loader_train)):
-        if i > 100:
+        if i > 200:
             break
         sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
         if min(chunk_size)<0:
@@ -156,18 +156,21 @@ with torch.amp.autocast('cuda', dtype=torch.bfloat16):
     # preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
     # obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
 # %%
-preds = preds[obs>0]
-obs = obs[obs>0]
-sns.scatterplot(x=preds, y=obs, s=2, alpha=1)
+preds_ = preds[obs>0]
+obs_ = obs[obs>0]
+sns.scatterplot(x=preds_, y=obs_, s=2, alpha=1)
 # add correlation as text
 # set x lim
-plt.xlim([0, 4])
+# plt.xlim([0, 4])
 # set y lim
-plt.ylim([0, 4])
+# plt.ylim([0, 4])
 
 from scipy.stats import spearmanr, pearsonr
-corr = pearsonr(preds, obs)[0]
-plt.title(f'Correlation: {corr}')
+# r2_score(preds, obs)
+from sklearn.metrics import r2_score
+
+corr = pearsonr(preds_, obs_)[0]
+plt.title(f'Correlation: {corr}, R2: {r2_score(preds_, obs_)}')
 # %%
 np.mean(losses)
 # %%

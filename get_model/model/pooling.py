@@ -80,7 +80,8 @@ class ATACSplitPool(nn.Module):
 
     def forward(self, x, atac, peak_split, n_peaks, max_n_peaks):
         # normalize atac to [0,1], keeps mostly shape information
-        atac = atac / (atac.max(1, keepdim=True)[0]+1e-5)
+        # atac = atac / (atac.max(1, keepdim=True)[0]+1e-5)
+        atac = torch.log10(atac+1)
         # split pool motif signal to region level
         x_region = self.forward_x(x, peak_split, n_peaks, max_n_peaks)
         # jointly convolve atac and motif signal at 50bp bin level

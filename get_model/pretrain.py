@@ -103,7 +103,7 @@ def get_args_parser():
     parser.add_argument(
         "--non_redundant",
         default=None,
-        choices=["max_depth", None],
+        choices=["max_depth", "depth_512", "depth_1024", "depth_2048", "depth_4096", None],
     )
     parser.add_argument(
         "--num_motif",
