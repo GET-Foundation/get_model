@@ -387,8 +387,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         dataset = ZarrPretrainDataset([
             f'{root}/htan_gbm_dense.zarr',
             ],
-                           f'/pmglocal/alb2281/fetal_adult_data/hg38.zarr',
-                           f'/pmglocal/alb2281/fetal_adult_data/hg38_motif_result.zarr', 
+                           f'/pmglocal/alb2281/get_data/get_resources/hg38.zarr',
+                           f'/pmglocal/alb2281/get_data/get_resources/hg38_motif_result.zarr', 
                            ['/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, insulation_subsample_ratio=0.8,
                            additional_peak_columns=['Expression_positive', 'Expression_negative'], preload_count=args.preload_count, 
@@ -410,8 +410,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         dataset = ZarrPretrainDataset([
             f"{root}/htan_gbm_dense.zarr",
             ],
-                           f'/pmglocal/alb2281/fetal_adult_data/hg38.zarr',
-                           f'/pmglocal/alb2281/fetal_adult_data/hg38_motif_result.zarr', 
+                           f'/pmglocal/alb2281/get_data/get_resources/hg38.zarr',
+                           f'/pmglocal/alb2281/get_data/get_resources/hg38_motif_result.zarr', 
                            ['/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, insulation_subsample_ratio=0.8, additional_peak_columns=['Expression_positive', 'Expression_negative'], preload_count=args.preload_count, 
                            n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes,

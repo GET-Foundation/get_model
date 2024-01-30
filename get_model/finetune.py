@@ -439,7 +439,7 @@ def main(args, ds_init):
     np.random.seed(seed)
     # random.seed(seed)
 
-    sequence_obj = DenseZarrIO('/pmglocal/alb2281/fetal_adult_data/hg38.zarr', dtype='int8')
+    sequence_obj = DenseZarrIO('/pmglocal/alb2281/get_data/get_resources/hg38.zarr', dtype='int8')
     sequence_obj.load_to_memory_dense()
 
     cudnn.benchmark = True
