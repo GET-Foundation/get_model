@@ -124,7 +124,21 @@ def get_args():
         help="use insulation score",
     )
     parser.add_argument(
+        "--non_redundant",
+        default=None,
+        choices=["max_depth", "depth_512", "depth_1024", "depth_2048", "depth_4096", None],
+    )
+    parser.add_argument(
+        "--freeze_atac_attention",
+        action="store_true",
+        default=False,
+        help="use insulation score",
+    )
+    parser.add_argument(
         "--last_layer", default=False, type=bool, help="train only last layers"
+    )
+    parser.add_argument(
+        "--final_bn", default=False, type=bool, help="Whether to BN motifxregion matrix before region embedding"
     )
     parser.add_argument(
         "--drop",
@@ -525,6 +539,7 @@ def main(args, ds_init):
 
         use_mean_pooling=args.use_mean_pooling,
         setting=args.setting,
+        final_bn=args.final_bn,
 
 
     )
@@ -582,12 +597,12 @@ def main(args, ds_init):
                     param.requires_grad = False
 
         # model.load_state_dict(checkpoint_model, strict=False)
-#        # TODO: temporarily freeze atac_attention 
-#        for name, param in model.named_parameters():
-#            if "atac_attention" in name:
-#                param.requires_grad = False
-#                print(f"Freezed weights of {name}")
-#            
+        if args.freeze_atac_attention:
+            for name, param in model.named_parameters():
+                if "atac_attention" in name:
+                    param.requires_grad = False
+                    print(f"Freezed weights of {name}")
+                
 
     model.to(device)
 

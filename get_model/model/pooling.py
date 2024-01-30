@@ -66,30 +66,37 @@ class ATACSplitPool(nn.Module):
     splitting can be calculated by cumsum of the padded peak lengths. The output
     is a tensor of shape (batch, n_peak, dimension). 
     """
-    def __init__(self, pool_method='mean', atac_kernel_num=16, motif_dim=639, joint_kernel_num=16, atac_kernel_size=3, joint_kernel_size=3):
+    def __init__(self, pool_method='mean', atac_kernel_num=16, motif_dim=639, joint_kernel_num=16, atac_kernel_size=3, joint_kernel_size=3, final_bn=False):
         super().__init__()
         self.pool_method = pool_method
         self.atac_conv = nn.Conv1d(1, atac_kernel_num, atac_kernel_size, padding="same", bias=False)
-        self.atac_bn = nn.BatchNorm1d(atac_kernel_num)
+        self.atac_bn = nn.BatchNorm1d(atac_kernel_num, affine=False)
         self.joint_conv = nn.Conv1d(motif_dim + atac_kernel_num, joint_kernel_num, joint_kernel_size, padding="same", bias=False)
-        self.joint_bn = nn.BatchNorm1d(joint_kernel_num)
-        self.patch_pool = nn.MaxPool1d(50, stride=50)
+        self.joint_bn = nn.BatchNorm1d(joint_kernel_num, affine=False)
+        self.patch_pool = nn.MaxPool1d(25, stride=25)
+        if final_bn:
+            self.final_bn = nn.BatchNorm1d(motif_dim + joint_kernel_num, affine=False)
+
 
     def forward(self, x, atac, peak_split, n_peaks, max_n_peaks):
         # normalize atac to [0,1], keeps mostly shape information
-        atac = atac / (atac.max(1, keepdim=True)[0]+1e-5)
+        # atac = atac / (atac.max(1, keepdim=True)[0]+1e-5)
+        atac = torch.log10(atac+1)
         # split pool motif signal to region level
         x_region = self.forward_x(x, peak_split, n_peaks, max_n_peaks)
         # jointly convolve atac and motif signal at 50bp bin level
         joint_region = self.forward_joint(x, atac, peak_split, n_peaks, max_n_peaks)
         # log transform to make the signal < 10
-        joint_region = torch.log10(joint_region+1)
+        joint_region = torch.log2(joint_region+1)
         # concatenate motif representation with joint representation
         # shape (batch, n_peak, motif_dim + joint_kernel_num)
-        x = torch.cat([x_region, joint_region], dim=2)
+        x = torch.cat([x_region, joint_region], dim=2).contiguous()
+        # batch norm
+        if hasattr(self, 'final_bn'):
+            x = self.final_bn(x.transpose(1,2)).transpose(1,2)
         return x
 
-    def forward_joint(self, x, atac, peak_split, n_peaks, max_n_peaks, patch_size=50):
+    def forward_joint(self, x, atac, peak_split, n_peaks, max_n_peaks, patch_size=25):
         """
         x: (batch, length, dimension)
         atac: (batch, length, 1)

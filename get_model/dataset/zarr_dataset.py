@@ -110,6 +110,21 @@ class ZarrDataPool(object):
         """
         Initialize the zarr datasets and load peaks and insulation data.
         """
+        self._subset_datasets()
+        self.data_keys = list(self.zarr_dict.keys())
+        self.peaks_dict = self._load_peaks()
+        self.insulation = self._load_insulation()
+
+    def _subset_datasets(self):
+        """
+        Subset the zarr datasets based on the 
+        - peak_name 
+        - leave_out_celltypes and 
+        - non_redundant and 
+        - leave_out_chromosomes and
+        - is_train
+        parameters.
+        """
         self.zarr_dict = {cdz.data_key: cdz for zarr_dir in self.zarr_dirs for cdz in [
             CelltypeDenseZarrIO(zarr_dir).subset_celltypes_with_data_name(self.peak_name)]}
 
@@ -129,25 +144,21 @@ class ZarrDataPool(object):
             for data_key, cdz in self.zarr_dict.items():
                 self.zarr_dict.update(
                     {data_key: cdz.non_redundant_celltypes(self.non_redundant)})
-
-        self.data_keys = list(self.zarr_dict.keys())
-        self.peaks_dict = self._load_peaks()
-        self.insulation = self._load_insulation(
-            self.insulation_paths).sample(frac=self.insulation_subsample_ratio).reset_index(drop=True)
-        # remove the leave out chromosomes from insulation
+                
+        # remove the leave out chromosomes
         if isinstance(self.leave_out_chromosomes, str):
             if ',' in self.leave_out_chromosomes:
                 self.leave_out_chromosomes = self.leave_out_chromosomes.split(
                     ',')
             else:
                 self.leave_out_chromosomes = [self.leave_out_chromosomes]
+        
         if self.leave_out_chromosomes is not None and isinstance(self.leave_out_chromosomes, list):
-            if self.is_train:
-                self.insulation = self.insulation.query(
-                    'Chromosome not in @self.leave_out_chromosomes').reset_index(drop=True)
-            else:
-                self.insulation = self.insulation.query(
-                    'Chromosome in @self.leave_out_chromosomes').reset_index(drop=True)
+            # subset the data
+            for data_key, cdz in self.zarr_dict.items():
+                self.zarr_dict.update({data_key: cdz.leave_out_chromosomes(
+                    self.leave_out_chromosomes, inverse=not self.is_train)})
+        return
 
     def calculate_metadata(self):
         """
@@ -195,8 +206,7 @@ class ZarrDataPool(object):
         if self.motif_mean_std_obj is not None:
             motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chunk_idx:chunk_idx+2].reshape(
                 2, 2, -1).mean(0)
-        else:
-            motif_mean_std = np.zeros((2, 1274))
+
         return window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
 
     def _get_peak_names(self, data_key, celltype_id):
@@ -237,7 +247,7 @@ class ZarrDataPool(object):
 
         return peaks_dict
 
-    def _load_insulation(self, insulation_paths: list):
+    def _load_insulation(self):
         """
         Load insulation data which is a list of pandas dataframe feather
 
@@ -249,10 +259,20 @@ class ZarrDataPool(object):
         """
         logging.info('Loading insulation data')
         insulation_list = []
-        for path in insulation_paths:
+        for path in self.insulation_paths:
             insulation_list.append(pd.read_feather(path))
 
-        return pd.concat(insulation_list).drop_duplicates(subset=['Chromosome', 'Start', 'End'])
+        insulation = pd.concat(insulation_list).drop_duplicates(subset=['Chromosome', 'Start', 'End'])
+        if self.leave_out_chromosomes is not None and isinstance(self.leave_out_chromosomes, list):
+            if self.is_train:
+                # subset the data
+                insulation = insulation.query(
+                    'Chromosome not in @self.leave_out_chromosomes').reset_index(drop=True)
+            else:
+                insulation = insulation.query(
+                    'Chromosome in @self.leave_out_chromosomes').reset_index(drop=True)
+        return insulation.sample(frac=self.insulation_subsample_ratio).reset_index(drop=True)
+
 
     def _get_celltype_info(self, window_index):
         """

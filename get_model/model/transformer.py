@@ -63,7 +63,7 @@ class Attention(nn.Module):
         if attn_dtype == torch.float16:
             attn_mask_value = -65504
         elif attn_dtype == torch.float32:
-            attn_mask_value = -3.4028235e38
+            attn_mask_value = -65504
         elif attn_dtype == torch.bfloat16:
             attn_mask_value = -65504
 

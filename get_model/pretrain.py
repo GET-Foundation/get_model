@@ -100,7 +100,11 @@ def get_args_parser():
         type=int,
         help="upper bound of number of peaks",
     )
-
+    parser.add_argument(
+        "--non_redundant",
+        default=None,
+        choices=["max_depth", "depth_512", "depth_1024", "depth_2048", "depth_4096", None],
+    )
     parser.add_argument(
         "--num_motif",
         default=1273,
@@ -119,7 +123,9 @@ def get_args_parser():
         type=float,
         help="ratio of the visual tokens/patches need be masked",
     )
-
+    parser.add_argument(
+        "--final_bn", default=False, type=bool, help="Whether to BN motifxregion matrix before region embedding"
+    )
 
 
     parser.add_argument(
@@ -315,6 +321,7 @@ def get_model(args):
         drop_block_rate=None,
         output_dim=args.output_dim,
         flash_attn=args.flash_attn,
+        final_bn=args.final_bn,
     )
 
     return model
