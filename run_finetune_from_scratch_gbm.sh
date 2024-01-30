@@ -3,7 +3,7 @@
 OUTPUT_DIR='/pmglocal/alb2281/get_data/output_ckpts/finetune-from-scratch'
 # path to expression set
 DATA_PATH='/pmglocal/alb2281/get_data/htan_final_zarr'
-PORT=7962
+PORT=7963
 
 export NCCL_P2P_LEVEL=NVL
 
@@ -28,7 +28,7 @@ CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=2 python -m torch.distributed.run --npr
     --lr 5e-4 \
     --opt adamw \
     --wandb_project_name "get-finetune-gbm" \
-    --wandb_run_name "gbm-pretrain_ATACSplitPool_unnorm_bidirectional_no_insulation_no_affine_no_final_bn-eval-oligodendrocytes-cont" \
+    --wandb_run_name "gbm-finetune-from-scratch-ckpt-197-leaveout-oligo-chr11" \
     --eval_freq 1 \
     --dist_eval \
     --eval_nonzero \
