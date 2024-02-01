@@ -1,9 +1,9 @@
 #!/bin/bash
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/alb2281/get_data/output_ckpts/finetune-from-scratch'
+OUTPUT_DIR='/pmglocal/alb2281/get_ckpts/output/finetune-from-scratch'
 # path to expression set
-DATA_PATH='/pmglocal/alb2281/get_data/htan_final_zarr'
-PORT=7963
+DATA_PATH='/pmglocal/alb2281/get_data/htan_data/zarr_final'
+PORT=7967
 
 export NCCL_P2P_LEVEL=NVL
 
@@ -11,7 +11,7 @@ export NCCL_P2P_LEVEL=NVL
 CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=2 python -m torch.distributed.run --nproc_per_node=2 --rdzv-endpoint=localhost:$PORT /pmglocal/alb2281/repos/get_model/get_model/finetune.py \
     --data_set "HTAN_GBM" \
     --eval_data_set "HTAN_GBM.eval" \
-    --finetune "/pmglocal/alb2281/get_data/input_ckpts/checkpoint-197.pth" \
+    --finetune "/pmglocal/alb2281/get_ckpts/input/checkpoint-197.pth" \
     --data_path ${DATA_PATH} \
     --input_dim 639 \
     --output_dim 2 \
