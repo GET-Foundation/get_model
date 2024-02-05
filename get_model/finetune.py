@@ -129,7 +129,7 @@ def get_args():
         choices=["max_depth", "depth_512", "depth_1024", "depth_2048", "depth_4096", None],
     )
     parser.add_argument(
-        "--filter_to_min_depth",
+        "--filter_by_min_depth",
         default=None,
         choices=["depth_512", "depth_1024", "depth_2048", "depth_4096", "depth_8192", None],
         help="Filter out samples that do not meet minimum depth threshold"
