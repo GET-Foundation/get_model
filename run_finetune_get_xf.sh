@@ -32,11 +32,11 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=2 --rdzv-endpoint=localhost:$PORT ge
     --wandb_project_name "get_finetune" \
     --wandb_run_name "20240205.finetune_conv50_depth4096_500_region_200bp" \
     --eval_freq 5 \
+    --freeze_atac_attention \
     --dist_eval \
     --eval_nonzero \
     --leave_out_celltypes "Astrocyte" \
     --leave_out_chromosomes "chr4,chr14" \
-    --final_bn False \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 20 \
