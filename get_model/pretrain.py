@@ -510,7 +510,7 @@ def main(args):
                     epoch=epoch,
                 )
         if (
-            data_loader_eval is not None
+            data_loader_eval is not None and epoch % 5 == 0
         ):
             print("*******Start evaluation********")
             test_stats = evaluate_pretrain(
