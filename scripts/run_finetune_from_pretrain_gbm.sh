@@ -1,26 +1,30 @@
 #!/bin/bash
-# Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/alb2281/get_ckpts/output/finetune-from-pretrain'
-# path to expression set
-DATA_PATH='/pmglocal/alb2281/get_data/htan_data/zarr_final'
-PORT=7965
+
+PRETRAIN_NAME="20240204-pretrain_conv50_depth4096_500_region_200bp"
+FINETUNE_EXP_NAME="$PRETRAIN_NAME-GBM-leaveout-oligo-chr11"
+INPUT_CKPT="/pmglocal/alb2281/get_ckpts/input/$PRETRAIN_NAME-checkpoint-170.pth"
+OUTPUT_DIR="/pmglocal/alb2281/get_ckpts/output/finetune-from-scratch/$FINETUNE_EXP_NAME/"
+DATA_PATH="/pmglocal/alb2281/get_data/htan_final_zarr"
+PORT=7958
 
 export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
-CUDA_VISIBLE_DEVICES=2,3 OMP_NUM_THREADS=2 python -m torch.distributed.run --nproc_per_node=2 --rdzv-endpoint=localhost:$PORT /pmglocal/alb2281/repos/get_model/get_model/finetune.py \
+CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=2 python -m torch.distributed.run --nproc_per_node=2 --rdzv-endpoint=localhost:$PORT /pmglocal/alb2281/repos/get_model/get_model/finetune.py \
     --data_set "HTAN_GBM" \
     --eval_data_set "HTAN_GBM.eval" \
-    --finetune "/pmglocal/alb2281/get_ckpts/input/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional_no_insulation_no_affine_no_final_bn.pth" \
+    --finetune ${INPUT_CKPT} \
     --data_path ${DATA_PATH} \
     --input_dim 639 \
     --output_dim 2 \
     --num_motif 637 \
     --model get_finetune_motif \
-    --batch_size 32 \
-    --num_workers 64 \
+    --batch_size 16 \
+    --num_workers 32 \
     --n_peaks_lower_bound 20 \
-    --n_peaks_upper_bound 100 \
+    --n_peaks_upper_bound 500 \
+    --center_expand_target 200 \
+    --non_redundant 'max_depth' \
     --preload_count 200 \
     --pin_mem \
     --peak_name "peaks_q0.01_tissue_open_exp" \
@@ -28,15 +32,16 @@ CUDA_VISIBLE_DEVICES=2,3 OMP_NUM_THREADS=2 python -m torch.distributed.run --npr
     --lr 5e-4 \
     --opt adamw \
     --wandb_project_name "get-finetune-gbm" \
-    --wandb_run_name "gbm-finetune-from-pretrain_ATACSplitPool_unnorm_bidirectional_no_insulation_no_affine_no_final_bn-leaveout-oligo-chr11" \
+    --wandb_run_name "$FINETUNE_EXP_NAME" \
     --eval_freq 1 \
+    --freeze_atac_attention \
     --dist_eval \
     --eval_nonzero \
     --leave_out_celltypes "Oligodendrocytes" \
     --leave_out_chromosomes "chr11" \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
-    --warmup_epochs 5 \
-    --epochs 200 \
-    --num_region_per_sample 100 \
+    --warmup_epochs 20 \
+    --epochs 100 \
+    --num_region_per_sample 500 \
     --output_dir ${OUTPUT_DIR} 

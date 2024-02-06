@@ -1,43 +1,45 @@
 #!/bin/bash
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/alb2281/get_ckpts/output/finetune-from-scratch'
+OUTPUT_DIR='/pmglocal/xf2217/20240205.finetune_conv50_depth4096_500_region_200bp/'
 # path to expression set
-DATA_PATH='/pmglocal/alb2281/get_data/htan_final_zarr'
-PORT=7968
+DATA_PATH='/pmglocal/xf2217/get_data/'
+PORT=7957
 
 export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
-CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=1 python -m torch.distributed.run --nproc_per_node=1 --rdzv-endpoint=localhost:$PORT /pmglocal/alb2281/repos/get_model/get_model/finetune.py \
-    --data_set "HTAN_GBM" \
-    --eval_data_set "HTAN_GBM.eval" \
-    --finetune "/pmglocal/alb2281/get_ckpts/input/checkpoint-197.pth" \
+OMP_NUM_THREADS=1 torchrun --nproc_per_node=2 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
+    --data_set "Expression_Finetune_Fetal" \
+    --eval_data_set "Expression_Finetune_Fetal.fetal_eval" \
+    --finetune "/pmglocal/xf2217/20240204.pretrain_conv50_depth4096_500_region_200bp/checkpoint-170.pth" \
     --data_path ${DATA_PATH} \
     --input_dim 639 \
     --output_dim 2 \
     --num_motif 637 \
     --model get_finetune_motif \
-    --batch_size 32 \
-    --num_workers 64 \
-    --n_peaks_lower_bound 200 \
-    --n_peaks_upper_bound 200 \
+    --batch_size 16 \
+    --num_workers 32 \
+    --n_peaks_lower_bound 20 \
+    --n_peaks_upper_bound 500 \
+    --center_expand_target 200 \
+    --non_redundant 'max_depth' \
     --preload_count 200 \
     --pin_mem \
     --peak_name "peaks_q0.01_tissue_open_exp" \
     --n_packs 1 \
     --lr 5e-4 \
     --opt adamw \
-    --wandb_project_name "get-finetune-gbm" \
-    --wandb_run_name "gbm-finetune-from-scratch-ckpt-197-leaveout-oligo-chr11" \
-    --eval_freq 1 \
+    --wandb_project_name "get_finetune" \
+    --wandb_run_name "20240205.finetune_conv50_depth4096_500_region_200bp" \
+    --eval_freq 5 \
+    --freeze_atac_attention \
     --dist_eval \
     --eval_nonzero \
-    --leave_out_celltypes "Oligodendrocytes" \
-    --leave_out_chromosomes "chr11" \
+    --leave_out_celltypes "Astrocyte" \
+    --leave_out_chromosomes "chr4,chr14" \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
-    --warmup_epochs 5 \
-    --epochs 200 \
-    --num_region_per_sample 100 \
-    --filter_by_min_depth "depth_4096" \
+    --warmup_epochs 20 \
+    --epochs 100 \
+    --num_region_per_sample 500 \
     --output_dir ${OUTPUT_DIR} 
