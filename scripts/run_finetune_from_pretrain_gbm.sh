@@ -1,16 +1,16 @@
 #!/bin/bash
 
 PRETRAIN_NAME="20240204-pretrain_conv50_depth4096_500_region_200bp"
-FINETUNE_EXP_NAME="$PRETRAIN_NAME-GBM-leaveout-oligo-chr11"
+FINETUNE_EXP_NAME="$PRETRAIN_NAME-GBM-leaveout-Tumor.htan_gbm.C3N-01814_CPT0167860015-chr11"
 INPUT_CKPT="/pmglocal/alb2281/get_ckpts/input/$PRETRAIN_NAME-checkpoint-170.pth"
 OUTPUT_DIR="/pmglocal/alb2281/get_ckpts/output/finetune-from-scratch/$FINETUNE_EXP_NAME/"
 DATA_PATH="/pmglocal/alb2281/get_data/htan_final_zarr"
-PORT=7958
+PORT=7959
 
 export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
-CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=2 python -m torch.distributed.run --nproc_per_node=2 --rdzv-endpoint=localhost:$PORT /pmglocal/alb2281/repos/get_model/get_model/finetune.py \
+OMP_NUM_THREADS=4 python -m torch.distributed.run --nproc_per_node=4 --rdzv-endpoint=localhost:$PORT /pmglocal/alb2281/repos/get_model/get_model/finetune.py \
     --data_set "HTAN_GBM" \
     --eval_data_set "HTAN_GBM.eval" \
     --finetune ${INPUT_CKPT} \
@@ -24,7 +24,7 @@ CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=2 python -m torch.distributed.run --npr
     --n_peaks_lower_bound 20 \
     --n_peaks_upper_bound 500 \
     --center_expand_target 200 \
-    --non_redundant 'max_depth' \
+    --non_redundant 'depth_4096' \
     --preload_count 200 \
     --pin_mem \
     --peak_name "peaks_q0.01_tissue_open_exp" \
@@ -37,7 +37,7 @@ CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=2 python -m torch.distributed.run --npr
     --freeze_atac_attention \
     --dist_eval \
     --eval_nonzero \
-    --leave_out_celltypes "Oligodendrocytes" \
+    --leave_out_celltypes "Tumor.htan_gbm.C3N-01814_CPT0167860015_snATAC_GBM_Tumor" \
     --leave_out_chromosomes "chr11" \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
