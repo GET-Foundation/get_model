@@ -46,8 +46,8 @@ for id in tqdm(cdz.ids):
     peaks['Expression_negative'] = exp_array[:,1]
     peaks['aTPM'] = np.log10(peaks.Count / peaks.Count.sum() * 1e5 + 1)
     peaks['aTPM'] = peaks['aTPM'] / peaks['aTPM'].max()
-    peaks.loc[peaks.aTPM<0.01, 'Expression_negative'] = 0
-    peaks.loc[peaks.aTPM<0.01, 'Expression_positive'] = 0
+    peaks.loc[peaks.aTPM<0.1, 'Expression_negative'] = 0
+    peaks.loc[peaks.aTPM<0.1, 'Expression_positive'] = 0
     cdz.write_peaks(id, 
                 peaks,
                 'peaks_q0.01_tissue_open_exp',
@@ -61,8 +61,10 @@ cdz = CelltypeDenseZarrIO(
 # %%
 cdz = cdz.subset_celltypes_with_data_name('peaks_q0.01_tissue_open_exp')
 # %%
-cid = 'Fetal Erythroblast 1.shendure_fetal.sample_37_liver.4096'
+cid = 'Fetal Erythroblast 1.shendure_fetal.sample_37_liver.2048'
 peaks = cdz.get_peaks(cid, 'peaks_q0.01_tissue_open_exp')
+# peaks.loc[peaks.aTPM<0.1, 'Expression_negative'] = 0.00001
+# peaks.loc[peaks.aTPM<0.1, 'Expression_positive'] = 0.00001
 #%%
 accessibility = cdz.get_peak_counts(cid, 'peaks_q0.01_tissue_open_exp')
 #%%

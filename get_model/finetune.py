@@ -493,6 +493,7 @@ def main(args, ds_init):
     elif global_rank == 0 and args.wandb_project_name is not None:
         wandb.login()
         run = wandb.init(
+            dir=args.log_dir,
             project=args.wandb_project_name,
             name=args.wandb_run_name,
         )
