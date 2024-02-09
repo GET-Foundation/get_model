@@ -129,6 +129,12 @@ def get_args():
         choices=["max_depth", "depth_512", "depth_1024", "depth_2048", "depth_4096", None],
     )
     parser.add_argument(
+        "--filter_by_min_depth",
+        default=None,
+        choices=["depth_512", "depth_1024", "depth_2048", "depth_4096", "depth_8192", None],
+        help="Filter out samples that do not meet minimum depth threshold"
+    )
+    parser.add_argument(
         "--freeze_atac_attention",
         action="store_true",
         default=False,
@@ -453,7 +459,7 @@ def main(args, ds_init):
     np.random.seed(seed)
     # random.seed(seed)
 
-    sequence_obj = DenseZarrIO(f'{args.data_path}/hg38.zarr', dtype='int8')
+    sequence_obj = DenseZarrIO('/pmglocal/alb2281/get_data/get_resources/hg38.zarr', dtype='int8')
     sequence_obj.load_to_memory_dense()
 
     cudnn.benchmark = True

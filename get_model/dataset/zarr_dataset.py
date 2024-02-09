@@ -71,6 +71,7 @@ class ZarrDataPool(object):
     leave_out_chromosomes (list): A list of chromosome names to leave out.
     is_train (bool): Whether to use the dataset for training.
     non_redundant (bool): Whether to remove redundant cell type instances.
+    filter_by_min_depth (bool): Whether to filter out samples by minimum depth.
 
     Returns:
     ZarrDataPool: A ZarrDataPool object.
@@ -81,8 +82,8 @@ class ZarrDataPool(object):
 
     def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', insulation_subsample_ratio=0.1,
                  max_peak_length=None, center_expand_target=None, sequence_obj=None, motif_mean_std_obj=None,
-                 additional_peak_columns=None,
-                 leave_out_celltypes=None, leave_out_chromosomes=None, non_redundant='max_depth', is_train=True):
+                 additional_peak_columns=None, leave_out_celltypes=None, leave_out_chromosomes=None, non_redundant='max_depth', 
+                 filter_by_min_depth=None, is_train=True):
         # logging.info('Initializing ZarrDataPool')
         if sequence_obj is None:
             self.sequence = DenseZarrIO(
@@ -102,6 +103,7 @@ class ZarrDataPool(object):
         self.additional_peak_columns = additional_peak_columns
         self.is_train = is_train
         self.non_redundant = non_redundant
+        self.filter_by_min_depth = filter_by_min_depth
         self.initialize_datasets()
         self.calculate_metadata()
         # logging.info('ZarrDataPool initialized')
@@ -145,6 +147,13 @@ class ZarrDataPool(object):
                 self.zarr_dict.update(
                     {data_key: cdz.non_redundant_celltypes(self.non_redundant)})
                 
+        # remove samples that do not meet minimum depth threshold
+        if self.filter_by_min_depth:
+            for data_key, cdz in self.zarr_dict.items():
+                self.zarr_dict.update(
+                    {data_key: cdz.filter_by_min_depth(self.filter_by_min_depth)}
+                )
+                                
         # remove the leave out chromosomes
         if isinstance(self.leave_out_chromosomes, str):
             if ',' in self.leave_out_chromosomes:
@@ -720,7 +729,7 @@ class PreloadDataPack(object):
 
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, use_insulation=True, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True, non_redundant=False, dataset_size=655_360):
+    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, use_insulation=True, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True, non_redundant=False, filter_by_min_depth=False, dataset_size=655_360):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -750,6 +759,7 @@ class PretrainDataset(Dataset):
         leave_out_chromosomes (list): A list of chromosome names to leave out.
         is_train (bool): Whether to use the dataset for training.
         non_redundant (bool): Whether to remove redundant cell type instances.
+        filter_by_min_depth (bool): Whether to filter out samples by minimum depth.
         dataset_size (int): The size of the dataset.
 
         Returns:
@@ -769,6 +779,7 @@ class PretrainDataset(Dataset):
         self.leave_out_chromosomes = leave_out_chromosomes
         self.is_train = is_train
         self.non_redundant = non_redundant
+        self.filter_by_min_depth = filter_by_min_depth
         self.dataset_size = dataset_size
         self.n_packs = n_packs
         self.additional_peak_columns = additional_peak_columns
@@ -785,7 +796,7 @@ class PretrainDataset(Dataset):
                                      additional_peak_columns=self.additional_peak_columns,
                                      leave_out_celltypes=self.leave_out_celltypes,
                                      leave_out_chromosomes=self.leave_out_chromosomes,
-                                     is_train=self.is_train, non_redundant=self.non_redundant)
+                                     is_train=self.is_train, non_redundant=self.non_redundant, filter_by_min_depth=self.filter_by_min_depth)
 
         # initialize n_packs preload data packs
         self.preload_data_packs = None
