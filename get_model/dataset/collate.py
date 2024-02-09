@@ -98,6 +98,13 @@ def get_rev_collate_fn(batch):
         for i in range(len(additional_peak_columns_data)):
             additional_peak_columns_data[i] = np.pad(additional_peak_columns_data[i], ((0, max_n_peaks - len(additional_peak_columns_data[i])), (0,0)))
         additional_peak_columns_data = np.stack(additional_peak_columns_data, axis=0)
+        # if aTPM < 0.1, set the expression to 0
+        if additional_peak_columns_data.shape[-1] == 3:
+            additional_peak_columns_data = additional_peak_columns_data.reshape(-1, additional_peak_columns_data.shape[-1])
+            additional_peak_columns_data[additional_peak_columns_data[:,2]<0.1, 0] = 0
+            additional_peak_columns_data[additional_peak_columns_data[:,2]<0.1, 1] = 0
+            additional_peak_columns_data = additional_peak_columns_data.reshape(batch_size, -1, 3)
+
         additional_peak_columns_data = torch.from_numpy(additional_peak_columns_data) # B, R, C=2 RNA+,RNA-,ATAC
     else:
         additional_peak_columns_data = 0
