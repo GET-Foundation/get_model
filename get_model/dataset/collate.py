@@ -104,6 +104,7 @@ def get_rev_collate_fn(batch):
             additional_peak_columns_data[additional_peak_columns_data[:,2]<0.1, 0] = 0
             additional_peak_columns_data[additional_peak_columns_data[:,2]<0.1, 1] = 0
             additional_peak_columns_data = additional_peak_columns_data.reshape(batch_size, -1, 3)
+            additional_peak_columns_data = additional_peak_columns_data[:,:,0:2]
 
         additional_peak_columns_data = torch.from_numpy(additional_peak_columns_data) # B, R, C=2 RNA+,RNA-,ATAC
     else:

@@ -1,18 +1,18 @@
 #!/bin/bash
 
 PRETRAIN_NAME="20240204-pretrain_conv50_depth4096_500_region_200bp"
-FINETUNE_EXP_NAME="$PRETRAIN_NAME-GBM-leaveout-Tumor.htan_gbm.C3N-01814_CPT0167860015-chr11"
+FINETUNE_EXP_NAME="$PRETRAIN_NAME-fetal-leaveout-Astrocyte-chr11-atpm-0.1"
 INPUT_CKPT="/pmglocal/alb2281/get_ckpts/input/$PRETRAIN_NAME-checkpoint-170.pth"
-OUTPUT_DIR="/pmglocal/alb2281/get_ckpts/output/finetune-from-scratch/$FINETUNE_EXP_NAME/"
-DATA_PATH="/pmglocal/alb2281/get_data/htan_final_zarr"
-PORT=7959
+OUTPUT_DIR="/pmglocal/alb2281/get_ckpts/output/finetune-from-pretrain-fetal/$FINETUNE_EXP_NAME/"
+DATA_PATH="/pmglocal/alb2281/get_data/shendure_final_zarr"
+PORT=7962
 
 export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
-OMP_NUM_THREADS=4 python -m torch.distributed.run --nproc_per_node=4 --rdzv-endpoint=localhost:$PORT /pmglocal/alb2281/repos/get_model/get_model/finetune.py \
-    --data_set "HTAN_GBM" \
-    --eval_data_set "HTAN_GBM.eval" \
+CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=2 python -m torch.distributed.run --nproc_per_node=2 --rdzv-endpoint=localhost:$PORT /pmglocal/alb2281/repos/get_model/get_model/finetune.py \
+    --data_set "Expression_Finetune_Fetal" \
+    --eval_data_set "Expression_Finetune_Fetal.fetal_eval" \
     --finetune ${INPUT_CKPT} \
     --data_path ${DATA_PATH} \
     --input_dim 639 \
@@ -31,13 +31,13 @@ OMP_NUM_THREADS=4 python -m torch.distributed.run --nproc_per_node=4 --rdzv-endp
     --n_packs 1 \
     --lr 5e-4 \
     --opt adamw \
-    --wandb_project_name "get-finetune-gbm" \
+    --wandb_project_name "get-finetune-fetal" \
     --wandb_run_name "$FINETUNE_EXP_NAME" \
     --eval_freq 1 \
     --freeze_atac_attention \
     --dist_eval \
     --eval_nonzero \
-    --leave_out_celltypes "Tumor.htan_gbm.C3N-01814_CPT0167860015_snATAC_GBM_Tumor" \
+    --leave_out_celltypes "Astrocyte" \
     --leave_out_chromosomes "chr11" \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
