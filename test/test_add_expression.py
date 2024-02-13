@@ -24,7 +24,7 @@ from caesar.io.gencode import Gencode
 gencode = Gencode()
 
 #%%
-for id in tqdm(cdz.ids):
+for id in tqdm(np.array(cdz.ids)[np.where(pd.Series(cdz.ids).str.contains('Astrocyte'))[0]]):
     if id.split('.')[0] not in cell_annot_dict:
         continue
     exp_id = cell_annot_dict[id.split('.')[0]]
@@ -36,14 +36,18 @@ for id in tqdm(cdz.ids):
 
     peaks = cdz.get_peaks(id, name='peaks_q0.01_tissue_open')
     overlap = pr(peaks.reset_index(drop=True).reset_index()).join(pr(exp).extend(300), suffix="_exp", how='left').df[['index', 'Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'TPM']].drop_duplicates()
+    print(overlap)
     row_col_data = overlap.query('gene_name!="-1" & TPM>=0').groupby(['index', 'Strand']).TPM.max().fillna(0).reset_index().values
     row, col, data = row_col_data[:,0], row_col_data[:,1], row_col_data[:,2]
     row = row.astype(np.int64)
     col = col.astype(np.int64)
     data = data.astype(np.float32)
     exp_array = csr_matrix((data, (row, col)), shape=(len(peaks), 2)).todense()
+    peaks = peaks.reset_index(drop=True)
+    peaks['TSS'] = 0
     peaks['Expression_positive'] = exp_array[:,0]
     peaks['Expression_negative'] = exp_array[:,1]
+    peaks['TSS'][np.unique(row)] = 1 
     peaks['aTPM'] = np.log10(peaks.Count / peaks.Count.sum() * 1e5 + 1)
     peaks['aTPM'] = peaks['aTPM'] / peaks['aTPM'].max()
     peaks.loc[peaks.aTPM<0.1, 'Expression_negative'] = 0
@@ -51,7 +55,7 @@ for id in tqdm(cdz.ids):
     cdz.write_peaks(id, 
                 peaks,
                 'peaks_q0.01_tissue_open_exp',
-                ['Start', 'End', 'Expression_positive', 'Expression_negative', 'aTPM', 'Count'],
+                ['Start', 'End', 'Expression_positive', 'Expression_negative', 'aTPM', 'Count', 'TSS'],
                 overwrite=True)
 
 # %%
@@ -63,8 +67,8 @@ cdz = cdz.subset_celltypes_with_data_name('peaks_q0.01_tissue_open_exp')
 # %%
 cid = 'Fetal Erythroblast 1.shendure_fetal.sample_37_liver.2048'
 peaks = cdz.get_peaks(cid, 'peaks_q0.01_tissue_open_exp')
-# peaks.loc[peaks.aTPM<0.1, 'Expression_negative'] = 0.00001
-# peaks.loc[peaks.aTPM<0.1, 'Expression_positive'] = 0.00001
+peaks.loc[peaks.aTPM<0.1, 'Expression_negative'] = 0
+peaks.loc[peaks.aTPM<0.1, 'Expression_positive'] = 0
 #%%
 accessibility = cdz.get_peak_counts(cid, 'peaks_q0.01_tissue_open_exp')
 #%%
@@ -77,6 +81,11 @@ peaks['logCount'] = np.log10(peaks['Count']+1)
 #%%
 # peaks.loc[peaks.aTPM<0.2, 'Exp'] = 0
 peaks.query('Exp>0').plot(x='Exp', y='aTPM', kind='scatter', s=0.15)
+#%%
+from sklearn.metrics import r2_score
+r2_score(peaks.query('Expression_negative>0')['Expression_negative'], peaks.query('Expression_negative>0')['aTPM'])
+#%%
+peaks.query('Expression_negative>0')[['Expression_negative','aTPM']].corr()
 # %%
 # pearson correlation
 from scipy.stats import pearsonr
