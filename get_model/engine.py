@@ -11,6 +11,7 @@ import sys
 from typing import Iterable, Optional
 
 import numpy as np
+from sympy import N
 import torch
 import torch.nn as nn
 import utils
@@ -51,7 +52,7 @@ def pretrain_one_epoch(
     for step, batch in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
     ):
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _ = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _, _ = batch
         if min(chunk_size)<0:
             continue
         # assign learning rate & weight decay for each step
@@ -233,7 +234,7 @@ def finetune_train_one_epoch(
     ):  
         # logging.info("data_iter_step: {}".format(data_iter_step))
         # logging.info("start getting batch")
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_peak_labels = batch
         if min(chunk_size)<0:
             continue
         # logging.info("Got batch")
@@ -391,10 +392,9 @@ def cal_score_stats(preds, obs, data_loader, args):
         spearmanr_score = score_spearmanr(preds[obs > 0], obs[obs > 0])
         pearsonr_score = score_pearsonr(preds[obs > 0], obs[obs > 0])
     elif args.eval_tss:
-        gene_idx = np.where(data_loader.dataset.tssidxs.reshape(-1)>0)[0]
-        r2score = score_r2(preds[gene_idx][obs[gene_idx]>0], obs[gene_idx][obs[gene_idx]>0])
-        spearmanr_score = score_spearmanr(preds[gene_idx][obs[gene_idx]>0], obs[gene_idx][obs[gene_idx]>0])
-        pearsonr_score = score_pearsonr(preds[gene_idx][obs[gene_idx]>0], obs[gene_idx][obs[gene_idx]>0])
+        r2score = score_r2(preds, obs)
+        spearmanr_score = score_spearmanr(preds, obs)
+        pearsonr_score = score_pearsonr(preds, obs)
     else:
         r2score = score_r2(preds, obs)
         spearmanr_score = score_spearmanr(preds, obs)
@@ -413,7 +413,7 @@ def evaluate_pretrain(data_loader, model, device, args, epoch=0, printlog=True):
     output_masked_list = []
     target_list = []
     for i, batch in enumerate(data_loader):
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _ = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _, _ = batch
         if min(chunk_size)<0:
             continue
     # for i in tqdm(range(100)):
@@ -491,7 +491,7 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
     obs_atac = []
     from tqdm import tqdm
     for batch in tqdm(data_loader):
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_peak_labels = batch
         if min(chunk_size)<0:
             continue
         sample_track = sample_track.to(device, non_blocking=True).bfloat16()
@@ -500,15 +500,21 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         # chunk_size = chunk_size.to(device, non_blocking=True)
         n_peaks = n_peaks.to(device, non_blocking=True)
         labels_data = labels_data.to(device, non_blocking=True).bfloat16()
-
+        other_peak_labels = other_peak_labels.to(device, non_blocking=True).bfloat16()
         # compute output
         loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
         , None, labels_data, criterion)
 
-        preds.append(exp.reshape(-1).detach().cpu().numpy())
-        obs.append(exp_target.reshape(-1).detach().cpu().numpy())
-        # preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
-        # obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
+        if args.eval_tss:
+            B, R, N = other_peak_labels.shape
+            # other_peak_labels is B, R, N where [:,:, 1] is TSS indicator
+            preds.append(exp.reshape(B,R,2)[other_peak_labels[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
+            obs.append(exp_target.reshape(B,R,2)[other_peak_labels[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
+        else:
+            preds.append(exp.reshape(-1).detach().cpu().numpy())
+            obs.append(exp_target.reshape(-1).detach().cpu().numpy())
+            # preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
+            # obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
 
         metric_logger.update(loss=loss.item())
 

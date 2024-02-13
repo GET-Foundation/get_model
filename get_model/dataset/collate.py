@@ -92,22 +92,25 @@ def get_rev_collate_fn(batch):
         maskable_pos_i = maskable_pos[maskable_pos[:,0]==i,1]
         idx = np.random.choice(maskable_pos_i, size=np.ceil(mask_ratio*len(maskable_pos_i)).astype(int), replace=False)
         mask[i,idx] = 1
-
+    
     if additional_peak_columns_data[0] is not None:
         # pad each element to max_n_peaks using zeros
         for i in range(len(additional_peak_columns_data)):
             additional_peak_columns_data[i] = np.pad(additional_peak_columns_data[i], ((0, max_n_peaks - len(additional_peak_columns_data[i])), (0,0)))
         additional_peak_columns_data = np.stack(additional_peak_columns_data, axis=0)
         # if aTPM < 0.1, set the expression to 0
-        if additional_peak_columns_data.shape[-1] == 3:
-            additional_peak_columns_data = additional_peak_columns_data.reshape(-1, additional_peak_columns_data.shape[-1])
+        n_peak_labels = additional_peak_columns_data.shape[-1]
+        if n_peak_labels >= 3:
+            # assuming the third column is aTPM, use aTPM to thresholding the expression
+            additional_peak_columns_data = additional_peak_columns_data.reshape(-1, n_peak_labels)
             additional_peak_columns_data[additional_peak_columns_data[:,2]<0.1, 0] = 0
             additional_peak_columns_data[additional_peak_columns_data[:,2]<0.1, 1] = 0
-            additional_peak_columns_data = additional_peak_columns_data.reshape(batch_size, -1, 3)
-            additional_peak_columns_data = additional_peak_columns_data[:,:,0:2]
-
-        additional_peak_columns_data = torch.from_numpy(additional_peak_columns_data) # B, R, C=2 RNA+,RNA-,ATAC
+            additional_peak_columns_data = additional_peak_columns_data.reshape(batch_size, -1, n_peak_labels)
+            other_peak_labels = additional_peak_columns_data[:,:,2:]
+            exp_label = additional_peak_columns_data[:,:,0:2]
+        exp_label = torch.from_numpy(exp_label) # B, R, C=2 RNA+,RNA-,ATAC
+        other_peak_labels = torch.from_numpy(other_peak_labels)
     else:
         additional_peak_columns_data = 0
 
-    return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, additional_peak_columns_data
+    return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, exp_label, other_peak_labels

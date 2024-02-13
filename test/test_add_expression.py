@@ -63,12 +63,12 @@ cdz = CelltypeDenseZarrIO(
     '/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr', 'r'
 )
 # %%
-cdz = cdz.subset_celltypes_with_data_name('peaks_q0.01_tissue_open_exp')
+cdz = cdz.subset_celltypes_with_data_name('peaks_q0.01_tissue_open')
 # %%
-cid = 'Fetal Erythroblast 1.shendure_fetal.sample_37_liver.2048'
+cid = 'Fetal Astrocyte 1.shendure_fetal.sample_36_cerebrum.1024'
 peaks = cdz.get_peaks(cid, 'peaks_q0.01_tissue_open_exp')
-peaks.loc[peaks.aTPM<0.1, 'Expression_negative'] = 0
-peaks.loc[peaks.aTPM<0.1, 'Expression_positive'] = 0
+# peaks.loc[peaks.aTPM<0.1, 'Expression_negative'] = 0
+# peaks.loc[peaks.aTPM<0.1, 'Expression_positive'] = 0
 #%%
 accessibility = cdz.get_peak_counts(cid, 'peaks_q0.01_tissue_open_exp')
 #%%
@@ -79,13 +79,14 @@ peaks['aTPM'] = peaks['aTPM']/peaks['aTPM'].max()
 #%%
 peaks['logCount'] = np.log10(peaks['Count']+1)
 #%%
+peaks['Exp'] = peaks['Expression_positive'] + peaks['Expression_negative']
 # peaks.loc[peaks.aTPM<0.2, 'Exp'] = 0
-peaks.query('Exp>0').plot(x='Exp', y='aTPM', kind='scatter', s=0.15)
+peaks.query('TSS==1').plot(x='Exp', y='aTPM', kind='scatter', s=0.15)
 #%%
 from sklearn.metrics import r2_score
 r2_score(peaks.query('Expression_negative>0')['Expression_negative'], peaks.query('Expression_negative>0')['aTPM'])
 #%%
-peaks.query('Expression_negative>0')[['Expression_negative','aTPM']].corr()
+peaks.query('TSS==1 & Exp>0')[['Exp','aTPM']].corr()
 # %%
 # pearson correlation
 from scipy.stats import pearsonr
