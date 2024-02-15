@@ -445,11 +445,12 @@ def main(args, ds_init):
     print(args)
 
     if utils.is_main_process(): # Log metrics only on main process
-        wandb.login()
-        run = wandb.init(
-            project=opts.wandb_project_name,
-            name=opts.wandb_run_name,
-        )
+        if args.wandb_project_name is not None:
+            wandb.login()
+            run = wandb.init(
+                project=args.wandb_project_name,
+                name=args.wandb_run_name,
+            )
 
     device = torch.device(args.device)
 
@@ -459,7 +460,7 @@ def main(args, ds_init):
     np.random.seed(seed)
     # random.seed(seed)
 
-    sequence_obj = DenseZarrIO('/pmglocal/alb2281/get_data/get_resources/hg38.zarr', dtype='int8')
+    sequence_obj = DenseZarrIO(f'{args.data_path}/hg38.zarr', dtype='int8')
     sequence_obj.load_to_memory_dense()
 
     cudnn.benchmark = True

@@ -112,5 +112,6 @@ def get_rev_collate_fn(batch):
         other_peak_labels = torch.from_numpy(other_peak_labels)
     else:
         additional_peak_columns_data = 0
+        other_peak_labels = 0
 
     return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, exp_label, other_peak_labels
