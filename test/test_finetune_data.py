@@ -1,5 +1,6 @@
+#%%
 import numpy as np
-import seaborn as sns
+# import seaborn as sns
 import torch
 from scipy.sparse import coo_matrix
 from tqdm import tqdm
@@ -8,8 +9,9 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 
 from get_model.dataset.collate import get_rev_collate_fn
-from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, PreloadDataPack, CelltypeDenseZarrIO
-
+from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, PreloadDataPack, CelltypeDenseZarrIO, worker_init_fn_get
+from get_model.model.model import GETFinetune
+#%%
 # # %%
 # cdz = CelltypeDenseZarrIO('/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr')
 # # %%
@@ -18,25 +20,25 @@ from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, Preloa
 # cdz = cdz.leave_out_celltypes_with_pattern('Astrocyte')
 
 
-wandb.login()
-run = wandb.init(
-    project="get",
-    name="finetune-gbm",
-)
+# wandb.login()
+# run = wandb.init(
+#     project="get",
+#     name="finetune-gbm",
+# )
 
-pretrain = PretrainDataset(['/pmglocal/alb2281/geo_data/htan_final/gbm/htan_gbm_dense.zarr',
+pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr',
                             ],
-                           '/pmglocal/alb2281/fetal_adult_data/hg38.zarr', 
-                           '/pmglocal/alb2281/fetal_adult_data/hg38_motif_result.zarr', [
-                           '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=50, n_peaks_upper_bound=100, leave_out_celltypes='Astrocyte', leave_out_chromosomes='chr11', is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative'], non_redundant='depth_2048', use_insulation=False, dataset_size=4096)
+                           '/pmglocal/xf2217/get_data/hg38.zarr', 
+                           '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
+                           '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
+                           max_peak_length=5000, center_expand_target=200, n_peaks_lower_bound=50, n_peaks_upper_bound=500, leave_out_celltypes='Astrocyte', leave_out_chromosomes='chr4', is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant='max_depth', use_insulation=False, dataset_size=4096)
 pretrain.__len__()
 
-
+#%%
 data_loader_train = torch.utils.data.DataLoader(
     pretrain,
     batch_size=8,
-    num_workers=64,
+    num_workers=16,
     pin_memory=True,
     drop_last=True,
     collate_fn=get_rev_collate_fn,
@@ -46,7 +48,7 @@ data_loader_train = torch.utils.data.DataLoader(
 loss_masked = nn.PoissonNLLLoss(log_input=False, reduce='mean')
 #%%
 model = GETFinetune(
-        num_regions=100,
+        num_regions=500,
         num_res_block=0,
         motif_prior=False,
         embed_dim=768,
@@ -60,33 +62,35 @@ model = GETFinetune(
         atac_kernel_num = 161,
         atac_kernel_size = 3,
         joint_kernel_num = 161,
-        final_bn = True,
+        final_bn = False,
     )
 #%%
-checkpoint = torch.load('/burg/home/xf2217/checkpoint.pth')
+checkpoint = torch.load('/pmglocal/xf2217/get_data/checkpoint-best.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=True)
 
-checkpoint = torch.load('/pmglocal/alb2281/get_ckpts/checkpoint-135.pth')
-model.load_state_dict(checkpoint["model"], strict=True)
+# checkpoint = torch.load('/pmglocal/alb2281/get_ckpts/checkpoint-135.pth')
+# model.load_state_dict(checkpoint["model"], strict=True)
 model.eval()
 model.cuda()
 
-for i, j in model.atac_attention.joint_conv.named_parameters():
-    print(i, j.requires_grad)
-    weight = j.detach().cpu().numpy()
+# for i, j in model.atac_attention.joint_conv.named_parameters():
+#     print(i, j.requires_grad)
+#     weight = j.detach().cpu().numpy()
 
-plt.imshow(weight[:,0,:])
+# figsize = (10, 10)
+# plt.imshow(weight[160,:,:], aspect=0.01)
+
 #%%
 # plot as six line plot
 # plot as a panel horizontally
-fig, ax = plt.subplots(1, 10, figsize=(15, 2))
-for i in range(10):
-    # calculate reorder index
-    from scipy.cluster.hierarchy import linkage, dendrogram
-    Z = linkage((weight[i+10,:,:]), 'ward')
-    g = dendrogram(Z, no_plot=True)
-    ax[i].imshow((weight[i+10,:,:])[np.array(g['ivl']).astype('int')], aspect=0.01)
+# fig, ax = plt.subplots(1, 10, figsize=(15, 2))
+# for i in range(10):
+#     # calculate reorder index
+#     from scipy.cluster.hierarchy import linkage, dendrogram
+#     Z = linkage((weight[i+10,:,:]), 'ward')
+#     g = dendrogram(Z, no_plot=True)
+#     ax[i].imshow((weight[i+10,:,:])[np.array(g['ivl']).astype('int')], aspect=0.01)
     
 #%%
 from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
@@ -99,12 +103,16 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
         atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
+    # loss_atac = criterion(atac, atac_target)
+        
+
     exp = exp * mask_for_loss
     indices = torch.where(mask_for_loss==1)
     exp = exp[indices[0], indices[1], :].flatten()
     exp_target = exp_target * mask_for_loss
     exp_target = exp_target[indices[0], indices[1], :].flatten()
     loss_exp = criterion(exp, exp_target)
+    # loss = loss_atac + loss_exp
     loss = loss_exp
     return loss, atac, exp, exp_target 
 
@@ -115,7 +123,7 @@ with torch.amp.autocast('cuda', dtype=torch.bfloat16):
     for i, batch in tqdm(enumerate(data_loader_train)):
         if i > 200:
             break
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels_data = batch
         if min(chunk_size)<0:
             continue
         device  = 'cuda'
@@ -124,21 +132,31 @@ with torch.amp.autocast('cuda', dtype=torch.bfloat16):
         motif_mean_std = motif_mean_std.to(device, non_blocking=True).bfloat16()
         n_peaks = n_peaks.to(device, non_blocking=True)
         labels_data = labels_data.to(device, non_blocking=True).bfloat16()
+        other_labels_data = other_labels_data.to(device, non_blocking=True).bfloat16()
 
         # compute output
-        loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, criterion)
+        loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, loss_masked)
 
-        preds.append(exp.reshape(-1).detach().cpu().numpy())
-        obs.append(exp_target.reshape(-1).detach().cpu().numpy())
+        # other_labels_data is B, R, N where [:,:, 1] is TSS indicator
+        # only append tss preds and obs
+        print(other_labels_data.shape)
+        print(exp.shape)
+        preds.append(exp.reshape(8,500,2)[other_labels_data[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
+        obs.append(exp_target.reshape(8,500,2)[other_labels_data[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
+
+        # preds.append(exp.reshape(-1).detach().cpu().numpy())
+        # obs.append(exp_target.reshape(-1).detach().cpu().numpy())
 
     preds = np.concatenate(preds, axis=0).reshape(-1)
     obs = np.concatenate(obs, axis=0).reshape(-1)
     # preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
     # obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
 # %%
-preds_ = preds[obs>0]
-obs_ = obs[obs>0]
-sns.scatterplot(x=preds_, y=obs_, s=2, alpha=1)
+import seaborn as sns
+# preds_ = preds[obs>0]
+# obs_ = obs[obs>0]
+fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+sns.scatterplot(x=preds, y=obs, s=2, alpha=1, ax=ax)
 # add correlation as text
 # set x lim
 # plt.xlim([0, 4])
@@ -149,8 +167,9 @@ from scipy.stats import spearmanr, pearsonr
 # r2_score(preds, obs)
 from sklearn.metrics import r2_score
 
-corr = pearsonr(preds_, obs_)[0]
-plt.title(f'Correlation: {corr}, R2: {r2_score(preds_, obs_)}')
+corr = pearsonr(preds, obs)[0]
+r2 = r2_score(preds, obs)
+ax.text(0.5, 0.5, f'Pearson r={corr:.2f}\nR2={r2:.2f}', ha='center', va='center', transform=ax.transAxes)
 # %%
-np.mean(losses)
-# %%
+# save the plot
+fig.savefig('finetune_gbm.png')
