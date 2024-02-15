@@ -24,7 +24,7 @@ from caesar.io.gencode import Gencode
 gencode = Gencode()
 
 #%%
-for id in tqdm(np.array(cdz.ids)[np.where(pd.Series(cdz.ids).str.contains('Astrocyte'))[0]]):
+for id in tqdm(cdz.ids):
     if id.split('.')[0] not in cell_annot_dict:
         continue
     exp_id = cell_annot_dict[id.split('.')[0]]

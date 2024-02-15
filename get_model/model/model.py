@@ -352,9 +352,18 @@ class ExpressionHead(nn.Module):
 
     def forward(self, x, atac=None):
         if self.use_atac:
-            x = torch.cat([x, atac.unsqueeze(-1)], dim=-1)
+            x = torch.cat([x, atac], dim=-1)
         return self.head(x)
 
+class ATACHead(nn.Module):
+    """Expression head"""
+
+    def __init__(self, embed_dim, output_dim):
+        super().__init__()
+        self.head = nn.Linear(embed_dim, output_dim)
+
+    def forward(self, x):
+        return self.head(x)
 
 class GETFinetune(nn.Module):
     """A GET model for finetuning using classification head."""
@@ -494,6 +503,284 @@ class GETFinetune(nn.Module):
     def no_weight_decay(self):
         return {"pos_embed", "cls_token"}
 
+class GETFinetuneExpATAC(nn.Module):
+    """A GET model for finetuning using classification head."""
+
+    def __init__(
+        self,
+        num_regions=200,
+        num_motif=637,
+        motif_dim=639,
+        num_res_block=0,
+        motif_prior=False,
+        embed_dim=768,
+        num_layers=12,
+        d_model=768,
+        nhead=12,
+        dropout=0.1,
+        output_dim=1,
+        pos_emb_components=["CTCF", "Rotary", "Absolute"],
+        atac_attention=True,
+        flash_attn=False,
+        atac_kernel_num=16,
+        atac_kernel_size=3,
+        joint_kernel_num=16,
+        joint_kernel_size=3,
+        use_atac=True,
+        final_bn=False,
+    ):
+        super().__init__()
+        self.num_regions = num_regions
+        self.num_motif = num_motif
+        self.num_res_block = num_res_block
+        self.motif_prior = motif_prior
+        self.embed_dim = embed_dim
+        self.num_layers = num_layers
+        self.d_model = d_model
+        self.nhead = nhead
+        self.dropout = dropout
+        self.output_dim = output_dim
+        self.pos_emb_components = pos_emb_components
+        self.atac_kernel_num = atac_kernel_num
+        self.atac_kernel_size = atac_kernel_size
+        self.joint_kernel_num = joint_kernel_num
+        self.joint_kernel_size = joint_kernel_size
+        self.motif_scanner = MotifScanner(
+            num_motif=num_motif, include_reverse_complement=True,
+            bidirectional_except_ctcf=True
+        )
+        self.atac_attention = ATACSplitPool(
+            pool_method='mean',
+            atac_kernel_num=atac_kernel_num,
+            motif_dim=motif_dim,
+            joint_kernel_num=joint_kernel_num,
+            atac_kernel_size=atac_kernel_size,
+            joint_kernel_size=joint_kernel_size,
+            final_bn=final_bn,
+        )
+        # self.split_pool = SplitPool()
+        self.region_embed = RegionEmbed(num_regions, motif_dim+joint_kernel_num, embed_dim)
+        self.pos_embed = []
+        if "CTCF" in self.pos_emb_components: 
+            self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
+        # if "Rotary" in self.pos_emb_components:
+            # self.pos_embed.append(RotaryEmbedding(embed_dim))
+        if "Absolute" in self.pos_emb_components:
+            self.pos_embed.append(AbsolutePositionalEncoding(embed_dim))
+        self.pos_embed = nn.ModuleList(self.pos_embed)
+        self.encoder = GETTransformer(
+            d_model,
+            nhead,
+            num_layers,
+            drop_path_rate=dropout,
+            drop_rate=dropout,
+            attn_drop_rate=dropout,
+            use_mean_pooling=False,
+            flash_attn=flash_attn,
+        )
+        # self.head_atac = nn.Conv1d(d_model, 1, 1)
+        # self.head_mask = nn.Linear(d_model, output_dim)
+        self.head_exp = (
+            ExpressionHead(d_model, output_dim, use_atac)
+            if output_dim > 0
+            else nn.Identity()
+        )
+        # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        # trunc_normal_(self.mask_token, std=0.02)
+        self.apply(self._init_weights)
+
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels):
+        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
+        # peak_seq: [B, L, 4]
+        # [B, L, 4] --> [B, L, 1274]
+        x = self.motif_scanner(peak_seq)
+        x = x - motif_mean_std[:,0, :].unsqueeze(1)
+        x = x / motif_mean_std[:,1, :].unsqueeze(1)
+        x = F.relu(x)
+        # [B, L, 1274] --> [B, R, 1274]
+        # gloabl pooling inner product with peak
+        x_original = self.atac_attention(x, atac, chunk_size, n_peaks, max_n_peaks)
+        # x = self.atac_attention(x, atac)
+        # x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
+        atpm = other_labels[:,:, 0].unsqueeze(-1)
+        tss_mask = other_labels[:,:, 1]
+        # x_original = torch.cat([x_original, atpm], dim=-1)
+
+        x = self.region_embed(x_original)
+        B, N, C = x_original.shape
+
+
+        for pos_emb_component in self.pos_embed:
+            if isinstance(pos_emb_component, CTCFPositionalEncoding):
+                x = pos_emb_component(x, ctcf_pos)
+            else:
+                x = pos_emb_component(x)
+
+        x, _ = self.encoder(x, mask=padding_mask)
+        # atac = F.softplus(self.head_atac(x.permute(0, 2, 1))).permute(0, 2, 1).squeeze(-1)
+        atac=None
+
+        exp = F.softplus(self.head_exp(x, atpm))
+        return atac, exp
+
+    def reset_head(self, output_dim):
+        self.output_dim = output_dim
+        self.head_exp = (
+            nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
+        )
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {"pos_embed", "cls_token"}
+
+class GETFinetuneATAC(nn.Module):
+    """A GET model for finetuning using classification head."""
+
+    def __init__(
+        self,
+        num_regions=200,
+        num_motif=637,
+        motif_dim=639,
+        num_res_block=0,
+        motif_prior=False,
+        embed_dim=768,
+        num_layers=12,
+        d_model=768,
+        nhead=12,
+        dropout=0.1,
+        output_dim=1,
+        pos_emb_components=["CTCF", "Rotary", "Absolute"],
+        atac_attention=True,
+        flash_attn=False,
+        atac_kernel_num=16,
+        atac_kernel_size=3,
+        joint_kernel_num=16,
+        joint_kernel_size=3,
+        use_atac=True,
+        final_bn=False,
+    ):
+        super().__init__()
+        self.num_regions = num_regions
+        self.num_motif = num_motif
+        self.num_res_block = num_res_block
+        self.motif_prior = motif_prior
+        self.embed_dim = embed_dim
+        self.num_layers = num_layers
+        self.d_model = d_model
+        self.nhead = nhead
+        self.dropout = dropout
+        self.output_dim = output_dim
+        self.pos_emb_components = pos_emb_components
+        self.atac_kernel_num = atac_kernel_num
+        self.atac_kernel_size = atac_kernel_size
+        self.joint_kernel_num = joint_kernel_num
+        self.joint_kernel_size = joint_kernel_size
+        self.motif_scanner = MotifScanner(
+            num_motif=num_motif, include_reverse_complement=True,
+            bidirectional_except_ctcf=True
+        )
+        self.atac_attention = ATACSplitPool(
+            pool_method='mean',
+            atac_kernel_num=atac_kernel_num,
+            motif_dim=motif_dim,
+            joint_kernel_num=joint_kernel_num,
+            atac_kernel_size=atac_kernel_size,
+            joint_kernel_size=joint_kernel_size,
+            final_bn=final_bn,
+        )
+        # self.split_pool = SplitPool()
+        self.region_embed = RegionEmbed(num_regions, motif_dim+joint_kernel_num, embed_dim)
+        self.pos_embed = []
+        if "CTCF" in self.pos_emb_components: 
+            self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
+        # if "Rotary" in self.pos_emb_components:
+            # self.pos_embed.append(RotaryEmbedding(embed_dim))
+        if "Absolute" in self.pos_emb_components:
+            self.pos_embed.append(AbsolutePositionalEncoding(embed_dim))
+        self.pos_embed = nn.ModuleList(self.pos_embed)
+        
+        self.encoder = GETTransformer(
+            d_model,
+            nhead,
+            num_layers,
+            drop_path_rate=dropout,
+            drop_rate=dropout,
+            attn_drop_rate=dropout,
+            use_mean_pooling=False,
+            flash_attn=flash_attn,
+        )
+        self.head_atac = ATACHead(d_model, 1)
+        # self.head_mask = nn.Linear(d_model, output_dim)
+        self.head_exp = (
+            ExpressionHead(d_model, output_dim, use_atac)
+            if output_dim > 0
+            else nn.Identity()
+        )
+        # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        # trunc_normal_(self.mask_token, std=0.02)
+        self.apply(self._init_weights)
+
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
+        # peak_seq: [B, L, 4]
+        # [B, L, 4] --> [B, L, 1274]
+        x = self.motif_scanner(peak_seq)
+        x = x - motif_mean_std[:,0, :].unsqueeze(1)
+        x = x / motif_mean_std[:,1, :].unsqueeze(1)
+        x = F.relu(x)
+        # [B, L, 1274] --> [B, R, 1274]
+        # gloabl pooling inner product with peak
+        x_original = self.atac_attention(x, atac, chunk_size, n_peaks, max_n_peaks)
+        # x = self.atac_attention(x, atac)
+        # x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
+
+        x = self.region_embed(x_original)
+        B, N, C = x_original.shape
+
+
+        for pos_emb_component in self.pos_embed:
+            if isinstance(pos_emb_component, CTCFPositionalEncoding):
+                x = pos_emb_component(x, ctcf_pos)
+            else:
+                x = pos_emb_component(x)
+
+        tss_mask = None # TODO: Set tss_mask to None for now
+        x, _ = self.encoder(x, mask=padding_mask)
+        atac = F.softplus(self.head_atac(x.permute(0, 2, 1))).permute(0, 2, 1).squeeze(-1)
+
+        exp = F.softplus(self.head_exp(x, atac))
+        return atac, exp
+
+    def reset_head(self, output_dim):
+        self.output_dim = output_dim
+        self.head_exp = (
+            nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
+        )
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {"pos_embed", "cls_token"}
+
 
 
 
@@ -526,6 +813,31 @@ def get_pretrain_motif_base(pretrained=False, **kwargs):
 @register_model
 def get_finetune_motif(pretrained=False, **kwargs):
     model = GETFinetune(
+        num_regions=kwargs["num_region_per_sample"],
+        num_motif=kwargs["num_motif"],
+        motif_dim=kwargs["motif_dim"],
+        num_res_block=0,
+        motif_prior=False,
+        embed_dim=768,
+        num_layers=12,
+        d_model=768,
+        nhead=12,
+        dropout=0.1,
+        output_dim=kwargs["output_dim"],
+        pos_emb_components=[],
+        flash_attn=kwargs["flash_attn"],
+        atac_kernel_num=161,
+        joint_kernel_num=161,
+        final_bn=kwargs["final_bn"],
+    )
+    if pretrained:
+        checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
+        model.load_state_dict(checkpoint["model"])
+    return model
+
+@register_model
+def get_finetune_motif_with_atac(pretrained=False, **kwargs):
+    model = GETFinetuneExpATAC(
         num_regions=kwargs["num_region_per_sample"],
         num_motif=kwargs["num_motif"],
         motif_dim=kwargs["motif_dim"],

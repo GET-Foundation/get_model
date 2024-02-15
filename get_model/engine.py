@@ -172,14 +172,14 @@ def pretrain_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, criterion):
+def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion):
     device = peak_seq.device
     padding_mask = get_padding_pos(mask)
     mask_for_loss = 1-padding_mask
     padding_mask = padding_mask.to(device, non_blocking=True).bool()
     mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
-        atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
+        atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels)
     # loss_atac = criterion(atac, atac_target)
         
 
@@ -234,7 +234,7 @@ def finetune_train_one_epoch(
     ):  
         # logging.info("data_iter_step: {}".format(data_iter_step))
         # logging.info("start getting batch")
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_peak_labels = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels = batch
         if min(chunk_size)<0:
             continue
         # logging.info("Got batch")
@@ -266,9 +266,9 @@ def finetune_train_one_epoch(
 
         if loss_scaler is None:
             peaks = peaks.half()
-            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, criterion)
+            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, other_labels, criterion)
         else:
-            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, criterion)
+            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, other_labels, criterion)
 
         loss_value = loss.item()
 
@@ -491,7 +491,7 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
     obs_atac = []
     from tqdm import tqdm
     for batch in tqdm(data_loader):
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_peak_labels = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels = batch
         if min(chunk_size)<0:
             continue
         sample_track = sample_track.to(device, non_blocking=True).bfloat16()
@@ -500,16 +500,16 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         # chunk_size = chunk_size.to(device, non_blocking=True)
         n_peaks = n_peaks.to(device, non_blocking=True)
         labels_data = labels_data.to(device, non_blocking=True).bfloat16()
-        other_peak_labels = other_peak_labels.to(device, non_blocking=True).bfloat16()
+        other_labels = other_labels.to(device, non_blocking=True).bfloat16()
         # compute output
         loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
-        , None, labels_data, criterion)
+        , None, labels_data, other_labels, criterion)
 
         if args.eval_tss:
-            B, R, N = other_peak_labels.shape
-            # other_peak_labels is B, R, N where [:,:, 1] is TSS indicator
-            preds.append(exp.reshape(B,R,2)[other_peak_labels[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
-            obs.append(exp_target.reshape(B,R,2)[other_peak_labels[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
+            B, R, N = other_labels.shape
+            # other_labels is B, R, N where [:,:, 1] is TSS indicator
+            preds.append(exp.reshape(B,R,2)[other_labels[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
+            obs.append(exp_target.reshape(B,R,2)[other_labels[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
         else:
             preds.append(exp.reshape(-1).detach().cpu().numpy())
             obs.append(exp_target.reshape(-1).detach().cpu().numpy())

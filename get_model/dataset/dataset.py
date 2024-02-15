@@ -373,7 +373,7 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         # get FILEPATH
         # codebase = os.path.dirname(os.path.dirname(
         #    os.path.dirname(os.path.abspath(__file__))))
-        codebase = "/pmglocal/alb2281/repos/get_model"
+        codebase = "/pmglocal/xf2217/get_model"
         if sequence_obj is None:
             sequence_obj = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
             sequence_obj.load_to_memory_dense()
@@ -388,11 +388,11 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, insulation_subsample_ratio=0.8,
-                           additional_peak_columns=['Expression_positive', 'Expression_negative','aTPM'], preload_count=args.preload_count, 
+                           additional_peak_columns=['Expression_positive', 'Expression_negative','aTPM', 'TSS'], preload_count=args.preload_count, 
                            n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target,
                            n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, 
-                           sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=args.leave_out_chromosomes, 
-                           is_train=True, non_redundant=args.non_redundant, filter_by_min_depth=args.filter_by_min_depth, dataset_size=40960)
+                           sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=['chr1', 'chr2', 'chr3', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9', 'chr10', 'chr11', 'chr12', 'chr13', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chrX'], 
+                           is_train=False, non_redundant=args.non_redundant, filter_by_min_depth=args.filter_by_min_depth, dataset_size=10240)
     elif not is_train and args.eval_data_set == "Expression_Finetune_Fetal.fetal_eval":
         transform = DataAugmentationForGETPeak(args)
         print("Data Aug = %s" % str(transform))
@@ -414,9 +414,9 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
                            f'{root}/hg38_motif_result.zarr', [
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
-                           peak_name=args.peak_name, insulation_subsample_ratio=0.8, additional_peak_columns=['Expression_positive', 'Expression_negative','aTPM'], preload_count=args.preload_count, 
+                           peak_name=args.peak_name, insulation_subsample_ratio=0.8, additional_peak_columns=['Expression_positive', 'Expression_negative','aTPM', 'TSS'], preload_count=args.preload_count, 
                            n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes,
-                           leave_out_chromosomes=None, is_train=is_train, non_redundant=None, filter_by_min_depth=None, dataset_size=4096)
+                           leave_out_chromosomes=args.leave_out_chromosomes, is_train=is_train, non_redundant=None, filter_by_min_depth=None, dataset_size=1024)
     elif is_train and args.data_set == "HTAN_GBM":
         transform = DataAugmentationForGETPeak(args)
         print("Data Aug = %s" % str(transform))
