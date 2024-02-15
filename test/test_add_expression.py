@@ -50,8 +50,8 @@ for id in tqdm(np.array(cdz.ids)[np.where(pd.Series(cdz.ids).str.contains('Astro
     peaks['TSS'][np.unique(row)] = 1 
     peaks['aTPM'] = np.log10(peaks.Count / peaks.Count.sum() * 1e5 + 1)
     peaks['aTPM'] = peaks['aTPM'] / peaks['aTPM'].max()
-    peaks.loc[peaks.aTPM<0.1, 'Expression_negative'] = 0
-    peaks.loc[peaks.aTPM<0.1, 'Expression_positive'] = 0
+    # peaks.loc[peaks.aTPM<0.1, 'Expression_negative'] = 0
+    # peaks.loc[peaks.aTPM<0.1, 'Expression_positive'] = 0
     cdz.write_peaks(id, 
                 peaks,
                 'peaks_q0.01_tissue_open_exp',
@@ -98,10 +98,12 @@ peaks['Exp'] = peaks['Expression_positive'] + peaks['Expression_negative']
 # peaks.loc[peaks.aTPM<0.2, 'Exp'] = 0
 peaks.query('TSS==1').plot(x='Exp', y='aTPM', kind='scatter', s=0.15)
 #%%
+peaks.query('TSS==1')[['Exp','aTPM']].corr()
+#%%
 from sklearn.metrics import r2_score
 r2_score(peaks.query('Expression_negative>0')['Expression_negative'], peaks.query('Expression_negative>0')['aTPM'])
 #%%
-peaks.query('TSS==1 & Exp>0')[['Exp','aTPM']].corr()
+peaks.query('Exp>0')[['Exp','aTPM']].corr()
 # %%
 # pearson correlation
 from scipy.stats import pearsonr
