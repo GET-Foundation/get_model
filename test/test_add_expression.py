@@ -70,7 +70,22 @@ peaks = cdz.get_peaks(cid, 'peaks_q0.01_tissue_open_exp')
 # peaks.loc[peaks.aTPM<0.1, 'Expression_negative'] = 0
 # peaks.loc[peaks.aTPM<0.1, 'Expression_positive'] = 0
 #%%
-accessibility = cdz.get_peak_counts(cid, 'peaks_q0.01_tissue_open_exp')
+accessibility = cdz.get_peak_counts(cid, 'peaks_q0.01')
+#%%
+accessibility['aTPM'] = np.log10(accessibility.Count / accessibility.Count.sum() * 1e5 + 1)
+accessibility['aTPM'] = accessibility['aTPM'] / accessibility['aTPM'].max()
+#%%
+import seaborn as sns
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots(1, 2, figsize=(10, 5), sharex=True, sharey=True)
+sns.histplot(accessibility.aTPM, ax=ax[0])
+sns.histplot(peaks.query('Count>10').aTPM, ax=ax[1])
+# set y lim
+ax[0].set_ylim(0, 10000)
+ax[1].set_ylim(0, 10000)
+ax[0].set_xlim(0, 1)
+ax[1].set_xlim(0, 1)
+# np.log10(peaks.Count+1).hist(bins=100, alpha=0.5)
 #%%
 peaks['Exp'] = peaks['Expression_positive'] + peaks['Expression_negative']
 #%%
