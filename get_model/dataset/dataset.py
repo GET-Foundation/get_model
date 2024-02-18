@@ -349,9 +349,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         print("Data Aug = %s" % str(transform))
         root = args.data_path
         # get FILEPATH
-        # codebase = os.path.dirname(os.path.dirname(
-        #    os.path.dirname(os.path.abspath(__file__))))
-        codebase = "/pmglocal/alb2281/repos/get_model"
+        codebase = os.path.dirname(os.path.dirname(
+           os.path.dirname(os.path.abspath(__file__))))
         if sequence_obj is None:
             sequence_obj = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
             sequence_obj.load_to_memory_dense()
@@ -371,9 +370,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         print("Data Aug = %s" % str(transform))
         root = args.data_path
         # get FILEPATH
-        # codebase = os.path.dirname(os.path.dirname(
-        #    os.path.dirname(os.path.abspath(__file__))))
-        codebase = "/pmglocal/xf2217/get_model"
+        codebase = os.path.dirname(os.path.dirname(
+           os.path.dirname(os.path.abspath(__file__))))
         if sequence_obj is None:
             sequence_obj = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
             sequence_obj.load_to_memory_dense()
@@ -392,7 +390,25 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
                            n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target,
                            n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, 
                            sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=args.leave_out_chromosomes, 
-                           is_train=is_train, non_redundant=args.non_redundant, filter_by_min_depth=args.filter_by_min_depth, dataset_size=40960*2)
+                        is_train=is_train, non_redundant=args.non_redundant, filter_by_min_depth=args.filter_by_min_depth, dataset_size=40960)
+        logging.info('data_path: %s' % str(args.data_path))
+        logging.info('codebase: %s' % str(codebase))
+        logging.info('peak_name: %s' % str(args.peak_name))
+        logging.info('insulation_subsample_ratio: %s' % str(0.8))
+        logging.info('additional_peak_columns: %s' % str(['Expression_positive', 'Expression_negative', 'aTPM', 'TSS']))
+        logging.info('preload_count: %s' % str(args.preload_count))
+        logging.info('n_packs: %s' % str(args.n_packs))
+        logging.info('max_peak_length: %s' % str(args.max_peak_length))
+        logging.info('center_expand_target: %s' % str(args.center_expand_target))
+        logging.info('n_peaks_lower_bound: %s' % str(args.n_peaks_lower_bound))
+        logging.info('n_peaks_upper_bound: %s' % str(args.n_peaks_upper_bound))
+        logging.info('use_insulation: %s' % str(args.use_insulation))
+        logging.info('sequence_obj: %s' % str(sequence_obj))
+        logging.info('leave_out_celltypes: %s' % str(args.leave_out_celltypes))
+        logging.info('leave_out_chromosomes: %s' % str(args.leave_out_chromosomes))
+        logging.info('is_train: %s' % str(is_train))
+        logging.info('non_redundant: %s' % str(args.non_redundant))
+        logging.info('filter_by_min_depth: %s' % str(args.filter_by_min_depth))
     elif not is_train and args.eval_data_set == "Expression_Finetune_Fetal.fetal_eval":
         transform = DataAugmentationForGETPeak(args)
         print("Data Aug = %s" % str(transform))
@@ -433,11 +449,12 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         dataset = ZarrPretrainDataset([
             f'{root}/htan_gbm_dense.zarr',
             ],
-                           f'/pmglocal/alb2281/get_data/get_resources/hg38.zarr',
-                           f'/pmglocal/alb2281/get_data/get_resources/hg38_motif_result.zarr', 
-                           ['/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
+                           f'{root}/hg38.zarr',
+                           f'{root}/hg38_motif_result.zarr', [
+                           f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
+                           f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, insulation_subsample_ratio=0.8,
-                           additional_peak_columns=['Expression_positive', 'Expression_negative','aTPM'], preload_count=args.preload_count, 
+                           additional_peak_columns=['Expression_positive', 'Expression_negative','aTPM', 'TSS'], preload_count=args.preload_count, 
                            n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target,
                            n_peaks_lower_bound=args.n_peaks_lower_bound, n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation,
                            sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes, leave_out_chromosomes=args.leave_out_chromosomes,
@@ -459,10 +476,12 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         dataset = ZarrPretrainDataset([
             f"{root}/htan_gbm_dense.zarr",
             ],
-                           f'/pmglocal/alb2281/get_data/get_resources/hg38.zarr',
-                           f'/pmglocal/alb2281/get_data/get_resources/hg38_motif_result.zarr', 
-                           ['/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
-                           peak_name=args.peak_name, insulation_subsample_ratio=0.8, additional_peak_columns=['Expression_positive', 'Expression_negative','aTPM'], preload_count=args.preload_count, 
+                           f'{root}/hg38.zarr',
+                           f'{root}/hg38_motif_result.zarr', [
+                           f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
+                           f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
+                           peak_name=args.peak_name, insulation_subsample_ratio=0.8, additional_peak_columns=['Expression_positive', 'Expression_negative','aTPM', 'TSS'], 
+                           preload_count=args.preload_count, 
                            n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, 
                            n_peaks_upper_bound=args.n_peaks_upper_bound, use_insulation=args.use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=args.leave_out_celltypes,
                            leave_out_chromosomes=args.leave_out_chromosomes, is_train=False, non_redundant=args.non_redundant, filter_by_min_depth=args.filter_by_min_depth, dataset_size=4096)

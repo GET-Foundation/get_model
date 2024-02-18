@@ -356,7 +356,7 @@ class ExpressionHead(nn.Module):
         return self.head(x)
 
 class ATACHead(nn.Module):
-    """Expression head"""
+    """ATAC head"""
 
     def __init__(self, embed_dim, output_dim):
         super().__init__()
@@ -526,7 +526,7 @@ class GETFinetuneExpATAC(nn.Module):
         atac_kernel_size=3,
         joint_kernel_num=16,
         joint_kernel_size=3,
-        use_atac=True,
+        use_atac=False,
         final_bn=False,
     ):
         super().__init__()
@@ -578,7 +578,7 @@ class GETFinetuneExpATAC(nn.Module):
             use_mean_pooling=False,
             flash_attn=flash_attn,
         )
-        # self.head_atac = nn.Conv1d(d_model, 1, 1)
+        self.head_atac = nn.Linear(d_model, 1)
         # self.head_mask = nn.Linear(d_model, output_dim)
         self.head_exp = (
             ExpressionHead(d_model, output_dim, use_atac)
@@ -612,11 +612,11 @@ class GETFinetuneExpATAC(nn.Module):
         x_original = self.atac_attention(x, atac, chunk_size, n_peaks, max_n_peaks)
         # x = self.atac_attention(x, atac)
         # x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
-        atpm = other_labels[:,:, 0].unsqueeze(-1)
         tss_mask = other_labels[:,:, 1]
         # x_original = torch.cat([x_original, atpm], dim=-1)
 
         x = self.region_embed(x_original)
+
         B, N, C = x_original.shape
 
 
@@ -627,11 +627,9 @@ class GETFinetuneExpATAC(nn.Module):
                 x = pos_emb_component(x)
 
         x, _ = self.encoder(x, mask=padding_mask)
-        # atac = F.softplus(self.head_atac(x.permute(0, 2, 1))).permute(0, 2, 1).squeeze(-1)
-        atac=None
-
-        exp = F.softplus(self.head_exp(x, atpm))
-        return atac, exp
+        atpm = F.softplus(self.head_atac(x))
+        exp = F.softplus(self.head_exp(x, None))
+        return atpm, exp
 
     def reset_head(self, output_dim):
         self.output_dim = output_dim

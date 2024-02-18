@@ -180,7 +180,6 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
         atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels)
-    # loss_atac = criterion(atac, atac_target)
         
 
     exp = exp * mask_for_loss
@@ -189,8 +188,17 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     exp_target = exp_target * mask_for_loss
     exp_target = exp_target[indices[0], indices[1], :].flatten()
     loss_exp = criterion(exp, exp_target)
-    # loss = loss_atac + loss_exp
-    loss = loss_exp
+    
+    if atac_target is not None:
+        atac = atac * mask_for_loss
+        indices = torch.where(mask_for_loss==1)
+        atac = atac[indices[0], indices[1], :].flatten()
+        atac_target = atac_target.unsqueeze(-1) * mask_for_loss
+        atac_target = atac_target[indices[0], indices[1], :].flatten()
+        loss_atac = criterion(atac, atac_target)
+        loss = loss_atac + loss_exp
+    else:
+        loss = loss_exp
     return loss, atac, exp, exp_target 
 
 
@@ -262,13 +270,13 @@ def finetune_train_one_epoch(
         # chunk_size = chunk_size.to(device, non_blocking=True)
         n_peaks = n_peaks.to(device, non_blocking=True)
         labels_data = labels_data.to(device, non_blocking=True).bfloat16()
-
+        other_labels = other_labels.to(device, non_blocking=True).bfloat16()
 
         if loss_scaler is None:
             peaks = peaks.half()
-            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, other_labels, criterion)
+            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion)
         else:
-            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, None, labels_data, other_labels, criterion)
+            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion)
 
         loss_value = loss.item()
 
@@ -503,7 +511,7 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         other_labels = other_labels.to(device, non_blocking=True).bfloat16()
         # compute output
         loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
-        , None, labels_data, other_labels, criterion)
+        , other_labels[:,:,0], labels_data, other_labels, criterion)
 
         if args.eval_tss:
             B, R, N = other_labels.shape
