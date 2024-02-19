@@ -188,14 +188,14 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     exp_target = exp_target[indices[0], indices[1], :].flatten()
     loss_exp = criterion(exp, exp_target)
     
-    if atac_target is not None:
+    if atac is not None:
         atac = atac * mask_for_loss
         indices = torch.where(mask_for_loss==1)
         atac = atac[indices[0], indices[1], :].flatten()
         atac_target = atac_target.unsqueeze(-1) * mask_for_loss
         atac_target = atac_target[indices[0], indices[1], :].flatten()
         loss_atac = criterion(atac, atac_target)
-        loss = loss_atac + loss_exp
+        loss = loss_exp + loss_atac #+ loss_exp
     else:
         loss = loss_exp
     return loss, atac, exp, exp_target 

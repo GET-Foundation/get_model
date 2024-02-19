@@ -470,7 +470,7 @@ class GETFinetune(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels):
         """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
         # peak_seq: [B, L, 4]
         # [B, L, 4] --> [B, L, 1274]
