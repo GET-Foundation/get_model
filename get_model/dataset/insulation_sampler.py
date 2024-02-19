@@ -1,5 +1,4 @@
 #%%
-from random import sample
 import pyBigWig
 import numpy as np
 import os

@@ -444,7 +444,7 @@ class PreloadDataPack(object):
     """
 
     def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, padding=50, mask_ratio=0.5,
-                 n_peaks_lower_bound=5, n_peaks_upper_bound=200, n_peaks_sample_gap=200, use_insulation=True, window_index=None):
+                 n_peaks_lower_bound=5, n_peaks_upper_bound=200, use_insulation=True, window_index=None):
         # logging.info('Initializing PreloadDataPack')
         self.preload_count = preload_count
         self.zarr_data_pool = zarr_data_pool
@@ -456,7 +456,6 @@ class PreloadDataPack(object):
         self.mask_ratio = mask_ratio
         self.n_peaks_lower_bound = n_peaks_lower_bound
         self.n_peaks_upper_bound = n_peaks_upper_bound
-        self.n_peaks_sample_gap = n_peaks_sample_gap
         self.use_insulation = use_insulation
         self.additional_peak_columns = self.zarr_data_pool.additional_peak_columns
         if window_index is None:
@@ -569,7 +568,7 @@ class PreloadDataPack(object):
             about the extracted sample, including cell type ID, chromosome name, and positions.
         """
         window_index, chr_name, start, end, celltype_id, track, insulations, celltype_peaks, motif_mean_std = window
-        peak_start = peak_index * self.n_peaks_sample_gap
+        peak_start = peak_index * self.n_peaks_upper_bound 
         peak_end = peak_start + self.n_peaks_upper_bound
         celltype_peaks = celltype_peaks.iloc[peak_start:peak_end]
         track_start = celltype_peaks['Start'].min() - self.padding
@@ -698,7 +697,7 @@ class PreloadDataPack(object):
 
         for window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std in self.preloaded_data:
             per_window_n_samples.append(
-                (celltype_peaks.shape[0] - self.n_peaks_upper_bound) // self.n_peaks_sample_gap)
+                celltype_peaks.shape[0] // self.n_peaks_upper_bound)
             window_peak_counts[window_index] = celltype_peaks.shape[0]
         self.window_peak_counts = window_peak_counts
         self.per_window_n_samples = np.array(per_window_n_samples)
@@ -730,7 +729,7 @@ class PreloadDataPack(object):
 
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, n_peaks_sample_gap=200, use_insulation=True, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True, non_redundant=False, filter_by_min_depth=False, dataset_size=655_360):
+    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, use_insulation=True, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True, non_redundant=False, filter_by_min_depth=False, dataset_size=655_360):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -774,7 +773,6 @@ class PretrainDataset(Dataset):
         self.insulation_subsample_ratio = insulation_subsample_ratio
         self.n_peaks_lower_bound = n_peaks_lower_bound
         self.n_peaks_upper_bound = n_peaks_upper_bound
-        self.n_peaks_sample_gap = n_peaks_sample_gap
         self.use_insulation = use_insulation
 
         self.leave_out_celltypes = leave_out_celltypes
@@ -838,7 +836,7 @@ class PretrainDataset(Dataset):
         # logging.info(f'Async reloading data for slot {index}')
         # reload by reinitializing the preload data pack and put it back to the preload_data_packs
         self.preload_data_packs[slot] = PreloadDataPack(
-            preload_count=self.preload_count, zarr_data_pool=self.datapool, padding=self.padding, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation)
+            self.preload_count, self.datapool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound, self.use_insulation)
         
         # self.preload_data_packs[slot].preload_data()
         # add the index back to avaliable packs
@@ -852,7 +850,5 @@ def worker_init_fn_get(worker_id):
     worker_info = torch.utils.data.get_worker_info()
     dataset = worker_info.dataset
     if dataset.preload_data_packs is None:
-        dataset.preload_data_packs = [PreloadDataPack(
-        preload_count=dataset.preload_count, zarr_data_pool=dataset.datapool, padding=dataset.padding, mask_ratio=dataset.mask_ratio, n_peaks_lower_bound=dataset.n_peaks_lower_bound, n_peaks_upper_bound=dataset.n_peaks_upper_bound, n_peaks_sample_gap=dataset.n_peaks_sample_gap, use_insulation=dataset.use_insulation) for _ in range(dataset.n_packs)]
-                                                     
+        dataset.preload_data_packs = [PreloadDataPack(dataset.preload_count, dataset.datapool, dataset.padding, dataset.mask_ratio, dataset.n_peaks_lower_bound, dataset.n_peaks_upper_bound, dataset.use_insulation) for _ in range(dataset.n_packs)]
 # %%

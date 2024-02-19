@@ -1,6 +1,6 @@
 #!/bin/bash
 # Set the path to save checkpoints
-OUTPUT_DIR='/pmglocal/xf2217/20240205.finetune_conv50_depth4096_500_region_200bp/'
+OUTPUT_DIR='/pmglocal/xf2217/20240205.finetune_conv50_depth4096_200_region_500bp/'
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7957
@@ -11,18 +11,17 @@ export NCCL_P2P_LEVEL=NVL
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=1 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
     --data_set "Expression_Finetune_Fetal" \
     --eval_data_set "Expression_Finetune_Fetal.fetal_eval" \
-    --finetune "/pmglocal/xf2217/get_data/checkpoint-best.pth" \
     --data_path ${DATA_PATH} \
     --input_dim 639 \
     --output_dim 2 \
     --num_motif 637 \
     --eval \
-    --model get_finetune_motif \
+    --model get_finetune_motif_with_atac \
     --batch_size 16 \
     --num_workers 32 \
     --n_peaks_lower_bound 20 \
-    --n_peaks_upper_bound 500 \
-    --center_expand_target 200 \
+    --n_peaks_upper_bound 200 \
+    --center_expand_target 500 \
     --non_redundant 'max_depth' \
     --preload_count 200 \
     --pin_mem \
