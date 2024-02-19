@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO,
 # Suppress all deprecated warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-sys.path.append('/manitou/pmg/users/xf2217/get_model')
+sys.path.append('/pmglocal/xf2217/get_model')
 
 def get_padding_pos(mask):
     mask_ = mask.clone()
@@ -444,7 +444,7 @@ class PreloadDataPack(object):
     """
 
     def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, padding=50, mask_ratio=0.5,
-                 n_peaks_lower_bound=5, n_peaks_upper_bound=200, n_peaks_sample_gap=50, use_insulation=True, window_index=None):
+                 n_peaks_lower_bound=5, n_peaks_upper_bound=200, n_peaks_sample_gap=200, use_insulation=True, window_index=None):
         # logging.info('Initializing PreloadDataPack')
         self.preload_count = preload_count
         self.zarr_data_pool = zarr_data_pool
@@ -730,7 +730,7 @@ class PreloadDataPack(object):
 
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, n_peaks_sample_gap=50, use_insulation=True, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True, non_redundant=False, filter_by_min_depth=False, dataset_size=655_360):
+    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, n_peaks_sample_gap=200, use_insulation=True, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=True, non_redundant=False, filter_by_min_depth=False, dataset_size=655_360):
         super().__init__()
         """
         Pretrain dataset for GET model.

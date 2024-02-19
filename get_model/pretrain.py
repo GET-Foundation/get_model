@@ -9,7 +9,6 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import utils
-from altair import sample
 from dataset.dataset import build_dataset_zarr as build_dataset
 from dataset.zarr_dataset import DenseZarrIO, worker_init_fn_get
 from engine import evaluate_pretrain
