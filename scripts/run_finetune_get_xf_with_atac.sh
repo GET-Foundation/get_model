@@ -1,7 +1,7 @@
 #!/bin/bash
 # Set the path to save checkpoints
 DATE=`date +%Y%m%d`
-OUTPUT_DIR='/pmglocal/xf2217/'${DATE}'.conv50.nodepth.R200L500/'
+OUTPUT_DIR="/pmglocal/xf2217/${DATE}.conv50.nodepth.R200L500/"
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7957
