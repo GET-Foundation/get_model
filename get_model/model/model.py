@@ -358,12 +358,21 @@ class ExpressionHead(nn.Module):
 class ATACHead(nn.Module):
     """ATAC head"""
 
-    def __init__(self, embed_dim, output_dim):
+    def __init__(self, embed_dim, hidden_dim, output_dim, drop=0.1):
         super().__init__()
-        self.head = nn.Linear(embed_dim, output_dim)
-
+        self.fc1 = nn.Linear(embed_dim, hidden_dim)
+        self.act = nn.GELU()
+        self.fc2 = nn.Linear(hidden_dim, output_dim)
+        self.drop1 = nn.Dropout(drop)
+        self.drop2 = nn.Dropout(drop)
     def forward(self, x):
-        return self.head(x)
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop1(x)
+        x = self.fc2(x)
+        x = self.drop2(x)
+        return x
+
 
 class GETFinetune(nn.Module):
     """A GET model for finetuning using classification head."""
@@ -578,7 +587,7 @@ class GETFinetuneExpATAC(nn.Module):
             use_mean_pooling=False,
             flash_attn=flash_attn,
         )
-        self.head_atac = nn.Linear(d_model, 1)
+        self.head_atac = ATACHead(motif_dim+joint_kernel_num, d_model, 1)
         # self.head_mask = nn.Linear(d_model, output_dim)
         self.head_exp = (
             ExpressionHead(d_model, output_dim, use_atac)
@@ -614,7 +623,7 @@ class GETFinetuneExpATAC(nn.Module):
         # x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
         tss_mask = other_labels[:,:, 1]
         # x_original = torch.cat([x_original, atpm], dim=-1)
-
+        atpm = F.softplus(self.head_atac(x_original))
         x = self.region_embed(x_original)
 
         B, N, C = x_original.shape
@@ -627,7 +636,6 @@ class GETFinetuneExpATAC(nn.Module):
                 x = pos_emb_component(x)
 
         x, _ = self.encoder(x, mask=padding_mask)
-        atpm = F.softplus(self.head_atac(x))
         exp = F.softplus(self.head_exp(x, None))
         return atpm, exp
 

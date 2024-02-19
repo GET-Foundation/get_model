@@ -1,18 +1,19 @@
 #!/bin/bash
 # Set the path to save checkpoints
 DATE=`date +%Y%m%d`
-OUTPUT_DIR="/pmglocal/xf2217/${DATE}.conv50.nodepth.R200L500/"
+OUTPUT_DIR="/pmglocal/xf2217/${DATE}.conv50.freeze_continue_from_nofreeze.nodepth.R200L500/"
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7957
 
 export NCCL_P2P_LEVEL=NVL
+#"/burg/pmg/users/xf2217/get_data/checkpoint-399.from_shentong.R200L500.pth" \
 
 # batch_size can be adjusted according to the graphics card
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
     --data_set "Expression_Finetune_Fetal" \
     --eval_data_set "Expression_Finetune_Fetal.fetal_eval" \
-    --finetune "/burg/pmg/users/xf2217/get_data/checkpoint-399.from_shentong.R200L500.pth" \
+    --finetune "/pmglocal/xf2217/${DATE}.conv50.nofreeze.nodepth.R200L500/checkpoint-best.pth" \
     --data_path ${DATA_PATH} \
     --input_dim 639 \
     --output_dim 2 \
@@ -30,13 +31,13 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --lr 1e-3 \
     --opt adamw \
     --wandb_project_name "get_finetune.st_checkpoint399" \
-    --wandb_run_name "EvalTSS.OODChr4&14.conv50.nodepth.R200L500"${DATE} \
+    --wandb_run_name "EvalTSS.OODChr4&14.conv50.freeze_continue_from_nofreeze.nodepth.R200L500"${DATE} \
     --eval_freq 2 \
     --dist_eval \
     --eval_tss \
+    --freeze_atac_attention \
     --leave_out_celltypes "Astrocyte" \
     --leave_out_chromosomes "chr4,chr14" \
-    --freeze_atac_attention \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 20 \
