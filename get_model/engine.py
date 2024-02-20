@@ -195,7 +195,7 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
         atac_target = atac_target.unsqueeze(-1) * mask_for_loss
         atac_target = atac_target[indices[0], indices[1], :].flatten()
         loss_atac = criterion(atac, atac_target)
-        loss = loss_exp + loss_atac #+ loss_exp
+        loss = loss_exp# + loss_atac #+ loss_exp
     else:
         loss = loss_exp
     return loss, atac, exp, exp_target 
