@@ -438,8 +438,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         print("Data Aug = %s" % str(transform))
         root = args.data_path
         # get FILEPATH
-        codebase = os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__))))
+        codebase = "/pmglocal/alb2281/repos/get_model"
+        resource_dir = "/pmglocal/alb2281/get_resources"
         if sequence_obj is None:
             sequence_obj = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
             sequence_obj.load_to_memory_dense()
@@ -449,8 +449,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         dataset = ZarrPretrainDataset([
             f'{root}/htan_gbm_dense.zarr',
             ],
-                           f'{root}/hg38.zarr',
-                           f'{root}/hg38_motif_result.zarr', [
+                           f'{resource_dir}/hg38.zarr',
+                           f'{resource_dir}/hg38_motif_result.zarr', [
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
                            peak_name=args.peak_name, insulation_subsample_ratio=0.8,
@@ -464,8 +464,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         print("Data Aug = %s" % str(transform))
         root = args.data_path
         # get FILEPATH
-        codebase = os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__))))
+        codebase = "/pmglocal/alb2281/repos/get_model"
+        resource_dir = "/pmglocal/alb2281/get_resources"
         if sequence_obj is None:
             sequence_obj = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
             sequence_obj.load_to_memory_dense()
@@ -476,10 +476,10 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         dataset = ZarrPretrainDataset([
             f"{root}/htan_gbm_dense.zarr",
             ],
-                           f'{root}/hg38.zarr',
-                           f'{root}/hg38_motif_result.zarr', [
+                           f'{resource_dir}/hg38.zarr',
+                           f'{resource_dir}/hg38_motif_result.zarr', [
                            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', 
-                           f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], 
+                           f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'],  
                            peak_name=args.peak_name, insulation_subsample_ratio=0.8, additional_peak_columns=['Expression_positive', 'Expression_negative','aTPM', 'TSS'], 
                            preload_count=args.preload_count, 
                            n_packs=args.n_packs, max_peak_length=args.max_peak_length, center_expand_target=args.center_expand_target, n_peaks_lower_bound=args.n_peaks_lower_bound, 
