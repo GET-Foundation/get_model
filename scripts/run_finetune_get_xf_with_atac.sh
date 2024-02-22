@@ -1,7 +1,7 @@
 #!/bin/bash
 # Set the path to save checkpoints
 DATE=`date +%Y%m%d`
-OUTPUT_DIR="/pmglocal/xf2217/${DATE}.conv50.no_atac_loss.nofreeze.nodepth.R200L500/"
+OUTPUT_DIR="/pmglocal/xf2217/${DATE}.conv50.atac_loss.nofreeze.nodepth.use_insulation.gap50.shift50.R100L1000/"
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7957
@@ -21,25 +21,27 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --model get_finetune_motif_with_atac \
     --batch_size 32 \
     --num_workers 32 \
-    --n_peaks_lower_bound 20 \
-    --n_peaks_upper_bound 200 \
-    --center_expand_target 500 \
+    --use_insulation \
+    --n_peaks_lower_bound 5 \
+    --n_peaks_upper_bound 100 \
+    --center_expand_target 1000 \
     --preload_count 200 \
     --pin_mem \
     --peak_name "peaks_q0.01_tissue_open_exp" \
+    --save_ckpt_freq 5 \
     --n_packs 1 \
     --lr 1e-3 \
     --opt adamw \
     --wandb_project_name "get_finetune.st_checkpoint399" \
-    --wandb_run_name "EvalTSS.OODChr4&14.conv50.no_atac_loss.nofreeze.nodepth.R200L500"${DATE} \
+    --wandb_run_name "EvalTSS.OODChr4&14.conv50.atac_loss.nofreeze.use_insulation.nodepth.gap50.shift50.R100L1000."${DATE} \
     --eval_freq 2 \
     --dist_eval \
     --eval_tss \
-    --leave_out_celltypes "Astrocyte" \
+    --leave_out_celltypes ".*Astrocyte.*" \
     --leave_out_chromosomes "chr4,chr14" \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 20 \
     --epochs 100 \
-    --num_region_per_sample 200 \
+    --num_region_per_sample 100 \
     --output_dir ${OUTPUT_DIR}

@@ -179,7 +179,6 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
         atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels)
-        
 
     exp = exp * mask_for_loss
     indices = torch.where(mask_for_loss==1)
@@ -270,7 +269,7 @@ def finetune_train_one_epoch(
         n_peaks = n_peaks.to(device, non_blocking=True)
         labels_data = labels_data.to(device, non_blocking=True).bfloat16()
         other_labels = other_labels.to(device, non_blocking=True).bfloat16()
-
+        print(other_labels.shape)
         if loss_scaler is None:
             peaks = peaks.half()
             loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion)
@@ -513,10 +512,15 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         , other_labels[:,:,0], labels_data, other_labels, criterion)
 
         if args.eval_tss:
-            B, R, N = other_labels.shape
+            padding_mask = get_padding_pos(mask)
+            mask_for_loss = 1-padding_mask
+            padding_mask = padding_mask.to(device, non_blocking=True).bool()
+            mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
+            indices = torch.where(mask_for_loss==1)
             # other_labels is B, R, N where [:,:, 1] is TSS indicator
-            preds.append(exp.reshape(B,R,2)[other_labels[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
-            obs.append(exp_target.reshape(B,R,2)[other_labels[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
+            other_labels_reshape = other_labels[indices[0], indices[1], 1].flatten()
+            preds.append(exp.reshape(-1, 2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
+            obs.append(exp_target.reshape(-1,2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
         else:
             preds.append(exp.reshape(-1).detach().cpu().numpy())
             obs.append(exp_target.reshape(-1).detach().cpu().numpy())
