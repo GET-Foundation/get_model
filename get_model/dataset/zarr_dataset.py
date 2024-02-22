@@ -311,7 +311,7 @@ class ZarrDataPool(object):
         chr_name, chunk_idx = self._get_chr_chunk_idx(chunk_idx)
         start, end = self._get_start_end(chr_name, chunk_idx)
         return chr_name, chunk_idx, start, end
-
+    
     def _generate_peak_sequence(self, celltype_peaks, sequence, window_start, window_end):
         """
         Generate peak sequence from peaks and sequence data. Peak sequence is a one-hot encoding of DNA.
@@ -420,7 +420,30 @@ class ZarrDataPool(object):
         start = chunk_idx * self.chunk_size
         end = start + 2 * self.chunk_size
         return start, end
+    
+    def _get_window_index_from_chunk_idx(self, data_key, celltype_id, chunk_idx):
+        """Get window index from data_key, celltype_id, chr and pos
+        this is a reverse operation of _get_celltype_info and _get_chromosome_info
+        [ celltype_1:(genome_chunks), celltype_2:(genome_chunks), ... ]
+        first get the celltype index using celltype_id, 
+        then get the chunk index using chr and pos, 
+        then get the window index using celltype index and chunk index
+        """
+        celltype_idx = self._get_celltype_idx(data_key, celltype_id)
+        return int(celltype_idx * self.genome_chunk_length + chunk_idx)
 
+    def _get_celltype_idx(self, data_key, celltype_id):
+        """Get celltype index from data_key and celltype_id"""
+        return self.zarr_dict[data_key].ids.index(celltype_id)
+    
+    def _get_chunk_idx(self, chr, pos):
+        """Get chunk index from chr and pos"""
+        chr_chunk_idx = pos // self.chunk_size
+        # determine how many chunks before the current chromosome, chr is string
+        current_chr_idx = list(self.chrom_n_chunks.keys()).index(chr)
+        chunk_idx = sum([self.chrom_n_chunks[list(self.chrom_n_chunks.keys())[i]] for i in range(current_chr_idx)]) + chr_chunk_idx
+        return chunk_idx
+                             
 
 class PreloadDataPack(object):
     """
@@ -440,7 +463,7 @@ class PreloadDataPack(object):
     PreloadDataPack: A PreloadDataPack object.
 
     Note:
-    This class is used by PretrainDataset to preload data for a slot.
+    This class is used by PretrainDataset to preload datax for a slot.
     """
 
     def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, padding=50, mask_ratio=0.5,
@@ -506,7 +529,7 @@ class PreloadDataPack(object):
         # trigger the computation of peak_num_per_sample
         self._calculate_peak_num_per_sample()
         self._calculate_window_peak_counts()
-        if self.insulation_peak_counts.shape[0] == 0:
+        if self.insulation_peak_counts.shape[0] == 0 and self.use_insulation:
             logging.info('No valid insulation peak count')
             return PreloadDataPack(self.preload_count, self.zarr_data_pool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound)
 
@@ -554,7 +577,7 @@ class PreloadDataPack(object):
         window_slot = self.preloaded_data_window_indices_mapping[window_index]
         return self._extract_sample_from_window(self.preloaded_data[window_slot], insulation_index)
 
-    def _extract_sample_from_window_without_insulation(self, window, peak_index):
+    def _extract_sample_from_window_without_insulation(self, window, peak_index, peak_start=None, peak_end=None):
         """
         Extract a single sample from a preloaded window without using insulation data.
 
@@ -568,8 +591,9 @@ class PreloadDataPack(object):
             about the extracted sample, including cell type ID, chromosome name, and positions.
         """
         window_index, chr_name, start, end, celltype_id, track, insulations, celltype_peaks, motif_mean_std = window
-        peak_start = peak_index * self.n_peaks_upper_bound 
-        peak_end = peak_start + self.n_peaks_upper_bound
+        if peak_start is None or peak_end is None:
+            peak_start = peak_index * self.n_peaks_upper_bound
+            peak_end = peak_start + self.n_peaks_upper_bound
         celltype_peaks = celltype_peaks.iloc[peak_start:peak_end]
         track_start = celltype_peaks['Start'].min() - self.padding
         track_end = celltype_peaks['End'].max() + self.padding
@@ -831,12 +855,12 @@ class PretrainDataset(Dataset):
         # Could be based on total windows, number of samples per window, etc.
         return self.dataset_size
 
-    def reload_data(self, slot):
+    def reload_data(self, slot, window_index=None):
         # This method runs in a separate thread
         # logging.info(f'Async reloading data for slot {index}')
         # reload by reinitializing the preload data pack and put it back to the preload_data_packs
         self.preload_data_packs[slot] = PreloadDataPack(
-            self.preload_count, self.datapool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound, self.use_insulation)
+            self.preload_count, self.datapool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound, self.use_insulation, window_index=window_index)
         
         # self.preload_data_packs[slot].preload_data()
         # add the index back to avaliable packs
@@ -852,3 +876,57 @@ def worker_init_fn_get(worker_id):
     if dataset.preload_data_packs is None:
         dataset.preload_data_packs = [PreloadDataPack(dataset.preload_count, dataset.datapool, dataset.padding, dataset.mask_ratio, dataset.n_peaks_lower_bound, dataset.n_peaks_upper_bound, dataset.use_insulation) for _ in range(dataset.n_packs)]
 # %%
+
+
+
+class InferenceDataset(PretrainDataset):
+    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, gencode_obj, peak_name='peaks', 
+                 n_peaks_upper_bound=200, sequence_obj=None, additional_peak_columns=None, center_expand_target=1000, max_peak_length=5000, use_insulation=False):
+        super().__init__(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name=peak_name, n_peaks_upper_bound=n_peaks_upper_bound, sequence_obj=sequence_obj, additional_peak_columns=additional_peak_columns, n_packs=1, max_peak_length=max_peak_length,  use_insulation=use_insulation, center_expand_target=center_expand_target)
+        self.gencode_obj = gencode_obj
+        self.tss_chunk_idx = self._generate_tss_chunk_idx()
+
+    def _generate_tss_chunk_idx(self):
+        """Determine the windows to extract for each gene"""
+        self.tss_chunk_idx = self.gencode_obj.gtf.copy()
+        for i, row in tqdm(self.gencode_obj.gtf.iterrows()):
+            # get window_index for each gene
+            gene_chr = row.Chromosome
+            gene_start = row.Start
+            self.tss_chunk_idx.loc[i, 'chunk_idx'] = self.datapool._get_chunk_idx(gene_chr, gene_start)
+        return self.tss_chunk_idx
+    
+    def _get_window_idx_for_tss_and_celltype(self, data_key, celltype_id, tss_idx):
+        """Get window index for a gene and celltype"""
+        chunk_idx = self.tss_chunk_idx.loc[tss_idx, 'chunk_idx']
+        gene_name = self.tss_chunk_idx.loc[tss_idx, 'gene_name']
+        start = self.tss_chunk_idx.loc[tss_idx, 'Start']
+        return {'gene_name': gene_name,
+                'window_idx': np.array([self.datapool._get_window_index_from_chunk_idx(data_key, celltype_id, chunk_idx)]), 
+                'Start': start}
+
+    def _get_window_idx_for_gene_and_celltype(self, data_key, celltype_id, gene_name):
+        """Get window index for a gene and celltype"""
+        gene_df = self.tss_chunk_idx.query('gene_name==@gene_name')
+        chunk_idxs = gene_df['chunk_idx']
+        start = gene_df['Start']
+        return {'gene_name': gene_name,
+                'window_idx': np.unique([self.datapool._get_window_index_from_chunk_idx(data_key, celltype_id, chunk_idx) for chunk_idx in chunk_idxs]), 
+                'Start': start}
+    
+    def _get_gene_info_from_window_idx(self, window_idx):
+        chr_name, chunk_idx, start, end = self.datapool._get_chromosome_info(window_idx)
+        gene_df = self.tss_chunk_idx.query('chunk_idx==@chunk_idx or chunk_idx==@chunk_idx-1')
+        return gene_df
+    
+
+    def __len__(self):
+        return self.tss_chunk_idx['chunk_idx'].unique().shape[0] * self.datapool.n_celltypes
+
+    def __getitem__(self, idx):
+        celltype_idx = idx // self.tss_chunk_idx['chunk_idx'].unique().shape[0]
+        chunk_idx = self.tss_chunk_idx['chunk_idx'].unique()[idx % self.tss_chunk_idx['chunk_idx'].unique().shape[0]]
+        data_key, celltype_id = self.datapool._get_celltype(celltype_idx)
+        window_idx = self.datapool._get_window_index_from_chunk_idx(data_key, celltype_id, chunk_idx)
+        return window_idx
+
