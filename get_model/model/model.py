@@ -594,6 +594,11 @@ class GETFinetuneExpATAC(nn.Module):
             if output_dim > 0
             else nn.Identity()
         )
+        self.head_confidence = (
+            ExpressionHead(d_model, 50, use_atac)
+            if output_dim > 0
+            else nn.Identity()
+        )
         # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         # trunc_normal_(self.mask_token, std=0.02)
         self.apply(self._init_weights)
@@ -637,13 +642,16 @@ class GETFinetuneExpATAC(nn.Module):
 
         x, _ = self.encoder(x, mask=padding_mask)
         exp = F.softplus(self.head_exp(x, None))
-        return atpm, exp
+        confidence = F.softplus(self.head_confidence(x, None))
+        return atpm, exp, confidence
 
     def reset_head(self, output_dim):
         self.output_dim = output_dim
         self.head_exp = (
             nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
         )
+        self.head_atac = ATACHead(self.embed_dim, self.d_model, 1)
+        self.head_confidence = ExpressionHead(self.embed_dim, 50, False)
 
     @torch.jit.ignore
     def no_weight_decay(self):

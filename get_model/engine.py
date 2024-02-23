@@ -178,15 +178,30 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     padding_mask = padding_mask.to(device, non_blocking=True).bool()
     mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
-        atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels)
+        atac, exp, confidence = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels)
 
+    B, R, N = exp.shape
     exp = exp * mask_for_loss
+    exp_target = exp_target * mask_for_loss
+
+    cosine_similarity = torch.cosine_similarity(exp.reshape(B, -1), exp_target.reshape(B, -1), dim=-1).detach()
+    # use cosine similarity as a target for confidence header, map each element to a bin in (-1,1), 50 bin in total
+    # bin 0 is -1, bin 49 is 1
+    # bin 0-24 is negative, bin 25 is 0, bin 26-49 is positive
+    # get the bin index
+    confidence_target = ((cosine_similarity+1)/2*49).long()
+    # clip the value to 0-49
+    confidence_target = torch.clamp(confidence_target, 0, 49)
+    # confidence is (B, R, 1)
+    confidence_pred = confidence.mean(1).softmax(dim=-1)
+    # cross entropy loss for confidence header
+    loss_confidence = nn.CrossEntropyLoss()(confidence_pred, confidence_target)
+    print(loss_confidence)
     indices = torch.where(mask_for_loss==1)
     exp = exp[indices[0], indices[1], :].flatten()
-    exp_target = exp_target * mask_for_loss
     exp_target = exp_target[indices[0], indices[1], :].flatten()
     loss_exp = criterion(exp, exp_target)
-    
+
     if atac is not None:
         atac = atac * mask_for_loss
         indices = torch.where(mask_for_loss==1)
@@ -194,10 +209,12 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
         atac_target = atac_target.unsqueeze(-1) * mask_for_loss
         atac_target = atac_target[indices[0], indices[1], :].flatten()
         loss_atac = criterion(atac, atac_target)
-        loss = loss_exp + loss_atac #+ loss_exp
+        loss = loss_exp + loss_atac * 0.2
     else:
         loss = loss_exp
-    return loss, atac, exp, exp_target 
+    if confidence is not None:
+        loss = loss + loss_confidence * 0.01
+    return loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target
 
 
 def finetune_train_one_epoch(
@@ -269,12 +286,11 @@ def finetune_train_one_epoch(
         n_peaks = n_peaks.to(device, non_blocking=True)
         labels_data = labels_data.to(device, non_blocking=True).bfloat16()
         other_labels = other_labels.to(device, non_blocking=True).bfloat16()
-        print(other_labels.shape)
         if loss_scaler is None:
             peaks = peaks.half()
-            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion)
+            loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion)
         else:
-            loss, _, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion)
+            loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion)
 
         loss_value = loss.item()
 
@@ -508,8 +524,9 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         labels_data = labels_data.to(device, non_blocking=True).bfloat16()
         other_labels = other_labels.to(device, non_blocking=True).bfloat16()
         # compute output
+        atac_targets = other_labels[:,:,0]
         loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
-        , other_labels[:,:,0], labels_data, other_labels, criterion)
+        , atac_targets, labels_data, other_labels, criterion)
 
         if args.eval_tss:
             padding_mask = get_padding_pos(mask)
@@ -524,18 +541,18 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         else:
             preds.append(exp.reshape(-1).detach().cpu().numpy())
             obs.append(exp_target.reshape(-1).detach().cpu().numpy())
-            # preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
-            # obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
+        preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
+        obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
 
         metric_logger.update(loss=loss.item())
 
     preds = np.concatenate(preds, axis=0).reshape(-1)
     obs = np.concatenate(obs, axis=0).reshape(-1)
-    # preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
-    # obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
+    preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
+    obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
 
     r2score, pearsonr_score, spearmanr_score = cal_score_stats(preds, obs, data_loader, args)
-    # r2score_atac, pearsonr_score_atac, spearmanr_score_atac = cal_score_stats(preds_atac, obs_atac, data_loader, args)
+    r2score_atac, pearsonr_score_atac, spearmanr_score_atac = cal_score_stats(preds_atac, obs_atac, data_loader, args)
 
     # gather the stats from all processes
     # metric_logger.synchronize_between_processes()
@@ -544,9 +561,9 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
     metric_logger.meters["pearsonr_score"].update(pearsonr_score, n=1)
     metric_logger.meters["spearmanr_score"].update(spearmanr_score, n=1)
 
-    # metric_logger.meters["r2score_atac"].update(r2score_atac, n=1)
-    # metric_logger.meters["pearsonr_score_atac"].update(pearsonr_score_atac, n=1)
-    # metric_logger.meters["spearmanr_score_atac"].update(spearmanr_score_atac, n=1)
+    metric_logger.meters["r2score_atac"].update(r2score_atac, n=1)
+    metric_logger.meters["pearsonr_score_atac"].update(pearsonr_score_atac, n=1)
+    metric_logger.meters["spearmanr_score_atac"].update(spearmanr_score_atac, n=1)
 
     if printlog:
         print(
@@ -554,9 +571,9 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
                 r2=r2score,
                 pearson=pearsonr_score,
                 spearman=spearmanr_score,
-                # r2_atac=r2score_atac,
-                # pearson_atac=pearsonr_score_atac,
-                # spearman_atac=spearmanr_score_atac,
+                r2_atac=r2score_atac,
+                pearson_atac=pearsonr_score_atac,
+                spearman_atac=spearmanr_score_atac,
                 losses=metric_logger.loss,
             )
         )
