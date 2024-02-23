@@ -27,7 +27,7 @@ class SplitPool(nn.Module):
     splitting can be calculated by cumsum of the padded peak lengths. The output
     is a tensor of shape (batch, n_peak, dimension). 
     """
-    def __init__(self, pool_method='sum'):
+    def __init__(self, pool_method='mean'):
         super().__init__()
         self.pool_method = pool_method
 

@@ -623,9 +623,10 @@ class GETFinetuneExpATAC(nn.Module):
         x = F.relu(x)
         # [B, L, 1274] --> [B, R, 1274]
         # gloabl pooling inner product with peak
+        
         x_original = self.atac_attention(x, atac, chunk_size, n_peaks, max_n_peaks)
         # x = self.atac_attention(x, atac)
-        # x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
+        # x_original = self.split_pool(x         , chunk_size, n_peaks, max_n_peaks)
         tss_mask = other_labels[:,:, 1]
         # x_original = torch.cat([x_original, atpm], dim=-1)
         atpm = F.softplus(self.head_atac(x_original))
@@ -796,6 +797,138 @@ class GETFinetuneATAC(nn.Module):
         return {"pos_embed", "cls_token"}
 
 
+class GETFinetuneExpATACFromSequence(nn.Module):
+    """A GET model for finetuning using classification head."""
+
+    def __init__(
+        self,
+        num_regions=200,
+        num_motif=637,
+        motif_dim=639,
+        num_res_block=0,
+        motif_prior=False,
+        embed_dim=768,
+        num_layers=12,
+        d_model=768,
+        nhead=12,
+        dropout=0.1,
+        output_dim=1,
+        pos_emb_components=["CTCF", "Rotary", "Absolute"],
+        flash_attn=False,
+        use_atac=False,
+    ):
+        super().__init__()
+        self.num_regions = num_regions
+        self.num_motif = num_motif
+        self.num_res_block = num_res_block
+        self.motif_prior = motif_prior
+        self.embed_dim = embed_dim
+        self.motif_dim = motif_dim
+        self.num_layers = num_layers
+        self.d_model = d_model
+        self.nhead = nhead
+        self.dropout = dropout
+        self.output_dim = output_dim
+        self.pos_emb_components = pos_emb_components
+        self.motif_scanner = MotifScanner(
+            num_motif=num_motif, include_reverse_complement=True,
+            bidirectional_except_ctcf=True
+        )
+        self.atac_attention = SplitPool(
+            pool_method='mean',
+        )
+        # self.split_pool = SplitPool()
+        self.region_embed = RegionEmbed(num_regions, motif_dim+joint_kernel_num, embed_dim)
+        self.pos_embed = []
+        if "CTCF" in self.pos_emb_components: 
+            self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
+        # if "Rotary" in self.pos_emb_components:
+            # self.pos_embed.append(RotaryEmbedding(embed_dim))
+        if "Absolute" in self.pos_emb_components:
+            self.pos_embed.append(AbsolutePositionalEncoding(embed_dim))
+        self.pos_embed = nn.ModuleList(self.pos_embed)
+        self.encoder = GETTransformer(
+            d_model,
+            nhead,
+            num_layers,
+            drop_path_rate=dropout,
+            drop_rate=dropout,
+            attn_drop_rate=dropout,
+            use_mean_pooling=False,
+            flash_attn=flash_attn,
+        )
+        self.head_atac = ATACHead(motif_dim, d_model, 1)
+        # self.head_mask = nn.Linear(d_model, output_dim)
+        self.head_exp = (
+            ExpressionHead(d_model, output_dim, use_atac)
+            if output_dim > 0
+            else nn.Identity()
+        )
+        self.head_confidence = (
+            ExpressionHead(d_model, 50, use_atac)
+            if output_dim > 0
+            else nn.Identity()
+        )
+        # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        # trunc_normal_(self.mask_token, std=0.02)
+        self.apply(self._init_weights)
+
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels):
+        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
+        # peak_seq: [B, L, 4]
+        # [B, L, 4] --> [B, L, 1274]
+        x = self.motif_scanner(peak_seq)
+        x = x - motif_mean_std[:,0, :].unsqueeze(1)
+        x = x / motif_mean_std[:,1, :].unsqueeze(1)
+        x = F.relu(x)
+        # [B, L, 1274] --> [B, R, 1274]
+        # gloabl pooling inner product with peak
+        x_original = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+        # x = self.atac_attention(x, atac)
+        atpm = F.softplus(self.head_atac(x_original))
+
+        # x_original = self.split_pool(x         , chunk_size, n_peaks, max_n_peaks)
+        tss_mask = other_labels[:,:, 1]
+        # x_original = torch.cat([x_original, atpm], dim=-1)
+        
+        x = self.region_embed(x_original)
+
+        B, N, C = x_original.shape
+
+
+        for pos_emb_component in self.pos_embed:
+            if isinstance(pos_emb_component, CTCFPositionalEncoding):
+                x = pos_emb_component(x, ctcf_pos)
+            else:
+                x = pos_emb_component(x)
+
+        x, _ = self.encoder(x, mask=padding_mask)
+        exp = F.softplus(self.head_exp(x, None))
+        confidence = F.softplus(self.head_confidence(x, None))
+        return atpm, exp, confidence
+
+    def reset_head(self, output_dim):
+        self.output_dim = output_dim
+        self.head_exp = (
+            nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
+        )
+        self.head_atac = ATACHead(self.motif_dim, self.d_model, 1)
+        self.head_confidence = ExpressionHead(self.embed_dim, 50, False)
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {"pos_embed", "cls_token"}
+
 
 
 @register_model
@@ -868,6 +1001,28 @@ def get_finetune_motif_with_atac(pretrained=False, **kwargs):
         atac_kernel_num=161,
         joint_kernel_num=161,
         final_bn=kwargs["final_bn"],
+    )
+    if pretrained:
+        checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
+        model.load_state_dict(checkpoint["model"])
+    return model
+
+@register_model
+def get_finetune_motif_with_atac_from_sequence(pretrained=False, **kwargs):
+    model = GETFinetuneExpATACFromSequence(
+        num_regions=kwargs["num_region_per_sample"],
+        num_motif=kwargs["num_motif"],
+        motif_dim=kwargs["motif_dim"],
+        num_res_block=0,
+        motif_prior=False,
+        embed_dim=768,
+        num_layers=12,
+        d_model=768,
+        nhead=12,
+        dropout=0.1,
+        output_dim=kwargs["output_dim"],
+        pos_emb_components=[],
+        flash_attn=kwargs["flash_attn"],
     )
     if pretrained:
         checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")

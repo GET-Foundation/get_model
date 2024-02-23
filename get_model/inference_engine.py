@@ -32,7 +32,7 @@ class ModelWrapper:
         
     def _load_checkpoint(self, path):
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint["model"], strict=True)
+        self.model.load_state_dict(checkpoint["model"], strict=False)
         self.model.eval()
         self.model.to(self.device)
 
@@ -66,7 +66,7 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     padding_mask = padding_mask.to(device, non_blocking=True).bool()
     mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
-        atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data)
+        atac, exp, confidence = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data)
         
 
     exp = exp * mask_for_loss
@@ -94,16 +94,17 @@ class InferenceEngine:
         self.model_wrapper = ModelWrapper(model_checkpoint)
         self.mut = mut
 
-    def setup_data(self, gene_name, celltype):
+    def setup_data(self, gene_name, celltype, window_idx_offset=0):
         data_key = self.dataset.datapool.data_keys[0]
         dataset =  self.dataset
         window_idx = self.dataset._get_window_idx_for_gene_and_celltype(data_key, celltype, gene_name)['window_idx']
+        self.window_idx = window_idx
+        
         self.dataset.preload_data_packs = [PreloadDataPack(
-                     preload_count=dataset.preload_count, zarr_data_pool=dataset.datapool, padding=dataset.padding, mask_ratio=dataset.mask_ratio, n_peaks_lower_bound=dataset.n_peaks_lower_bound, n_peaks_upper_bound=dataset.n_peaks_upper_bound, n_peaks_sample_gap=dataset.n_peaks_sample_gap, use_insulation=dataset.use_insulation, window_index=window_idx)]
-        gene_info = self.dataset._get_gene_info_from_window_idx(window_idx[0]).query('gene_name==@gene_name')
+                     preload_count=dataset.preload_count, zarr_data_pool=dataset.datapool, padding=dataset.padding, mask_ratio=dataset.mask_ratio, n_peaks_lower_bound=dataset.n_peaks_lower_bound, n_peaks_upper_bound=dataset.n_peaks_upper_bound, n_peaks_sample_gap=dataset.n_peaks_sample_gap, use_insulation=dataset.use_insulation, window_index=window_idx+window_idx_offset)]
+        gene_info = self.dataset._get_gene_info_from_window_idx(window_idx[0]+window_idx_offset).query('gene_name==@gene_name')
         peak_info = self.dataset.preload_data_packs[0].preloaded_data[0][7]
         self.data_key = data_key
-        self.window_idx = window_idx
         self.gene_info = gene_info
         self.peak_info = peak_info
         peak_start, peak_end, tss_peak = self.get_peak_start_end_from_gene_peak(gene_info, peak_info, gene_name)
@@ -111,7 +112,7 @@ class InferenceEngine:
         self.peak_end = peak_end
         self.tss_peak = np.unique(tss_peak)
 
-    def run_inference_for_gene_and_celltype(self, offset=0):
+    def run_inference_for_gene_and_celltype(self, offset=0, mut=None):
         """
         Run inference for a specific gene and cell type.
 
@@ -119,10 +120,12 @@ class InferenceEngine:
         - gene_name (str): The name of the gene.
         - celltype (str): The cell type.
         """
-
+        if mut is None:
+            mut = self.mut
+            
         # 5. Extract the sample data for inference
         batch = self.dataset.preload_data_packs[0]._extract_sample_from_window_without_insulation(
-            self.dataset.preload_data_packs[0].preloaded_data[0], None, self.peak_start+offset, self.peak_end+offset, mut=self.mut
+            self.dataset.preload_data_packs[0].preloaded_data[0], None, self.peak_start+offset, self.peak_end+offset, mut=mut
         )
         tss_peak = self.tss_peak - offset
 
