@@ -37,6 +37,19 @@ dataset_config = {
     "n_peaks_upper_bound": 100
 }
 #%%
+
+def load_erythroblast_abe_data(csv_path='Editable_A_scores.combined.scores.csv'):
+    base_edit = pd.read_csv('Editable_A_scores.combined.scores.csv')
+    base_edit['Chromosome'] = base_edit['coord'].str.split(':').str[0]
+    base_edit['Start'] = base_edit['coord'].str.split(':').str[1].str.split('-').str[0].astype(int)
+    base_edit['End'] = base_edit['coord'].str.split(':').str[1].str.split('-').str[1].str[:-1].astype(int)
+    base_edit['Strand'] = base_edit['coord'].str[-1]
+    base_edit['Ref'] = 'A' if base_edit['Strand'].values[0] == '+' else 'T'
+    base_edit['Alt'] = 'G' if base_edit['Strand'].values[0] == '+' else 'C'
+    return base_edit, base_edit[['Chromosome', 'Start', 'End', 'Ref', 'Alt']]
+
+base_edit_annot, base_edit = load_erythroblast_abe_data()
+#%%
 gencode = Gencode(**gencode_config)
 dataset = InferenceDataset(**dataset_config, gencode_obj=gencode)
 #%%
@@ -74,17 +87,17 @@ celltype = 'Fetal Erythroblast 1.shendure_fetal.sample_7_liver.4096'  # Update t
 engine = InferenceEngine(dataset, model_checkpoint)
 engine.setup_data(gene_name, celltype)
 strand = engine.gene_info.query('gene_name==@gene_name').Strand.map({'+':0, '-':1}).values[0]
-variants = generate_variant_in(engine.peak_info.Chromosome.iloc[0], engine.peak_info.Start.min(), engine.peak_info.End.max(), 10000)
-engine_mut = InferenceEngine(dataset, model_checkpoint, mut=variants)
-engine_mut.setup_data(gene_name, celltype)
+# variants 
+
+# engine_mut.setup_data(gene_name, celltype)
 
 #%%
 pred_exps = []
 pred_exps_mut = []
 obs_exps = []
 # Run inference
-for i in tqdm(range(500)):
-    engine.setup_data(gene_name, celltype)
+for i, variants in tqdm(base_edit.iterrows()):
+    engine_mut = InferenceEngine(dataset, model_checkpoint, mut=variants)
     engine_mut.setup_data(gene_name, celltype)
     inference_results, prepared_batch, tss_peak = engine.run_inference_for_gene_and_celltype(offset=0)
     inference_results_mut, prepared_batch_mut, tss_peak_mut = engine_mut.run_inference_for_gene_and_celltype(offset=0)
