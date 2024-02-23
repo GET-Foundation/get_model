@@ -1,7 +1,7 @@
 #!/bin/bash
 # Set the path to save checkpoints
 DATE=`date +%Y%m%d`
-OUTPUT_DIR="/pmglocal/xf2217/${DATE}.conv50.atac_loss.nofreeze.nodepth.use_insulation.gap50.shift50.R100L1000/"
+OUTPUT_DIR="/pmglocal/xf2217/EvalTSS.AllChr.fetal_hsc_gbm.conv50.atac_loss.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.${DATE}/"
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7957
@@ -33,12 +33,11 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --lr 1e-3 \
     --opt adamw \
     --wandb_project_name "get_finetune.st_checkpoint399" \
-    --wandb_run_name "EvalTSS.OODChr4&14.conv50.atac_loss.nofreeze.use_insulation.nodepth.gap50.shift50.R100L1000."${DATE} \
+    --wandb_run_name "EvalTSS.AllChr.fetal_hsc_gbm.conv50.atac_loss.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000."${DATE} \
     --eval_freq 2 \
     --dist_eval \
     --eval_tss \
     --leave_out_celltypes ".*Astrocyte.*" \
-    --leave_out_chromosomes "chr4,chr14" \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 20 \

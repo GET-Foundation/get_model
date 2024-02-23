@@ -13,7 +13,7 @@ from typing import Iterable, Optional
 import numpy as np
 import torch
 import torch.nn as nn
-import get_model.utils
+import get_model.utils as utils
 from metrics import score_pearsonr, score_r2, score_spearmanr
 from timm.data import Mixup
 from timm.utils import ModelEma
