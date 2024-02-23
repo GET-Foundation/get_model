@@ -22,7 +22,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:$PORT ge
     --batch_size 32 \
     --num_workers 32 \
     --use_insulation \
-    --n_peaks_lower_bound 5 \
+    --n_peaks_lower_bound 10 \
     --n_peaks_upper_bound 100 \
     --center_expand_target 1000 \
     --preload_count 200 \
