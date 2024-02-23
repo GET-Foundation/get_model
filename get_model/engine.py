@@ -524,7 +524,7 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         other_labels = other_labels.to(device, non_blocking=True).bfloat16()
         # compute output
         atac_targets = other_labels[:,:,0]
-        loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
+        loss, exp, exp_target, atac, atac_target, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
         , atac_targets, labels_data, other_labels, criterion)
 
         if args.eval_tss:
@@ -541,7 +541,7 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
             preds.append(exp.reshape(-1).detach().cpu().numpy())
             obs.append(exp_target.reshape(-1).detach().cpu().numpy())
         preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
-        obs_atac.append(atac_targets.reshape(-1).detach().cpu().numpy())
+        obs_atac.append(atac_target.reshape(-1).detach().cpu().numpy())
 
         metric_logger.update(loss=loss.item())
 
