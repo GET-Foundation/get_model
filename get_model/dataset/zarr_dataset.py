@@ -3,7 +3,7 @@ import os.path
 import sys
 import warnings
 from posixpath import basename
-
+from caesar.io.zarr_io import DenseZarrIO
 import numpy as np
 import pandas as pd
 import torch
@@ -33,6 +33,47 @@ def get_mask_pos(mask):
     mask_ = mask.clone()
     mask_[mask_==-10000]=0
     return mask_
+
+def get_sequence_with_mutations(arr, start, end, mut):
+    from atac_rna_data_processing.io.sequence import DNASequence
+    arr_wt = arr.copy()
+    mut_df_chr = mut.query('Start>=@start & End <= @end').sort_values('Start')
+    
+    offset = 0  # Track the net offset introduced by mutations
+
+    for _, row in tqdm(mut_df_chr.iterrows()):
+        # Adjust mutation positions by the current offset
+        mut_start = row.Start - start + offset
+        mut_end = row.End - start + offset
+        
+        # Convert reference and alternative alleles to one-hot encoded format
+        wt_on_genome = arr[mut_start:mut_end]
+        wt_in_mut_file = DNASequence(row.Ref).one_hot.astype(float)
+        alt_sequence = DNASequence(row.Alt).one_hot.astype(float)
+        
+        # Ensure the sequence in the genome matches the reference sequence
+        if not np.array_equal(wt_on_genome, wt_in_mut_file):
+            continue
+        
+        # Apply the mutation and calculate the new offset
+        prev_length = mut_end - mut_start
+        new_length = len(alt_sequence)
+        if new_length != prev_length:
+            arr = apply_indel(arr, mut_start, mut_end, alt_sequence)
+            offset += new_length - prev_length
+        else:
+            arr[mut_start:mut_end] = alt_sequence
+        # Update the offset for subsequent mutations
+
+    return arr, arr_wt
+
+def apply_indel(arr, start, end, alt_sequence):
+    """Helper function to apply a mutation to the array."""
+    # Remove the original sequence
+    arr = np.delete(arr, slice(start, end), axis=0)
+    # Insert the new sequence
+    arr = np.insert(arr, start, alt_sequence, axis=0)
+    return arr
 
 class MotifMeanStd(object):
     """A class that reads the mean and std of motif scores from a zarr file.
@@ -351,9 +392,9 @@ class ZarrDataPool(object):
         This method is used by PreloadDataPack to query peaks data.
         """
         df = self.peaks_dict[celltype_id]
-        random_int = 50-np.random.choice(100)
-        df['Start'] = df['Start'] + random_int
-        df['End'] = df['End'] + random_int
+        random_int = np.random.randint(-10, 10, size=df.shape[0])
+        df['Start'] = df['Start'].values + random_int
+        df['End'] = df['End'].values + random_int
         return df.query(
             'Chromosome == @chr_name and Start >= @start and End <= @end')
 
@@ -445,7 +486,7 @@ class ZarrDataPool(object):
         chr_chunk_idx = pos // self.chunk_size
         # determine how many chunks before the current chromosome, chr is string
         current_chr_idx = list(self.chrom_n_chunks.keys()).index(chr)
-        chunk_idx = sum([self.chrom_n_chunks[list(self.chrom_n_chunks.keys())[i]] for i in range(current_chr_idx)]) + chr_chunk_idx
+        chunk_idx = sum([self.chrom_n_chunks[list(self.chrom_n_chunks.keys())[i]]-1 for i in range(current_chr_idx)]) + chr_chunk_idx
         return chunk_idx
                              
 
@@ -582,7 +623,7 @@ class PreloadDataPack(object):
         window_slot = self.preloaded_data_window_indices_mapping[window_index]
         return self._extract_sample_from_window(self.preloaded_data[window_slot], insulation_index)
 
-    def _extract_sample_from_window_without_insulation(self, window, peak_index, peak_start=None, peak_end=None):
+    def _extract_sample_from_window_without_insulation(self, window, peak_index, peak_start=None, peak_end=None, mut=None):
         """
         Extract a single sample from a preloaded window without using insulation data.
 
@@ -596,6 +637,7 @@ class PreloadDataPack(object):
             about the extracted sample, including cell type ID, chromosome name, and positions.
         """
         window_index, chr_name, start, end, celltype_id, track, insulations, celltype_peaks, motif_mean_std = window
+
         if peak_start is None or peak_end is None:
             peak_start = peak_index * self.n_peaks_sample_gap
             peak_end = peak_start + self.n_peaks_upper_bound
@@ -603,10 +645,10 @@ class PreloadDataPack(object):
         track_start = celltype_peaks['Start'].min() - self.padding
         track_end = celltype_peaks['End'].max() + self.padding
         return self._generate_sample(chr_name, start, end, celltype_id, track, celltype_peaks, motif_mean_std,
-                                     track_start, track_end)
+                                     track_start, track_end, mut)
 
     def _generate_sample(self, chr_name, start, end, celltype_id, track, celltype_peaks, motif_mean_std,
-                         track_start, track_end):
+                         track_start, track_end, mut=None):
         """
         Generate a single sample from a window.
         """
@@ -617,15 +659,28 @@ class PreloadDataPack(object):
         else:
             additional_peak_columns_data = None
 
+        sequence = self.zarr_data_pool.sequence.get_track(
+            chr_name, track_start, track_end, sparse=False)
+    
+        if mut is not None:
+            # filter the mutation data with celltype_peaks
+            mut_peak = pr(mut.query('Chromosome==@chr_name')).join(pr(celltype_peaks)).df
+            if mut_peak.shape[0] > 0:
+                sequence_mut, sequence = get_sequence_with_mutations(
+                    sequence, track_start, track_end, mut_peak)
+                sequence = sequence_mut
+
         celltype_peaks = celltype_peaks[[
             'Start', 'End']].to_numpy().astype(np.int64)
 
-        sequence = self.zarr_data_pool.sequence.get_track(
-            chr_name, track_start, track_end, sparse=False)
+
         sample_peak_sequence = self.zarr_data_pool._generate_peak_sequence(
             celltype_peaks, sequence, track_start, track_end)
+        
 
+        # where the track locates in the window
         _start, _end = track_start - start, track_end - start
+        # where the peaks locate in the track
         celltype_peaks = celltype_peaks - track_start
 
         sample_track = track[_start:_end]
@@ -884,8 +939,8 @@ def worker_init_fn_get(worker_id):
 
 class InferenceDataset(PretrainDataset):
     def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, gencode_obj, peak_name='peaks', 
-                 n_peaks_upper_bound=200, sequence_obj=None, additional_peak_columns=None, center_expand_target=1000, max_peak_length=5000, use_insulation=False):
-        super().__init__(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name=peak_name, n_peaks_upper_bound=n_peaks_upper_bound, sequence_obj=sequence_obj, additional_peak_columns=additional_peak_columns, n_packs=1, max_peak_length=max_peak_length,  use_insulation=use_insulation, center_expand_target=center_expand_target)
+                 n_peaks_upper_bound=100, sequence_obj=None, additional_peak_columns=None, center_expand_target=1000, max_peak_length=5000, use_insulation=False):
+        super().__init__(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name=peak_name, n_peaks_upper_bound=n_peaks_upper_bound, sequence_obj=sequence_obj, additional_peak_columns=additional_peak_columns, n_packs=1, max_peak_length=max_peak_length,  use_insulation=use_insulation, center_expand_target=center_expand_target, preload_count=1)
         self.gencode_obj = gencode_obj
         self.tss_chunk_idx = self._generate_tss_chunk_idx()
 
@@ -912,14 +967,14 @@ class InferenceDataset(PretrainDataset):
         """Get window index for a gene and celltype"""
         gene_df = self.tss_chunk_idx.query('gene_name==@gene_name')
         chunk_idxs = gene_df['chunk_idx']
-        start = gene_df['Start']
+        start = gene_df['Start'].values
         return {'gene_name': gene_name,
                 'window_idx': np.unique([self.datapool._get_window_index_from_chunk_idx(data_key, celltype_id, chunk_idx) for chunk_idx in chunk_idxs]), 
                 'Start': start}
     
     def _get_gene_info_from_window_idx(self, window_idx):
-        chr_name, chunk_idx, start, end = self.datapool._get_chromosome_info(window_idx)
-        gene_df = self.tss_chunk_idx.query('chunk_idx==@chunk_idx or chunk_idx==@chunk_idx-1')
+        chunk_idx = window_idx % self.datapool.genome_chunk_length
+        gene_df = self.tss_chunk_idx.query('chunk_idx==@chunk_idx or chunk_idx==@chunk_idx+1')
         return gene_df
     
 

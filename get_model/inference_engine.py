@@ -1,12 +1,14 @@
 # inference_engine.py
-from caesar.io.gencode import Gencode
+import numpy as np
 import torch
-from get_model.dataset.zarr_dataset import InferenceDataset
-from get_model.model.model import GETFinetuneExpATAC
-from get_model.dataset.zarr_dataset import get_padding_pos
+
 from get_model.dataset.collate import get_rev_collate_fn
+from get_model.dataset.zarr_dataset import PreloadDataPack, get_padding_pos
+from get_model.model.model import GETFinetuneExpATAC
+
+
 class ModelWrapper:
-    def __init__(self, checkpoint_path, device='cpu'):
+    def __init__(self, checkpoint_path, device='cuda'):
         self.model = GETFinetuneExpATAC(
             num_regions=100,
             num_res_block=0,
@@ -38,13 +40,13 @@ class ModelWrapper:
         device = self.device
         # Placeholder for inference code
         sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels_data  = batch_data
-        sample_track = sample_track.to(device, non_blocking=True)
-        peak_seq = peak_seq.to(device, non_blocking=True)
-        motif_mean_std = motif_mean_std.to(device, non_blocking=True)
+        sample_track = sample_track.to(device, non_blocking=True).float()
+        peak_seq = peak_seq.to(device, non_blocking=True).float()
+        motif_mean_std = motif_mean_std.to(device, non_blocking=True).float()
         n_peaks = n_peaks.to(device, non_blocking=True)
-        labels_data = labels_data.to(device, non_blocking=True)
-        other_labels_data = other_labels_data.to(device, non_blocking=True)
-
+        labels_data = labels_data.to(device, non_blocking=True).float()
+        other_labels_data = other_labels_data.to(device, non_blocking=True).float()
+        
         # compute output
         loss, atac, exp, exp_target = train_class_batch(self.model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data[:,:,0], labels_data, self.loss, other_labels_data)
 
@@ -63,7 +65,8 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     mask_for_loss = 1-padding_mask
     padding_mask = padding_mask.to(device, non_blocking=True).bool()
     mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
-    atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data)
+    with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
+        atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data)
         
 
     exp = exp * mask_for_loss
@@ -86,12 +89,29 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     return loss, atac, exp, exp_target 
 
 class InferenceEngine:
-    def __init__(self, gencode_config, dataset_config, model_checkpoint):
-        self.gencode = Gencode(**gencode_config)
-        self.dataset = InferenceDataset(**dataset_config, gencode_obj=self.gencode)
+    def __init__(self, dataset, model_checkpoint, mut=None):
+        self.dataset = dataset
         self.model_wrapper = ModelWrapper(model_checkpoint)
-        
-    def run_inference_for_gene_and_celltype(self, gene_name, celltype):
+        self.mut = mut
+
+    def setup_data(self, gene_name, celltype):
+        data_key = self.dataset.datapool.data_keys[0]
+        dataset =  self.dataset
+        window_idx = self.dataset._get_window_idx_for_gene_and_celltype(data_key, celltype, gene_name)['window_idx']
+        self.dataset.preload_data_packs = [PreloadDataPack(
+                     preload_count=dataset.preload_count, zarr_data_pool=dataset.datapool, padding=dataset.padding, mask_ratio=dataset.mask_ratio, n_peaks_lower_bound=dataset.n_peaks_lower_bound, n_peaks_upper_bound=dataset.n_peaks_upper_bound, n_peaks_sample_gap=dataset.n_peaks_sample_gap, use_insulation=dataset.use_insulation, window_index=window_idx)]
+        gene_info = self.dataset._get_gene_info_from_window_idx(window_idx[0]).query('gene_name==@gene_name')
+        peak_info = self.dataset.preload_data_packs[0].preloaded_data[0][7]
+        self.data_key = data_key
+        self.window_idx = window_idx
+        self.gene_info = gene_info
+        self.peak_info = peak_info
+        peak_start, peak_end, tss_peak = self.get_peak_start_end_from_gene_peak(gene_info, peak_info, gene_name)
+        self.peak_start = peak_start
+        self.peak_end = peak_end
+        self.tss_peak = np.unique(tss_peak)
+
+    def run_inference_for_gene_and_celltype(self, offset=0):
         """
         Run inference for a specific gene and cell type.
 
@@ -99,26 +119,12 @@ class InferenceEngine:
         - gene_name (str): The name of the gene.
         - celltype (str): The cell type.
         """
-        # 1. Find the window index for the specified gene and cell type.
-        # This step assumes the dataset has a method to get the window index based on gene name and cell type.
-        data_key = self.dataset.datapool.data_keys[0]  # Assuming the first data key is what we want
-        window_idx = self.dataset._get_window_idx_for_gene_and_celltype(data_key, celltype, gene_name)['window_idx']
-        
-        # 2. Reload data for the specific window index
-        self.dataset.preload_data_packs = [0]  # Prepare the dataset for loading specific data
-        self.dataset.reload_data(0, window_idx)
-
-        # 3. Extract gene and peak information for the specific window
-        gene_info = self.dataset._get_gene_info_from_window_idx(window_idx[0])
-        peak_info = self.dataset.preload_data_packs[0].preloaded_data[0][7]
-        
-        # 4. Determine the peak start and end based on the gene peak
-        peak_start, peak_end, tss_peak = self.get_peak_start_end_from_gene_peak(gene_info, peak_info, gene_name)
 
         # 5. Extract the sample data for inference
         batch = self.dataset.preload_data_packs[0]._extract_sample_from_window_without_insulation(
-            self.dataset.preload_data_packs[0].preloaded_data[0], None, peak_start, peak_end
+            self.dataset.preload_data_packs[0].preloaded_data[0], None, self.peak_start+offset, self.peak_end+offset, mut=self.mut
         )
+        tss_peak = self.tss_peak - offset
 
         # 6. Prepare the batch data for the model (assuming a method exists for this)
         prepared_batch = get_rev_collate_fn([batch])
@@ -128,7 +134,7 @@ class InferenceEngine:
 
         # 8. Handle the inference results as needed
         return inference_results, prepared_batch, tss_peak
-
+    
     def get_peak_start_end_from_gene_peak(self, gene_info, peak_info, gene):
         """
         Determine the peak start and end positions for a specific gene.
@@ -143,11 +149,14 @@ class InferenceEngine:
         """
         # Assuming PyRanges is used for managing genomic ranges
         from pyranges import PyRanges as pr
-        df = pr(peak_info).join(pr(gene_info[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates()), suffix="_gene", how='left').df[['index', 'Chromosome', 'Start', 'End', 'Expression_positive', 'Expression_negative', 'aTPM', 'TSS', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates().sort_values('Start', ascending=True).reset_index(drop=True)
-        idx = df.query('gene_name==@gene').aTPM.idxmax()
+        df = pr(peak_info.copy()).join(pr(gene_info.copy().query('gene_name==@gene')[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates()).extend(300), suffix="_gene", how='left', apply_strand_suffix=False).df[['index', 'Chromosome', 'Start', 'End', 'Expression_positive', 'Expression_negative', 'aTPM', 'TSS', 'gene_name', 'Strand', 'chunk_idx']].reset_index(drop=True)
+        gene_df = df.query('gene_name==@gene')
+        if gene_df.shape[0] == 0:
+            raise ValueError(f"Gene {gene} not found in the peak information.")
+        idx = gene_df.aTPM.idxmax()
         peak_start, peak_end = df.iloc[idx]['index'] - self.dataset.n_peaks_upper_bound // 2, df.iloc[idx]['index'] + self.dataset.n_peaks_upper_bound // 2
         peak_start = max(0, peak_start)
         peak_end = min(peak_end, peak_info['index'].max())
-        tss_peak = df.iloc[idx]['index']
+        tss_peak = gene_df['index'].values
         tss_peak = tss_peak - peak_start
         return peak_start, peak_end, tss_peak
