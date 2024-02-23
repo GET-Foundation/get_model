@@ -721,8 +721,8 @@ class PreloadDataPack(object):
         track_start, track_end = self._insulation_sampler(
             insulations, insulation_index)
         celltype_peaks = celltype_peaks.query('Start>@track_start and End<@track_end')
-        if celltype_peaks.shape[0] < self.n_peaks_lower_bound:
-            logging.info('No enough peaks', stacklevel=2)
+        # if celltype_peaks.shape[0] < self.n_peaks_lower_bound:
+            # logging.info('No enough peaks', stacklevel=2)
         return self._generate_sample(chr_name, start, end, celltype_id, track, celltype_peaks, motif_mean_std,
                                      track_start, track_end)
 

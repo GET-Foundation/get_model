@@ -196,7 +196,6 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     confidence_pred = confidence.mean(1).softmax(dim=-1)
     # cross entropy loss for confidence header
     loss_confidence = nn.CrossEntropyLoss()(confidence_pred, confidence_target)
-    print(loss_confidence)
     indices = torch.where(mask_for_loss==1)
     exp = exp[indices[0], indices[1], :].flatten()
     exp_target = exp_target[indices[0], indices[1], :].flatten()
