@@ -838,7 +838,7 @@ class GETFinetuneExpATACFromSequence(nn.Module):
             pool_method='mean',
         )
         # self.split_pool = SplitPool()
-        self.region_embed = RegionEmbed(num_regions, motif_dim+joint_kernel_num, embed_dim)
+        self.region_embed = RegionEmbed(num_regions, motif_dim, embed_dim)
         self.pos_embed = []
         if "CTCF" in self.pos_emb_components: 
             self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
