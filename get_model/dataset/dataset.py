@@ -44,7 +44,7 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
     use_insulation=args.use_insulation
     leave_out_celltypes=args.leave_out_celltypes
     leave_out_chromosomes=args.leave_out_chromosomes
-    n_peaks_sample_gap=50, 
+    n_peaks_sample_gap=50
     non_redundant=args.non_redundant
     filter_by_min_depth=args.filter_by_min_depth
     dataset_size=40_960
