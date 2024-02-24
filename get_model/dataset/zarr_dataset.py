@@ -849,17 +849,19 @@ class PretrainDataset(Dataset):
         Returns:
         PretrainDataset: A PretrainDataset object.
         """
+        logging.info('Initializing PretrainDataset')
+        # # log all parameters
+        for key, value in locals().items():
+            logging.info(f'{key}: {value}')
         self.preload_count = preload_count
         self.padding = padding
         self.mask_ratio = mask_ratio
-
         self.peak_name = peak_name
         self.insulation_subsample_ratio = insulation_subsample_ratio
         self.n_peaks_lower_bound = n_peaks_lower_bound
         self.n_peaks_upper_bound = n_peaks_upper_bound
         self.n_peaks_sample_gap = n_peaks_sample_gap
         self.use_insulation = use_insulation
-
         self.leave_out_celltypes = leave_out_celltypes
         self.leave_out_chromosomes = leave_out_chromosomes
         self.is_train = is_train
