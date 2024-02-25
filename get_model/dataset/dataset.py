@@ -102,6 +102,23 @@ def dataset_fintune_fetal_all_chr_eval(is_train, args, sequence_obj=None):
         'leave_out_chromosomes': None
         })
 
+def dataset_fintune_fetal_k562_hsc(is_train, args, sequence_obj=None):
+    return build_dataset_zarr_template(
+        "Expression_Finetune_K562_HSC.Chr4&14", is_train, args, sequence_obj=sequence_obj, parameter_override={
+        'zarr_dirs': [f'{args.data_path}/shendure_fetal_dense.zarr', 
+                      f'{args.data_path}/encode_hg38atac_dense.zarr',
+                      f'{args.data_path}/vijay_hematopoiesis_dense.zarr'],
+        'dataset_size': 40_960,
+        })
+
+
+def dataset_fintune_fetal_k562_hsc_eval(is_train, args, sequence_obj=None):
+    return build_dataset_zarr_template(
+        "Expression_Finetune_K562_HSC.Chr4&14.Eval", is_train, args, sequence_obj=sequence_obj, parameter_override={
+        'zarr_dirs': [f'{args.data_path}/shendure_fetal_dense.zarr', 
+                      f'{args.data_path}/encode_hg38atac_dense.zarr'
+                      f'{args.data_path}/vijay_hematopoiesis_dense.zarr'],
+        })
 
 def dataset_htan_gbm(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
