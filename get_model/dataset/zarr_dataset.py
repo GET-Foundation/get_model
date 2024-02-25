@@ -285,9 +285,9 @@ class ZarrDataPool(object):
         data_key, celltype_id = self._get_celltype_info(window_index)
         chr_name, chr_chunk_idx, start, end = self._get_chromosome_info(
             window_index)
-
         chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std = self.load_data(data_key, celltype_id, chr_name, start, end)
-
+        item_insulation['key'] = str(
+            window_index) + '_' + item_insulation['index'].astype(str)
         return window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
 
     def _get_peak_names(self, data_key, celltype_id):
