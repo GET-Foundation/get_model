@@ -500,7 +500,7 @@ class GETFinetune(nn.Module):
         atac = None
 
         exp = F.softplus(self.head_exp(x, atac))
-        return atac, exp
+        return atac, exp, None
 
     def reset_head(self, output_dim):
         self.output_dim = output_dim
@@ -784,7 +784,7 @@ class GETFinetuneATAC(nn.Module):
         atac = F.softplus(self.head_atac(x.permute(0, 2, 1))).permute(0, 2, 1).squeeze(-1)
 
         exp = F.softplus(self.head_exp(x, atac))
-        return atac, exp
+        return atac, exp, None
 
     def reset_head(self, output_dim):
         self.output_dim = output_dim

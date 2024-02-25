@@ -8,21 +8,21 @@ PORT=7957
 export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
-OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
+OMP_NUM_THREADS=1 torchrun --nproc_per_node=1 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
     --data_set "Expression_Finetune_Fetal" \
     --eval_data_set "Expression_Finetune_Fetal.fetal_eval" \
     --data_path ${DATA_PATH} \
-    --finetune "/burg/pmg/users/xf2217/get_data/20240204-pretrain_conv50_depth4096_500_region_200bp-fetal-leaveout-Astrocyte-chr11-atpm-0.1.pth" \
+    --finetune "/burg/pmg/users/xf2217/get_checkpoints/fetal_hsc_gbm.all_chr.best.pth" \
     --input_dim 639 \
     --output_dim 2 \
     --num_motif 637 \
     --eval \
-    --model get_finetune_motif \
+    --model get_finetune_motif_with_atac \
     --batch_size 8 \
     --num_workers 32 \
-    --n_peaks_lower_bound 20 \
-    --n_peaks_upper_bound 400 \
-    --center_expand_target 200 \
+    --n_peaks_lower_bound 10 \
+    --n_peaks_upper_bound 100 \
+    --center_expand_target 1000 \
     --preload_count 200 \
     --pin_mem \
     --peak_name "peaks_q0.01_tissue_open_exp" \
@@ -37,10 +37,9 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 --rdzv-endpoint=localhost:$PORT ge
     --eval \
     --eval_tss \
     --leave_out_celltypes "Astrocyte" \
-    --leave_out_chromosomes "chr11" \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
     --warmup_epochs 20 \
     --epochs 100 \
-    --num_region_per_sample 500 \
+    --num_region_per_sample 100 \
     --output_dir ${OUTPUT_DIR} 

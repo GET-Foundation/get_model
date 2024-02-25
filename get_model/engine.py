@@ -14,7 +14,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import get_model.utils as utils
-from metrics import score_pearsonr, score_r2, score_spearmanr
+from get_model.metrics import score_pearsonr, score_r2, score_spearmanr
 from timm.data import Mixup
 from timm.utils import ModelEma
 from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
@@ -183,19 +183,23 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     B, R, N = exp.shape
     exp = exp * mask_for_loss
     exp_target = exp_target * mask_for_loss
-
-    cosine_similarity = torch.cosine_similarity(exp.reshape(B, -1), exp_target.reshape(B, -1), dim=-1).detach()
-    # use cosine similarity as a target for confidence header, map each element to a bin in (-1,1), 50 bin in total
-    # bin 0 is -1, bin 49 is 1
-    # bin 0-24 is negative, bin 25 is 0, bin 26-49 is positive
-    # get the bin index
-    confidence_target = ((cosine_similarity+1)/2*49).long()
-    # clip the value to 0-49
-    confidence_target = torch.clamp(confidence_target, 0, 49)
-    # confidence is (B, R, 1)
-    confidence_pred = confidence.mean(1).softmax(dim=-1)
-    # cross entropy loss for confidence header
-    loss_confidence = nn.CrossEntropyLoss()(confidence_pred, confidence_target)
+    if confidence is not None:
+        cosine_similarity = torch.cosine_similarity(exp.reshape(B, -1), exp_target.reshape(B, -1), dim=-1).detach()
+        # use cosine similarity as a target for confidence header, map each element to a bin in (-1,1), 50 bin in total
+        # bin 0 is -1, bin 49 is 1
+        # bin 0-24 is negative, bin 25 is 0, bin 26-49 is positive
+        # get the bin index
+        confidence_target = ((cosine_similarity+1)/2*49).long()
+        # clip the value to 0-49
+        confidence_target = torch.clamp(confidence_target, 0, 49)
+        # confidence is (B, R, 1)
+        confidence_pred = confidence.mean(1).softmax(dim=-1)
+        # cross entropy loss for confidence header
+        loss_confidence = nn.CrossEntropyLoss()(confidence_pred, confidence_target)
+    else:
+        confidence_pred = None
+        confidence_target = None
+        loss_confidence = None
     indices = torch.where(mask_for_loss==1)
     exp = exp[indices[0], indices[1], :].flatten()
     exp_target = exp_target[indices[0], indices[1], :].flatten()
