@@ -7,7 +7,6 @@ import seaborn as sns
 from caesar.io.gencode import Gencode
 from caesar.io.zarr_io import DenseZarrIO
 from pyranges import PyRanges as pr
-from sympy import var
 from tqdm import tqdm
 
 from get_model.dataset.zarr_dataset import InferenceDataset
@@ -38,6 +37,8 @@ dataset_config = {
 }
 #%%
 import pyliftover
+
+
 def load_erythroblast_abe_data(csv_path='/burg/pmg/users/xf2217/Editable_A_scores.combined.scores.csv'):
     base_edit = pd.read_csv(csv_path)
     base_edit['Chromosome'] = base_edit['coord'].str.split(':').str[0]
@@ -53,13 +54,24 @@ def load_erythroblast_abe_data(csv_path='/burg/pmg/users/xf2217/Editable_A_score
     base_edit['Alt'] = base_edit['Strand'].map({'+':'G', '-':'C'})
     return base_edit, base_edit[['Chromosome', 'Start', 'End', 'Ref', 'Alt']]
 
+#%%
+def load_k562_crispr_data(csv_path='/burg/pmg/users/xf2217/CRISPR_comparison/resources/example/EPCrisprBenchmark_Fulco2019_K562_GRCh38.tsv.gz'):
+    crispr = pd.read_csv(csv_path, sep='\t')
+    crispr.rename(columns={'chrom':'Chromosome',
+                           'chromStart': 'Start',
+                           'chromEnd': 'End'}, inplace=True)
+    return crispr
+k562_crispr = load_k562_crispr_data()
+#%%
+k562_crispr
+#%%
 base_edit_annot, base_edit = load_erythroblast_abe_data()
 #%%
 gencode = Gencode(**gencode_config)
 dataset = InferenceDataset(**dataset_config, gencode_obj=gencode)
 #%%
 # Path to the model checkpoint
-model_checkpoint = "/burg/home/xf2217/checkpoint-best.pth"
+model_checkpoint = "/burg/pmg/users/xf2217/get_checkpoints/fetal_hsc_gbm.all_chr.best.pth"
 #%%
 hg38 = DenseZarrIO('/pmglocal/xf2217/get_data/hg38.zarr')
 # %%
@@ -85,115 +97,106 @@ def generate_variant_in(chr, start, end, n=1000):
 
 
 # %%
+engine = InferenceEngine(dataset, model_checkpoint, with_sequence=False)
+engine.setup_data('MYC', 'Fetal Erythroblast 2.shendure_fetal.sample_7_liver.4096')
+#%%
+chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std  = engine.data
+batch = engine.dataset.datapool.generate_sample(chr_name, start, end, engine.data_key, celltype_id, track, celltype_peaks, motif_mean_std=motif_mean_std, mut=None, peak_inactivation=None)
+#%%
 # Initialize the InferenceEngine
 # Specify the gene and cell type for inference
-gene_name = "HBG1"
+def run_inference_for_gene_and_celltype(gene_name, celltype, base_edit_annot, dataset, model_checkpoint, with_sequence=False):
+    engine = InferenceEngine(dataset, model_checkpoint, with_sequence=with_sequence)
+    engine.setup_data(gene_name, celltype, window_idx_offset=0)
+    strand = engine.gene_info.query('gene_name==@gene_name').Strand.map({'+':0, '-':1}).values[0]
+    # variants 
+    chromosome = engine.gene_info.query('gene_name==@gene_name').Chromosome.values[0]
+    # engine_mut.setup_data(gene_name, celltype)
+    base_edit_to_test = base_edit_annot.query('Chromosome==@chromosome')
+    engine_mut = InferenceEngine(dataset, model_checkpoint, mut=base_edit_to_test, with_sequence=with_sequence)
+    engine_mut.setup_data(gene_name, celltype, window_idx_offset=0)
+    for i, variants in tqdm(base_edit_to_test.iterrows()):
+        inference_results, prepared_batch, tss_peak = engine.run_inference_for_gene_and_celltype(offset=0)
+        inference_results_mut, prepared_batch_mut, tss_peak_mut = engine_mut.run_inference_for_gene_and_celltype(offset=0, mut=pd.DataFrame(variants).T)
+        pred_exp, ob_exp, pred_atac, ob_atac = inference_results
+        pred_exp = pred_exp.reshape(-1, 2)
+        ob_exp = ob_exp.reshape(-1, 2)
+        pred_exp_mut, ob_exp_mut, pred_atac_mut, ob_atac_mut = inference_results_mut    
+        pred_exp_mut = pred_exp_mut.reshape(-1, 2)
+        ob_exp_mut = ob_exp_mut.reshape(-1, 2)
+        ob_atac = ob_atac.reshape(-1)
+        pred_atac = pred_atac.reshape(-1)
+        pred_atac_mut = pred_atac_mut.reshape(-1)
+
+        base_edit_to_test.loc[i, 'pred_exp'] = pred_exp[tss_peak, strand].mean()
+        base_edit_to_test.loc[i, 'pred_exp_mut'] = pred_exp_mut[tss_peak_mut, strand].mean()
+        base_edit_to_test.loc[i, 'obs_exp'] = ob_exp[tss_peak, strand].max()
+        base_edit_to_test.loc[i, 'ob_atac'] = ob_atac[tss_peak_mut].max()
+        base_edit_to_test.loc[i, 'pred_atac_mut'] = pred_atac_mut[tss_peak_mut].max()
+        base_edit_to_test.loc[i, 'pred_atac'] = pred_atac[tss_peak].max()
+        base_edit_to_test.loc[i, 'exp_fc'] = pred_exp_mut[tss_peak, strand].sum() - pred_exp[tss_peak, strand].sum()
+        base_edit_to_test.loc[i, 'atac_fc'] = (pred_atac_mut-pred_atac).sum() 
+    base_edit_to_test['Gene'] = gene_name
+    return base_edit_to_test
+#%%
 celltype = 'Fetal Erythroblast 2.shendure_fetal.sample_7_liver.4096'  # Update this with your actual cell type
-engine = InferenceEngine(dataset, model_checkpoint)
-engine.setup_data(gene_name, celltype, window_idx_offset=0)
-strand = engine.gene_info.query('gene_name==@gene_name').Strand.map({'+':0, '-':1}).values[0]
-# variants 
-chromosome = engine.gene_info.query('gene_name==@gene_name').Chromosome.values[0]
-# engine_mut.setup_data(gene_name, celltype)
-base_edit_to_test = base_edit_annot.query('Chromosome==@chromosome')
 
-engine_mut = InferenceEngine(dataset, model_checkpoint, mut=base_edit_to_test)
-engine_mut.setup_data(gene_name, celltype, window_idx_offset=0)
-#%%
+for gene in ['MYB', 'HBG1', 'HBG2', 'NFIX', 'KLF1' , 'BCL11A']:
+    base_edit_to_test = run_inference_for_gene_and_celltype(gene, celltype, base_edit_annot, dataset, model_checkpoint)
+    base_edit_to_test.to_csv(f'{gene}.HbFBase_inference_results.with_sequence.csv')
 
-pr(engine.peak_info).join(pr(base_edit_to_test))
-#%%
-# Run inference
-
-for i, variants in tqdm(base_edit_to_test.iterrows()):
-    inference_results, prepared_batch, tss_peak = engine.run_inference_for_gene_and_celltype(offset=0)
-    inference_results_mut, prepared_batch_mut, tss_peak_mut = engine_mut.run_inference_for_gene_and_celltype(offset=0, mut=pd.DataFrame(variants).T)
-    pred_exp, ob_exp, pred_atac, ob_atac = inference_results
-    pred_exp = pred_exp.reshape(-1, 2)
-    ob_exp = ob_exp.reshape(-1, 2)
-    pred_exp_mut, ob_exp_mut, pred_atac_mut, ob_atac_mut = inference_results_mut
-    pred_exp_mut = pred_exp_mut.reshape(-1, 2)
-    ob_exp_mut = ob_exp_mut.reshape(-1, 2)
-    ob_atac = ob_atac.reshape(-1)
-    pred_atac = pred_atac.reshape(-1)
-    pred_atac_mut = pred_atac_mut.reshape(-1)
-
-    base_edit_to_test.loc[i, 'pred_exp'] = pred_exp[tss_peak, strand].mean()
-    base_edit_to_test.loc[i, 'pred_exp_mut'] = pred_exp_mut[tss_peak_mut, strand].mean()
-    base_edit_to_test.loc[i, 'obs_exp'] = ob_exp[tss_peak, strand].max()
-    base_edit_to_test.loc[i, 'ob_atac'] = ob_atac[tss_peak_mut].max()
-    base_edit_to_test.loc[i, 'pred_atac_mut'] = pred_atac_mut[tss_peak_mut].max()
-    base_edit_to_test.loc[i, 'pred_atac'] = pred_atac[tss_peak].max()
-    base_edit_to_test.loc[i, 'exp_fc'] = pred_exp_mut[tss_peak, strand].sum() - pred_exp[tss_peak, strand].sum()
-    base_edit_to_test.loc[i, 'atac_fc'] = pred_atac_mut[tss_peak_mut].sum() - pred_atac[tss_peak].sum()
 # %%
+# Load all inference results
+celltype = 'Fetal Erythroblast 2.shendure_fetal.sample_7_liver.4096'  # Update this with your actual cell type
+
+inference_results = {}
+for gene in  ['MYB', 'HBG1', 'HBG2', 'NFIX', 'KLF1' , 'BCL11A']:
+    df = pd.read_csv(f'{gene}.HbFBase_inference_results.with_sequence.csv')
+    df['exp_fc_abs'] = df['exp_fc'].abs()
+    df['GET'] = df['exp_fc'] * df['atac_fc']
+    inference_results[gene] = df
+inference_results = pd.concat(inference_results.values()) 
+peaks = dataset.datapool.zarr_dict['shendure_fetal_dense.zarr'].get_peaks(celltype, 'peaks_q0.01_tissue_open_exp')
+
+#%%
+data = pr(inference_results.dropna()).join(pr(peaks)).df
 import seaborn as sns
-sns.scatterplot(data=pr(base_edit_to_test.dropna()).join(pr(engine.peak_info)).df,
-                x='HbFBase', y='atac_fc', hue='aTPM')
-# %%
-data = pr(base_edit_to_test.dropna()).join(pr(engine.peak_info)).df.query('aTPM>0.1')
-data['group'] = ['HbFBase>30' if x>10 else 'HbFBase<30' for x in data['HbFBase']]
-# violin plot of group HbFBase>30 and HbFBase<30
-sns.violinplot(data=data, x='group', y='GERP', cut=0, inner='quartile')
 
-# add y=0 line
+sns.scatterplot(data=data,
+                x='HbFBase', y='exp_fc', hue='aTPM')
+# %%
+#barplot of spearman correlation for DeepSEA, CADD, and GERP and exp_fc with HbFBase
+correlations = {}
+for col in ['DeepSEA', 'CADD', 'GERP', 'GET']:
+    correlations[col] = data.eval(f'HbFBase.corr({col}, method="pearson")')
+
+sns.barplot(x=list(correlations.keys()), y=list(correlations.values()))
+
+
+
 #%%
-# plot aupr for exp_fc, DeepSEA, CADD, and GERP against 'group'
-from sklearn.metrics import average_precision_score
-from sklearn.metrics import precision_recall_curve
-from sklearn.metrics import roc_curve
-def plot_aupr(data, ax, title, scores=['DeepSEA', 'CADD', 'GERP'], labels='group', hue=['exp_fc', ]):
-    # calculate the average precision score for DeepSEA, CADD, and GERP, exp_fc
-    for group, df in data.groupby(hue):
-        precision, recall, _ = precision_recall_curve(df[x]>30, df[y])
-        ax.plot(recall, precision, label=group)
-    ax.set_title(title)
+threshold = 30
+data = data#.query('HbFBase>30 or HbFBase<10')
+def plot_aupr(data, gene, score, ax):
+    from sklearn.metrics import auc, precision_recall_curve, roc_curve
+    precision, recall, _ = precision_recall_curve(data['HbFBase']>threshold, data[score])
+    # auroc
+    fp_rate, tp_rate, _ = roc_curve(data['HbFBase']>threshold, data[score])
+    ax.plot(recall, precision, label=f'{score} AUPR: {auc(recall, precision):.2f}')
+    # ax.plot(fp_rate, tp_rate, linestyle='--', label=f'{score} AUROC: {auc(fp_rate, tp_rate):.2f}')
+    # add random line 
     ax.set_xlabel('Recall')
     ax.set_ylabel('Precision')
     ax.legend()
     return ax
 
 import matplotlib.pyplot as plt
-fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-plot_aupr(data, ax, 'exp_fc vs HbFBase', 'HbFBase', 'exp_fc')
 
-
-
-
-
-
-#%%
-
-
-
-
-
-
-
-
-
-
-
-sns.histplot(np.array([s.mean() for s in pred_exps]), bins=50, color='blue', alpha=0.5)
-# sns.histplot(np.array([s.mean() for s in pred_exps_mut]), bins=50, color='red', alpha=0.5)
-sns.histplot(np.array([s.mean() for s in obs_exps]), bins=50, color='black', alpha=0.5)
-# %%
-sns.scatterplot(x=pred_atac_mut, y=pred_atac)
-# %%
-prepared_batch_ = prepared_batch
-# %%
-engine.setup_data(gene_name, celltype)
-inference_results, prepared_batch, tss_peak = engine.run_inference_for_gene_and_celltype(offset=0)
-# %%
-prepared_batch_[2]
-# %%
-prepared_batch[2]
-# %%
-sum(prepared_batch[0]==prepared_batch_[0])
-# %%
-(prepared_batch[1]==prepared_batch_[1])[0].sum(0)
-# %%
-(prepared_batch[3]==prepared_batch_[3])
-# %%
-prepared_batch[3]
+fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+for score in ['DeepSEA', 'CADD', 'GERP', 'atac_fc']:
+    plot_aupr(data, gene, score, ax)    
+random_aupr = (data['HbFBase']>threshold).sum()/len(data)
+ax.plot([0, 1], [(data['HbFBase']>threshold).sum()/len(data)]*2, linestyle='--', color = 'black', label=f'Random AUPR: {random_aupr:.2f}')
+ax.legend()
+plt.tight_layout()
 # %%

@@ -67,6 +67,32 @@ def get_sequence_with_mutations(arr, start, end, mut):
 
     return arr, arr_wt
 
+def _stack_tracks_with_padding_and_inactivation(celltype_peaks, track, padding, inactivated_peak_idx):
+    # Initialize an empty list to hold the arrays.
+    stacked_track_list = []
+    track_shape = track.shape
+    track_dtype = track.dtype
+    if len(track_shape) == 1:
+        track_depth = 1
+    else:
+        track_depth = track_shape[1]
+    # Iterate over the enumerated celltype_peaks to apply padding and handle inactivated peaks.
+    if inactivated_peak_idx is None:
+        inactivated_peak_idx = []
+    for i, (start, end) in enumerate(celltype_peaks):
+        if i not in inactivated_peak_idx:
+            # Apply padding and add the sliced track to the list.
+            padded_track = track[max(0, start-padding):end+padding]
+            stacked_track_list.append(padded_track)
+        else:
+            # Create a zero array of the required shape for inactivated peaks.
+            zero_array = np.zeros((2*padding + max(0, end - start), track_depth), dtype=track_dtype)
+            stacked_track_list.append(zero_array)
+
+    # Vertically stack the arrays.
+    stacked_track = vstack(stacked_track_list)
+    return stacked_track
+    
 def apply_indel(arr, start, end, alt_sequence):
     """Helper function to apply a mutation to the array."""
     # Remove the original sequence
@@ -223,7 +249,27 @@ class ZarrDataPool(object):
             n_chunks - 1 for n_chunks in self.chrom_n_chunks.values())
         self.total_chunk_length = self.genome_chunk_length * self.n_celltypes
 
-    def load_window_data(self, window_index):
+    def load_data(self, data_key, celltype_id, chr_name, start, end):
+        """
+        Load data from zarrdatapool
+        """
+        chr_chunk_idx = start // self.chunk_size
+        celltype_peaks = self._query_peaks(celltype_id, chr_name, start, end)
+        item_insulation = self._query_insulation(chr_name, start, end)
+
+        track = self.zarr_dict[data_key].get_track(
+            celltype_id, chr_name, start, end, sparse=True).T.astype(np.uint16)
+        item_insulation = item_insulation.reset_index(drop=True).reset_index()
+        
+        celltype_peaks = celltype_peaks.reset_index(drop=True).reset_index()
+        if self.motif_mean_std_obj is not None:
+            motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chr_chunk_idx:chr_chunk_idx+2].reshape(
+                2, 2, -1).mean(0)
+
+        return chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
+
+
+    def load_window_data(self, window_index=None):
         """
         Load data for a single window.
 
@@ -237,25 +283,10 @@ class ZarrDataPool(object):
         This method is used by PreloadDataPack to load data for a single window.
         """
         data_key, celltype_id = self._get_celltype_info(window_index)
-        chr_name, chunk_idx, start, end = self._get_chromosome_info(
+        chr_name, chr_chunk_idx, start, end = self._get_chromosome_info(
             window_index)
 
-        celltype_peaks = self._query_peaks(celltype_id, chr_name, start, end)
-        item_insulation = self._query_insulation(chr_name, start, end)
-
-        track = self.zarr_dict[data_key].get_track(
-            celltype_id, chr_name, start, end, sparse=True).T.astype(np.uint16)
-        # sequence = self.sequence.get_track(chr_name, start, end, sparse=False)
-
-        # peak_sequence = self._generate_peak_sequence(
-        # celltype_peaks, sequence, start, end)
-        item_insulation = item_insulation.reset_index(drop=True).reset_index()
-        item_insulation['key'] = str(
-            window_index) + '_' + item_insulation['index'].astype(str)
-        celltype_peaks = celltype_peaks.reset_index(drop=True).reset_index()
-        if self.motif_mean_std_obj is not None:
-            motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chunk_idx:chunk_idx+2].reshape(
-                2, 2, -1).mean(0)
+        chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std = self.load_data(data_key, celltype_id, chr_name, start, end)
 
         return window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
 
@@ -488,6 +519,64 @@ class ZarrDataPool(object):
         current_chr_idx = list(self.chrom_n_chunks.keys()).index(chr)
         chunk_idx = sum([self.chrom_n_chunks[list(self.chrom_n_chunks.keys())[i]]-1 for i in range(current_chr_idx)]) + chr_chunk_idx
         return chunk_idx
+    
+    def generate_sample(self, chr_name, start, end, data_key, celltype_id, track, celltype_peaks, motif_mean_std,
+                         mut=None, peak_inactivation=None, padding=50):
+        """
+        Generate a single sample.
+        """
+        chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std = self.load_data(
+            data_key, celltype_id, chr_name, start, end)
+        track_start = celltype_peaks['Start'].min() - padding
+        track_end = celltype_peaks['End'].max() + padding
+        # peak_inactivation is a dataframe of peaks to inactivate
+        # overlap with celltype_peaks to keep the peaks that are not in peak_inactivation, unless the peak is a TSS
+        if peak_inactivation is not None:
+            inactivated_peak_idx = self._inactivated_peaks(celltype_peaks, peak_inactivation)
+        else:
+            inactivated_peak_idx = None
+
+        if self.additional_peak_columns is not None:
+            # assume numeric columns
+            additional_peak_columns_data = celltype_peaks[self.additional_peak_columns].to_numpy(
+            ).astype(np.float32)
+        else:
+            additional_peak_columns_data = None
+
+        sequence = self.sequence.get_track(
+            chr_name, track_start, track_end, sparse=False)
+    
+        if mut is not None:
+            # filter the mutation data with celltype_peaks
+            mut_peak = pr(mut.query('Chromosome==@chr_name')).join(pr(celltype_peaks)).df
+            if mut_peak.shape[0] > 0:
+                sequence_mut, sequence = get_sequence_with_mutations(
+                    sequence, track_start, track_end, mut_peak)
+                sequence = sequence_mut
+
+        celltype_peaks = celltype_peaks[[
+            'Start', 'End']].to_numpy().astype(np.int64)
+
+
+        sample_peak_sequence = self._generate_peak_sequence(
+            celltype_peaks, sequence, track_start, track_end)
+        
+
+        # where the track locates in the window
+        _start, _end = track_start - start, track_end - start
+        # where the peaks locate in the track
+        celltype_peaks = celltype_peaks - track_start
+
+        sample_track = track[_start:_end]
+
+        sample_peak_sequence = _stack_tracks_with_padding_and_inactivation(celltype_peaks, sample_peak_sequence, padding, inactivated_peak_idx)
+        sample_track = _stack_tracks_with_padding_and_inactivation(celltype_peaks, sample_track, padding, inactivated_peak_idx)
+        sample_metadata = {
+            'celltype_id': celltype_id, 'chr_name': chr_name,
+            'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': 0.5
+        }
+
+        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, motif_mean_std, additional_peak_columns_data
                              
 
 class PreloadDataPack(object):
@@ -647,11 +736,31 @@ class PreloadDataPack(object):
         return self._generate_sample(chr_name, start, end, celltype_id, track, celltype_peaks, motif_mean_std,
                                      track_start, track_end, mut)
 
+    def _inactivated_peaks(self, celltype_peaks, peak_inactivation):
+        """
+        Generate a column label for 
+        inactivated peaks that are in peak_inactivation use pyranges
+        """
+        # double reset_index to get numeric index
+        celltype_peaks_ = pr(celltype_peaks.reset_index(drop=False).reset_index())
+        peak_inactivation_ = pr(peak_inactivation)
+        celltype_peaks_ = celltype_peaks_.join(peak_inactivation_, how='left', suffix='_peak')
+        # get numeric index of the peaks that are in peak_inactivation
+        inactivated_peak_idx = celltype_peaks_.loc[celltype_peaks_['Start_peak'].notna()].index.drop_duplicates()
+        return inactivated_peak_idx
+    
+
+    
     def _generate_sample(self, chr_name, start, end, celltype_id, track, celltype_peaks, motif_mean_std,
-                         track_start, track_end, mut=None):
+                         track_start, track_end, mut=None, peak_inactivation=None):
         """
         Generate a single sample from a window.
         """
+        # peak_inactivation is a dataframe of peaks to inactivate
+        # overlap with celltype_peaks to keep the peaks that are not in peak_inactivation, unless the peak is a TSS
+        if peak_inactivation is not None:
+            inactivated_peak_idx = self._inactivated_peaks(celltype_peaks, peak_inactivation)
+
         if self.additional_peak_columns is not None:
             # assume numeric columns
             additional_peak_columns_data = celltype_peaks[self.additional_peak_columns].to_numpy(
@@ -685,10 +794,8 @@ class PreloadDataPack(object):
 
         sample_track = track[_start:_end]
 
-        sample_peak_sequence = vstack(
-            [sample_peak_sequence[start-self.padding:end+self.padding] for start, end in celltype_peaks])
-        sample_track = vstack(
-            [sample_track[start-self.padding:end+self.padding] for start, end in celltype_peaks])
+        sample_peak_sequence = _stack_tracks_with_padding_and_inactivation(celltype_peaks, sample_peak_sequence, self.padding, inactivated_peak_idx)
+        sample_track = _stack_tracks_with_padding_and_inactivation(celltype_peaks, sample_track, self.padding, inactivated_peak_idx)
         sample_metadata = {
             'celltype_id': celltype_id, 'chr_name': chr_name,
             'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': self.mask_ratio

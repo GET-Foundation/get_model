@@ -7,10 +7,11 @@ from tqdm import tqdm
 import wandb
 import torch.nn as nn
 import matplotlib.pyplot as plt
-
+from get_model.dataset.zarr_dataset import get_padding_pos
+from get_model.engine import train_class_batch
 from get_model.dataset.collate import get_rev_collate_fn
 from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, PreloadDataPack, CelltypeDenseZarrIO, worker_init_fn_get
-from get_model.model.model import GETFinetune, GETFinetuneExpATAC
+from get_model.model.model import GETFinetune, GETFinetuneExpATAC, GETFinetuneExpATACFromSequence
 #%%
 # # %%
 # cdz = CelltypeDenseZarrIO('/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr')
@@ -26,12 +27,12 @@ from get_model.model.model import GETFinetune, GETFinetuneExpATAC
 #     name="finetune-gbm",
 # )
 
-pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/htan_gbm_dense.zarr',
+pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/encode_hg38atac_dense.zarr',
                             ],
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=50, n_peaks_upper_bound=100, leave_out_celltypes=None, leave_out_chromosomes=['chr4','chr14'], is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=4096)
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=10, insulation_subsample_ratio=0.8, n_peaks_upper_bound=100, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=400)
 pretrain.__len__()
 #  #%%
 # dfs = []
@@ -47,9 +48,15 @@ pretrain.__len__()
 # pd.concat(dfs).sort_values('aTPM').query('aTPM>0.1')['sample'].str.split('.').str[2].str.split('_').str[0].unique()
 #%%
 import pandas as pd
-df  = pretrain.datapool.peaks_dict['Tumor.htan_gbm.C3N-01814_CPT0167860015_snATAC_GBM_Tumor.1024']
+df  = pretrain.datapool.peaks_dict['k562.encode_hg38atac.ENCFF128WZG.max']
 df_ = pd.concat([df[['Expression_positive', 'aTPM', 'TSS']].rename({'Expression_positive':'Exp'}, axis=1),df[['Expression_negative', 'aTPM', 'TSS']].rename({'Expression_negative':'Exp'}, axis=1)]).query('TSS==1')
 #%%
+pretrain.datapool.load_data(
+    data_key='encode_hg38atac_dense.zarr', 
+    celltype_id='k562.encode_hg38atac.ENCFF128WZG.max',
+    chr_name='chr8',
+    start=129633446-1000000,
+    end=129633446+1000000)
 # df['Exp'] = df.Expression_positive + df.Expression_negative
 # df_ = df.query('TSS==1')
 #%%
@@ -76,6 +83,8 @@ output_ = output_.groupby('gene_name').mean()
 #%%
 output_.plot(x='aTPM', y='Exp', kind='scatter', s=1)
 #%%
+np.corrcoef(output_.Exp, output_.aTPM/output_.aTPM.mean()*output_.Exp.mean())
+#%%
 r2_score(output_.Exp, output_.aTPM/output_.aTPM.mean()*output_.Exp.mean())
 #%%
 data_loader_train = torch.utils.data.DataLoader(
@@ -90,7 +99,7 @@ data_loader_train = torch.utils.data.DataLoader(
 
 loss_masked = nn.PoissonNLLLoss(log_input=False, reduce='mean')
 #%%
-model = GETFinetuneExpATAC(
+model = GETFinetuneExpATACFromSequence(
         num_regions=100,
         num_res_block=0,
         motif_prior=False,
@@ -102,13 +111,13 @@ model = GETFinetuneExpATAC(
         dropout=0.1,
         output_dim=2,
         pos_emb_components=[],
-        atac_kernel_num = 161,
-        atac_kernel_size = 3,
-        joint_kernel_num = 161,
-        final_bn = False,
+        # atac_kernel_num = 161,
+        # atac_kernel_size = 3,
+        # joint_kernel_num = 161,
+        # final_bn = True,
     )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/20240221.conv50.no_atac_loss.nofreeze.nodepth.R100L1000/checkpoint-99.pth')
+checkpoint = torch.load('/burg/pmg/users/xf2217/get_checkpoints/fetal.from_sequence.allchr.best.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=True)
 
@@ -136,70 +145,53 @@ model.cuda()
 #     ax[i].imshow((weight[i+10,:,:])[np.array(g['ivl']).astype('int')], aspect=0.01)
     
 #%%
-from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
 
-def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, criterion,other_labels_data):
-    device = peak_seq.device
-    padding_mask = get_padding_pos(mask)
-    mask_for_loss = 1-padding_mask
-    padding_mask = padding_mask.to(device, non_blocking=True).bool()
-    mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
-    with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
-        atac, exp = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data)
-        
-
-    exp = exp * mask_for_loss
-    indices = torch.where(mask_for_loss==1)
-    exp = exp[indices[0], indices[1], :].flatten()
-    exp_target = exp_target * mask_for_loss
-    exp_target = exp_target[indices[0], indices[1], :].flatten()
-    loss_exp = criterion(exp, exp_target)
-    
-    if atac is not None:
-        atac = atac * mask_for_loss
-        indices = torch.where(mask_for_loss==1)
-        atac = atac[indices[0], indices[1], :].flatten()
-        atac_target = atac_target.unsqueeze(-1) * mask_for_loss
-        atac_target = atac_target[indices[0], indices[1], :].flatten()
-        loss_atac = criterion(atac, atac_target)
-        loss = loss_exp + loss_atac #+ loss_exp
-    else:
-        loss = loss_exp
-    return loss, atac, exp, exp_target 
-
+#%%
+criterion = nn.PoissonNLLLoss(log_input=False, reduce='mean')
+#%%
 losses = []
 preds = []
 obs = []
 preds_atac = []
 obs_atac = []
+tss_atac = []
+confidence_scores = []
+confidence_target_scores = []
 with torch.amp.autocast('cuda', dtype=torch.bfloat16):
     for i, batch in tqdm(enumerate(data_loader_train)):
-        if i > 100:
+        if i > 200:
             break
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels_data  = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels = batch
         if min(chunk_size)<0:
             continue
-        device  = 'cuda'
+        device = 'cuda'
         sample_track = sample_track.to(device, non_blocking=True).bfloat16()
         peak_seq = peak_seq.to(device, non_blocking=True).bfloat16()
         motif_mean_std = motif_mean_std.to(device, non_blocking=True).bfloat16()
+        # chunk_size = chunk_size.to(device, non_blocking=True)
         n_peaks = n_peaks.to(device, non_blocking=True)
         labels_data = labels_data.to(device, non_blocking=True).bfloat16()
-        other_labels_data = other_labels_data.to(device, non_blocking=True).bfloat16()
-
+        other_labels = other_labels.to(device, non_blocking=True).bfloat16()
         # compute output
-        loss, atac, exp, exp_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data[:,:,0], labels_data, loss_masked,other_labels_data)
+        atac_targets = other_labels[:,:,0]
+        loss, exp, exp_target, atac, atac_target, confidence, confidence_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
+        , atac_targets, labels_data,  other_labels, criterion)
 
-        # other_labels_data is B, R, N where [:,:, 1] is TSS indicator
-        # only append tss preds and obs
-        print(other_labels_data.shape)
-        print(exp.shape)
-        preds.append(exp.reshape(8,100,2)[other_labels_data[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
-        obs.append(exp_target.reshape(8,100,2)[other_labels_data[:,:,1]==1, :].reshape(-1).detach().cpu().numpy())
-        pred_atac = atac.reshape(8,100,1).reshape(-1).detach().cpu().numpy()
-        ob_atac = other_labels_data[:,:,0].float().reshape(8,100,1).reshape(-1).detach().cpu().numpy()
-        preds_atac.append(pred_atac)
-        obs_atac.append(ob_atac)
+        padding_mask = get_padding_pos(mask)
+        mask_for_loss = 1-padding_mask
+        padding_mask = padding_mask.to(device, non_blocking=True).bool()
+        mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
+        indices = torch.where(mask_for_loss==1)
+        # other_labels is B, R, N where [:,:, 1] is TSS indicator
+        other_labels_reshape = other_labels[indices[0], indices[1], 1].flatten()
+        preds.append(exp.reshape(-1, 2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
+        obs.append(exp_target.reshape(-1,2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
+        preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
+        obs_atac.append(atac_target.reshape(-1).detach().cpu().numpy())
+        tss_atac = other_labels[indices[0], indices[1], 0].flatten()
+        confidence_scores.append(confidence.reshape(-1).detach().cpu().numpy())
+        confidence_target_scores.append(confidence_target.reshape(-1).detach().cpu().numpy())
+
         # preds.append(exp.reshape(-1).detach().cpu().numpy())
         # obs.append(exp_target.reshape(-1).detach().cpu().numpy())
 
@@ -207,46 +199,38 @@ with torch.amp.autocast('cuda', dtype=torch.bfloat16):
     obs = np.concatenate(obs, axis=0).reshape(-1)
     preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
     obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
-    # preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
-    # obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
+    confidence_scores = np.concatenate(confidence_scores, axis=0).reshape(-1)
+    confidence_target_scores = np.concatenate(confidence_target_scores, axis=0).reshape(-1)
+#%%
+confidence_scores = confidence_scores.reshape(-1,50).argmax(axis=1)
+confidence_target_scores = confidence_target_scores.reshape(-1)
 # %%
 import seaborn as sns
-# preds_ = preds[obs>0]
-# obs_ = obs[obs>0]
-fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-sns.scatterplot(x=preds, y=obs, s=2, alpha=1, ax=ax)
-# add correlation as text
-# set x lim
-plt.xlim([0, 4])
-# set y lim
-plt.ylim([0, 4])
-
-from scipy.stats import spearmanr, pearsonr
-# r2_score(preds, obs)
+from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import r2_score
 
-corr = pearsonr(preds, obs)[0]
-r2 = r2_score(preds, obs)
-ax.text(0.5, 0.5, f'Pearson r={corr:.2f}\nR2={r2:.2f}', ha='center', va='center', transform=ax.transAxes)
+def plot_scatter_with_limits(preds, obs, hue, xlim=None, ylim=None, figsize=(5, 5), title=None):
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    sns.scatterplot(x=preds, y=obs, ax=ax, s=3, alpha=0.3, hue=hue)
+    
+    if xlim is not None:
+        plt.xlim(xlim)
+    if ylim is not None:
+        plt.ylim(ylim)
+
+    corr = pearsonr(preds, obs)[0]
+    r2 = r2_score(obs, preds)
+    ax.text(0.2, 0.8, f'Pearson r={corr:.2f}\nR2={r2:.2f}', ha='center', va='center', transform=ax.transAxes)
+    ax.set_xlabel('Predicted')
+    ax.set_ylabel('Observed')
+    if title is not None:
+        ax.set_title(title)
+    return fig, ax
+
+#%%
+plot_scatter_with_limits(preds, obs, None, xlim=(0, 4), ylim=(0, 4), title='Expression')
+#%%
+plot_scatter_with_limits(preds_atac, obs_atac, None, xlim=(0, 1), ylim=(0, 1), title='ATAC')
 # %%
-# save the plot
-import seaborn as sns
-# preds_ = preds[obs>0]
-# obs_ = obs[obs>0]
-import matplotlib.pyplot as plt
-fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-sns.scatterplot(x=preds_atac, y=obs_atac, s=5, alpha=1, ax=ax)
-# add correlation as text
-# set x lim
-# plt.xlim([0, 1])
-# set y lim
-# plt.ylim([0, 1])
-
-from scipy.stats import spearmanr, pearsonr
-# r2_score(preds, obs)
-from sklearn.metrics import r2_score
-
-corr = pearsonr(preds_atac, obs_atac)[0]
-r2 = r2_score(preds_atac, obs_atac)
-ax.text(0.5, 0.5, f'Pearson r={corr:.2f}\nR2={r2:.2f}', ha='center', va='center', transform=ax.transAxes)
+plot_scatter_with_limits(confidence_scores, confidence_target_scores, None, xlim=(0, 50), ylim=(0, 50), title='Confidence')
 # %%
