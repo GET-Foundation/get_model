@@ -51,7 +51,14 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
     # override parameters above from parameter_override
     if parameter_override is not None:
         for k, v in parameter_override.items():
-            exec(f'{k} = {v}')
+            if k == 'zarr_dirs':
+                zarr_dirs = v
+            elif k == 'genome_seq_zarr':
+                genome_seq_zarr = v
+            elif k == 'genome_motif_zarr':
+                genome_motif_zarr = v
+            else:
+                exec(f'{k} = {v}')
     dataset = ZarrPretrainDataset(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths,
         peak_name=peak_name, preload_count=preload_count, insulation_subsample_ratio=insulation_subsample_ratio, n_packs=n_packs, max_peak_length=max_peak_length, center_expand_target=center_expand_target, 
         padding=padding, mask_ratio=mask_ratio, 
