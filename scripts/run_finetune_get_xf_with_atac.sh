@@ -13,7 +13,7 @@ export NCCL_P2P_LEVEL=NVL
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=6 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
     --data_set "Expression_Finetune_K562_HSC.Chr4&14" \
     --eval_data_set "Expression_Finetune_K562_HSC.Chr4&14.Eval" \
-    --finetune "EvalTSS.AllChr.fetal_hsc_gbm.conv50.atac_loss.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.from_sequence.20240224.best.pth" \
+    --finetune "/burg/pmg/users/xf2217/get_checkpoints/EvalTSS.AllChr.fetal_hsc_gbm.conv50.atac_loss.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.from_sequence.20240224.best.pth" \
     --data_path ${DATA_PATH} \
     --input_dim 639 \
     --output_dim 2 \
