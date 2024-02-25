@@ -168,6 +168,11 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         dataset = dataset_fintune_fetal_all_chr(is_train, args, sequence_obj)
     elif not is_train and args.eval_data_set == "Expression_Finetune_Fetal.All_Chr.eval":
         dataset = dataset_fintune_fetal_all_chr_eval(is_train, args, sequence_obj)
+    elif is_train and args.data_set == "Expression_Finetune_K562_HSC.Chr4&14":
+        dataset = dataset_fintune_fetal_k562_hsc(is_train, args, sequence_obj)
+    elif not is_train and args.eval_data_set == "Expression_Finetune_K562_HSC.Chr4&14.Eval":
+        dataset = dataset_fintune_fetal_k562_hsc_eval(is_train, args, sequence_obj)
+        
     else:
         raise NotImplementedError()
 
