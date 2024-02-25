@@ -760,7 +760,8 @@ class PreloadDataPack(object):
         # overlap with celltype_peaks to keep the peaks that are not in peak_inactivation, unless the peak is a TSS
         if peak_inactivation is not None:
             inactivated_peak_idx = self._inactivated_peaks(celltype_peaks, peak_inactivation)
-
+        else:
+            inactivated_peak_idx = None
         if self.additional_peak_columns is not None:
             # assume numeric columns
             additional_peak_columns_data = celltype_peaks[self.additional_peak_columns].to_numpy(
