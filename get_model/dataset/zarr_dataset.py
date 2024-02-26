@@ -774,7 +774,7 @@ class PreloadDataPack(object):
         inactivated peaks that are in peak_inactivation use pyranges
         """
         # double reset_index to get numeric index
-        celltype_peaks_ = pr(celltype_peaks.reset_index(drop=False).reset_index())
+        celltype_peaks_ = pr(celltype_peaks.reset_index(drop=True).reset_index())
         peak_inactivation_ = pr(peak_inactivation)
         celltype_peaks_ = celltype_peaks_.join(peak_inactivation_, how='left', suffix='_peak')
         # get numeric index of the peaks that are in peak_inactivation
