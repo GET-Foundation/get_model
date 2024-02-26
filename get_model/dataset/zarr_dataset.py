@@ -450,7 +450,7 @@ class ZarrDataPool(object):
             # invert the peaks with a probability of `inverted`
             boundary = pd.DataFrame({'Chromosome': [chr_name], 'Start': [start], 'End': [end]})
             n_peaks = df.shape[0]
-            df = pr(boundary).subtract(pr(df)).tile(self.center_expand_target).sample(n_peaks)
+            df = pr(boundary).subtract(pr(df)).tile(self.center_expand_target).sample(n_peaks).df
             for col in self.additional_peak_columns:
                 df[col] = 0
         return df
