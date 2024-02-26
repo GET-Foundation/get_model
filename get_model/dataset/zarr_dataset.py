@@ -790,7 +790,7 @@ class PreloadDataPack(object):
         """
         # peak_inactivation is a dataframe of peaks to inactivate
         # overlap with celltype_peaks to keep the peaks that are not in peak_inactivation, unless the peak is a TSS
-        if self.peak_inactivation is not None:
+        if self.peak_inactivation is not None and self.peak_inactivation != 'random_tss':
             inactivated_peak_idx = self._inactivated_peaks(celltype_peaks, self.peak_inactivation)
         elif self.peak_inactivation == 'random_tss':
             inactivated_peak_idx = celltype_peaks.query('TSS==1').sample(frac=0.1)['index'].values
