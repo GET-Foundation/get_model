@@ -149,7 +149,7 @@ class ZarrDataPool(object):
 
     def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', insulation_subsample_ratio=0.1,
                  max_peak_length=None, center_expand_target=None, sequence_obj=None, motif_mean_std_obj=None,
-                 additional_peak_columns=None, leave_out_celltypes=None, leave_out_chromosomes=None, non_redundant='max_depth', 
+                 additional_peak_columns=None, leave_out_celltypes=None, leave_out_chromosomes=None, non_redundant='max_depth', invert_peak=False, random_shift_peak=True,
                  filter_by_min_depth=None, is_train=True):
         # logging.info('Initializing ZarrDataPool')
         if sequence_obj is None:
@@ -169,6 +169,8 @@ class ZarrDataPool(object):
         self.leave_out_chromosomes = leave_out_chromosomes
         self.additional_peak_columns = additional_peak_columns
         self.is_train = is_train
+        self.invert_peak = invert_peak
+        self.random_shift_peak = random_shift_peak
         self.non_redundant = non_redundant
         self.filter_by_min_depth = filter_by_min_depth
         self.initialize_datasets()
@@ -254,7 +256,7 @@ class ZarrDataPool(object):
         Load data from zarrdatapool
         """
         chr_chunk_idx = start // self.chunk_size
-        celltype_peaks = self._query_peaks(celltype_id, chr_name, start, end)
+        celltype_peaks = self._query_peaks(celltype_id, chr_name, start, end, self.invert_peak, self.random_shift_peak)
         item_insulation = self._query_insulation(chr_name, start, end)
 
         track = self.zarr_dict[data_key].get_track(
@@ -290,6 +292,19 @@ class ZarrDataPool(object):
             window_index) + '_' + item_insulation['index'].astype(str)
         return window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
 
+    def _inactivated_peaks(self, celltype_peaks, peak_inactivation):
+        """
+        Generate a column label for 
+        inactivated peaks that are in peak_inactivation use pyranges
+        """
+        # double reset_index to get numeric index
+        celltype_peaks_ = pr(celltype_peaks.reset_index(drop=True).reset_index())
+        peak_inactivation_ = pr(peak_inactivation)
+        celltype_peaks_ = celltype_peaks_.join(peak_inactivation_, how='left', suffix='_peak').df
+        # get numeric index of the peaks that are in peak_inactivation
+        inactivated_peak_idx = celltype_peaks_.loc[celltype_peaks_['Start_peak']!=-1]['index'].drop_duplicates().values
+        return inactivated_peak_idx
+    
     def _get_peak_names(self, data_key, celltype_id):
         """
         Return a list of peak names for a celltype, use glob peaks*
@@ -406,7 +421,7 @@ class ZarrDataPool(object):
             peak_sequence[start-window_start:end-window_start] = 1
         return csr_matrix(peak_sequence*sequence)
 
-    def _query_peaks(self, celltype_id, chr_name, start, end):
+    def _query_peaks(self, celltype_id, chr_name, start, end, invert=None, random_shift=False):
         """
         Query peaks data for a celltype and a window.
 
@@ -423,11 +438,22 @@ class ZarrDataPool(object):
         This method is used by PreloadDataPack to query peaks data.
         """
         df = self.peaks_dict[celltype_id]
-        random_int = np.random.randint(-10, 10, size=df.shape[0])
+        if random_shift:
+            random_int = np.random.randint(-10, 10, size=df.shape[0])
+        else:
+            random_int = 0
         df['Start'] = df['Start'].values + random_int
         df['End'] = df['End'].values + random_int
-        return df.query(
+        df = df.query(
             'Chromosome == @chr_name and Start >= @start and End <= @end')
+        if invert is not None and isinstance(invert, float) and np.random.rand() < invert:
+            # invert the peaks with a probability of `inverted`
+            boundary = pr(pd.DataFrame({'Chromosome': [chr_name], 'Start': [start], 'End': [end]}))
+            n_peaks = df.shape[0]
+            df = pr(boundary).subtract(pr(df)).tile(self.center_expand_target).sample(n_peaks)
+            for col in self.additional_peak_columns:
+                df[col] = 0
+        return df
 
     def _query_insulation(self, chr_name, start, end):
         """
@@ -530,7 +556,7 @@ class ZarrDataPool(object):
         track_start = celltype_peaks['Start'].min() - padding
         track_end = celltype_peaks['End'].max() + padding
         # peak_inactivation is a dataframe of peaks to inactivate
-        # overlap with celltype_peaks to keep the peaks that are not in peak_inactivation, unless the peak is a TSS
+        # overlap with celltype_peaks to keep the peaks that are not in peak_inactivation
         if peak_inactivation is not None:
             inactivated_peak_idx = self._inactivated_peaks(celltype_peaks, peak_inactivation)
         else:
@@ -571,6 +597,10 @@ class ZarrDataPool(object):
 
         sample_peak_sequence = _stack_tracks_with_padding_and_inactivation(celltype_peaks, sample_peak_sequence, padding, inactivated_peak_idx)
         sample_track = _stack_tracks_with_padding_and_inactivation(celltype_peaks, sample_track, padding, inactivated_peak_idx)
+        # remove atac and expression from inactivated peak
+        if inactivated_peak_idx is not None:
+            additional_peak_columns_data[inactivated_peak_idx, 0:3] = 0 # keep the TSS column but set aTPM and expression to 0
+        
         sample_metadata = {
             'celltype_id': celltype_id, 'chr_name': chr_name,
             'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': 0.5
@@ -601,7 +631,7 @@ class PreloadDataPack(object):
     """
 
     def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, padding=50, mask_ratio=0.5,
-            n_peaks_lower_bound=5, n_peaks_upper_bound=200, n_peaks_sample_gap=50, use_insulation=True, window_index=None):
+            n_peaks_lower_bound=5, n_peaks_upper_bound=200, n_peaks_sample_gap=50, use_insulation=True, window_index=None, peak_inactivation=None, mut=None):
         # logging.info('Initializing PreloadDataPack')
         self.preload_count = preload_count
         self.zarr_data_pool = zarr_data_pool
@@ -610,6 +640,8 @@ class PreloadDataPack(object):
         self.preloaded_data_window_indices_mapping = {}
         self.next_sample = 0
         self.padding = padding
+        self.peak_inactivation = peak_inactivation
+        self.mut = mut
         self.mask_ratio = mask_ratio
         self.n_peaks_lower_bound = n_peaks_lower_bound
         self.n_peaks_upper_bound = n_peaks_upper_bound
@@ -666,7 +698,7 @@ class PreloadDataPack(object):
         self._calculate_window_peak_counts()
         if self.insulation_peak_counts.shape[0] == 0 and self.use_insulation:
             logging.info('No valid insulation peak count')
-            return PreloadDataPack(self.preload_count, self.zarr_data_pool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound)
+            return PreloadDataPack(self.preload_count, self.zarr_data_pool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound, self.n_peaks_sample_gap, self.use_insulation, window_index, self.peak_inactivation, self.mut)
 
     def get_sample_with_idx(self, idx):
         """
@@ -746,20 +778,22 @@ class PreloadDataPack(object):
         peak_inactivation_ = pr(peak_inactivation)
         celltype_peaks_ = celltype_peaks_.join(peak_inactivation_, how='left', suffix='_peak')
         # get numeric index of the peaks that are in peak_inactivation
-        inactivated_peak_idx = celltype_peaks_.loc[celltype_peaks_['Start_peak'].notna()].index.drop_duplicates()
+        inactivated_peak_idx = celltype_peaks_.loc[celltype_peaks_['Start_peak']!=-1]['index'].drop_duplicates()
         return inactivated_peak_idx
     
 
     
     def _generate_sample(self, chr_name, start, end, celltype_id, track, celltype_peaks, motif_mean_std,
-                         track_start, track_end, mut=None, peak_inactivation=None):
+                         track_start, track_end, mut=None):
         """
         Generate a single sample from a window.
         """
         # peak_inactivation is a dataframe of peaks to inactivate
         # overlap with celltype_peaks to keep the peaks that are not in peak_inactivation, unless the peak is a TSS
-        if peak_inactivation is not None:
-            inactivated_peak_idx = self._inactivated_peaks(celltype_peaks, peak_inactivation)
+        if self.peak_inactivation is not None:
+            inactivated_peak_idx = self._inactivated_peaks(celltype_peaks, self.peak_inactivation)
+        elif self.peak_inactivation == 'random_tss':
+            inactivated_peak_idx = celltype_peaks.query('TSS==1').sample(frac=0.1)['index'].values
         else:
             inactivated_peak_idx = None
         if self.additional_peak_columns is not None:
@@ -797,6 +831,10 @@ class PreloadDataPack(object):
 
         sample_peak_sequence = _stack_tracks_with_padding_and_inactivation(celltype_peaks, sample_peak_sequence, self.padding, inactivated_peak_idx)
         sample_track = _stack_tracks_with_padding_and_inactivation(celltype_peaks, sample_track, self.padding, inactivated_peak_idx)
+        # remove atac and expression from inactivated peak
+        if inactivated_peak_idx is not None:
+            additional_peak_columns_data[inactivated_peak_idx, 0:3] = 0 # keep the TSS column but set aTPM and expression to 0
+        
         sample_metadata = {
             'celltype_id': celltype_id, 'chr_name': chr_name,
             'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': self.mask_ratio
@@ -921,7 +959,7 @@ class PreloadDataPack(object):
 
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, use_insulation=True, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None, n_peaks_sample_gap=50, is_train=True, non_redundant=False, filter_by_min_depth=False, dataset_size=655_360):
+    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, use_insulation=True, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None, n_peaks_sample_gap=50, is_train=True, non_redundant=False, filter_by_min_depth=False, dataset_size=655_360, peak_inactivation=None, mut=None, invert_peak=None, random_shift_peak=True):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -969,6 +1007,8 @@ class PretrainDataset(Dataset):
         self.n_peaks_lower_bound = n_peaks_lower_bound
         self.n_peaks_upper_bound = n_peaks_upper_bound
         self.n_peaks_sample_gap = n_peaks_sample_gap
+        self.invert_peak = invert_peak
+        self.random_shift_peak = random_shift_peak
         self.use_insulation = use_insulation
         self.leave_out_celltypes = leave_out_celltypes
         self.leave_out_chromosomes = leave_out_chromosomes
@@ -978,6 +1018,8 @@ class PretrainDataset(Dataset):
         self.dataset_size = dataset_size
         self.n_packs = n_packs
         self.additional_peak_columns = additional_peak_columns
+        self.peak_inactivation = peak_inactivation
+        self.mut = mut
         if sequence_obj is None:
             self.sequence = DenseZarrIO(
                 genome_seq_zarr, dtype='int8', mode='r')
@@ -991,7 +1033,8 @@ class PretrainDataset(Dataset):
                                      additional_peak_columns=self.additional_peak_columns,
                                      leave_out_celltypes=self.leave_out_celltypes,
                                      leave_out_chromosomes=self.leave_out_chromosomes,
-                                     is_train=self.is_train, non_redundant=self.non_redundant, filter_by_min_depth=self.filter_by_min_depth)
+                                     is_train=self.is_train, non_redundant=self.non_redundant, filter_by_min_depth=self.filter_by_min_depth,
+                                     invert_peak=self.invert_peak, random_shift_peak=self.random_shift_peak)
 
         # initialize n_packs preload data packs
         self.preload_data_packs = None
@@ -1031,7 +1074,7 @@ class PretrainDataset(Dataset):
         # logging.info(f'Async reloading data for slot {index}')
         # reload by reinitializing the preload data pack and put it back to the preload_data_packs
         self.preload_data_packs[slot] = PreloadDataPack(
-            preload_count=self.preload_count, zarr_data_pool=self.datapool, padding=self.padding, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation, window_index=window_index)
+            preload_count=self.preload_count, zarr_data_pool=self.datapool, padding=self.padding, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation, window_index=window_index, peak_inactivation=self.peak_inactivation, mut=self.mut)
         # self.preload_data_packs[slot].preload_data()
         # add the index back to avaliable packs
         self.avaliable_packs.append(slot)
@@ -1045,23 +1088,28 @@ def worker_init_fn_get(worker_id):
     dataset = worker_info.dataset
     if dataset.preload_data_packs is None:
         dataset.preload_data_packs = [PreloadDataPack(
-                     preload_count=dataset.preload_count, zarr_data_pool=dataset.datapool, padding=dataset.padding, mask_ratio=dataset.mask_ratio, n_peaks_lower_bound=dataset.n_peaks_lower_bound, n_peaks_upper_bound=dataset.n_peaks_upper_bound, n_peaks_sample_gap=dataset.n_peaks_sample_gap, use_insulation=dataset.use_insulation) for _ in range(dataset.n_packs)]
+                     preload_count=dataset.preload_count, zarr_data_pool=dataset.datapool, padding=dataset.padding, mask_ratio=dataset.mask_ratio, n_peaks_lower_bound=dataset.n_peaks_lower_bound, n_peaks_upper_bound=dataset.n_peaks_upper_bound, n_peaks_sample_gap=dataset.n_peaks_sample_gap, use_insulation=dataset.use_insulation, peak_inactivation=dataset.peak_inactivation, mut=dataset.mut) for _ in range(dataset.n_packs)]
 
 class InferenceDataset(PretrainDataset):
     def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, gencode_obj, peak_name='peaks', 
                  n_peaks_upper_bound=100, sequence_obj=None, additional_peak_columns=None, center_expand_target=1000, max_peak_length=5000, use_insulation=False):
-        super().__init__(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name=peak_name, n_peaks_upper_bound=n_peaks_upper_bound, sequence_obj=sequence_obj, additional_peak_columns=additional_peak_columns, n_packs=1, max_peak_length=max_peak_length,  use_insulation=use_insulation, center_expand_target=center_expand_target, preload_count=1)
+        super().__init__(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name=peak_name, n_peaks_upper_bound=n_peaks_upper_bound, sequence_obj=sequence_obj, additional_peak_columns=additional_peak_columns, n_packs=1, max_peak_length=max_peak_length,  use_insulation=use_insulation, center_expand_target=center_expand_target, preload_count=1, insulation_subsample_ratio=1)
         self.gencode_obj = gencode_obj
         self.tss_chunk_idx = self._generate_tss_chunk_idx()
 
     def _generate_tss_chunk_idx(self):
         """Determine the windows to extract for each gene"""
+        if os.path.exists(self.gencode_obj.feather_file.replace('.feather', '_tss_chunk_idx.feather')):
+            self.tss_chunk_idx = pd.read_feather(self.gencode_obj.feather_file.replace('.feather', '_tss_chunk_idx.feather'))
+            return self.tss_chunk_idx
         self.tss_chunk_idx = self.gencode_obj.gtf.copy()
         for i, row in tqdm(self.gencode_obj.gtf.iterrows()):
             # get window_index for each gene
             gene_chr = row.Chromosome
             gene_start = row.Start
             self.tss_chunk_idx.loc[i, 'chunk_idx'] = self.datapool._get_chunk_idx(gene_chr, gene_start)
+        # save the tss_chunk_idx as feather in the same directory as the gencode file
+        self.tss_chunk_idx.to_feather(self.gencode_obj.feather_file.replace('.feather', '_tss_chunk_idx.feather'))
         return self.tss_chunk_idx
     
     def _get_window_idx_for_tss_and_celltype(self, data_key, celltype_id, tss_idx):
