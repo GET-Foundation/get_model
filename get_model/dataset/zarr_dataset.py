@@ -451,9 +451,11 @@ class ZarrDataPool(object):
             'Chromosome == @chr_name and Start >= @start and End <= @end')
         if invert is not None and isinstance(invert, float) and np.random.rand() < invert:
             # invert the peaks with a probability of `inverted`
-            boundary = pd.DataFrame({'Chromosome': [chr_name], 'Start': [df.Start.min()+1000], 'End': [df.End.max()-1000]})
+            boundary = pd.DataFrame({'Chromosome': [chr_name], 'Start': [start], 'End': [end]})
             n_peaks = df.shape[0]
             df = pr(boundary).subtract(pr(df)).tile(self.center_expand_target).sample(n_peaks).df
+            df = df.query(
+            'Chromosome == @chr_name and Start >= @start and End <= @end')
             for col in self.additional_peak_columns:
                 df[col] = 0
         return df
