@@ -429,7 +429,7 @@ def get_args():
     parser.add_argument("--plot_scatter", action="store_true", default=False)
     parser.add_argument("--use_natac", action="store_true", default=False)
     parser.add_argument("--mask_tss", action="store_true", default=False)
-    parser.add_argument("--leave_out_celltypes", default="Astrocytes", type=str)
+    parser.add_argument("--leave_out_celltypes", default=None, type=str)
     parser.add_argument("--leave_out_chromosomes", default=None, type=str)
     parser.add_argument("--use_seq", default=False, action="store_true")
     parser.add_argument("--sampling_step", default=100, type=int)
