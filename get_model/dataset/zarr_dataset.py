@@ -793,7 +793,7 @@ class PreloadDataPack(object):
         if self.peak_inactivation is not None and self.peak_inactivation != 'random_tss':
             inactivated_peak_idx = self._inactivated_peaks(celltype_peaks, self.peak_inactivation)
         elif self.peak_inactivation == 'random_tss':
-            inactivated_peak_idx = celltype_peaks.reset_index(drop=True).reset_index().query('TSS==1').sample(frac=0.1)index.values
+            inactivated_peak_idx = celltype_peaks.reset_index(drop=True).reset_index().query('TSS==1').sample(frac=0.1).index.values
         else:
             inactivated_peak_idx = None
         if self.additional_peak_columns is not None:
