@@ -84,14 +84,12 @@ def _stack_tracks_with_padding_and_inactivation(celltype_peaks, track, padding, 
             # Apply padding and add the sliced track to the list.
             padded_track = track[max(0, start-padding):end+padding]
             # check if the padded track is empty
-            if len(padded_track.shape) != 2:
-                padded_track = np.zeros((2*padding + max(0, end - start), track_depth), dtype=track_dtype)
-                padded_track = csr_matrix(padded_track)
+            if padded_track.size == 0 or padded_track.shape[0] <= 1:
+                padded_track = csr_matrix((end-start+2*padding, track_depth), dtype=track_dtype)
             stacked_track_list.append(padded_track)
         else:
             # Create a zero array of the required shape for inactivated peaks.
-            zero_array = np.zeros((2*padding + max(0, end - start), track_depth), dtype=track_dtype)
-            zero_array = csr_matrix(zero_array)
+            zero_array = csr_matrix((end-start+2*padding, track_depth), dtype=track_dtype)
             stacked_track_list.append(zero_array)
 
     # Vertically stack the arrays.
@@ -453,7 +451,7 @@ class ZarrDataPool(object):
             'Chromosome == @chr_name and Start >= @start and End <= @end')
         if invert is not None and isinstance(invert, float) and np.random.rand() < invert:
             # invert the peaks with a probability of `inverted`
-            boundary = pd.DataFrame({'Chromosome': [chr_name], 'Start': [start], 'End': [end]})
+            boundary = pd.DataFrame({'Chromosome': [chr_name], 'Start': [df.Start.min()+1000], 'End': [df.End.max()-1000]})
             n_peaks = df.shape[0]
             df = pr(boundary).subtract(pr(df)).tile(self.center_expand_target).sample(n_peaks).df
             for col in self.additional_peak_columns:
