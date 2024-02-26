@@ -83,10 +83,15 @@ def _stack_tracks_with_padding_and_inactivation(celltype_peaks, track, padding, 
         if i not in inactivated_peak_idx:
             # Apply padding and add the sliced track to the list.
             padded_track = track[max(0, start-padding):end+padding]
+            # check if the padded track is empty
+            if len(padded_track.shape) != 2:
+                padded_track = np.zeros((2*padding + max(0, end - start), track_depth), dtype=track_dtype)
+                padded_track = csr_matrix(padded_track)
             stacked_track_list.append(padded_track)
         else:
             # Create a zero array of the required shape for inactivated peaks.
             zero_array = np.zeros((2*padding + max(0, end - start), track_depth), dtype=track_dtype)
+            zero_array = csr_matrix(zero_array)
             stacked_track_list.append(zero_array)
 
     # Vertically stack the arrays.
