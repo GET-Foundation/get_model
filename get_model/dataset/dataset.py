@@ -42,6 +42,8 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
     n_peaks_lower_bound=args.n_peaks_lower_bound
     n_peaks_upper_bound=args.n_peaks_upper_bound
     use_insulation=args.use_insulation
+    random_shift_peak=args.random_shift_peak
+    invert_peak=args.invert_peak
     leave_out_celltypes=args.leave_out_celltypes
     leave_out_chromosomes=args.leave_out_chromosomes
     n_peaks_sample_gap=50
@@ -64,6 +66,7 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
         padding=padding, mask_ratio=mask_ratio, 
         n_peaks_lower_bound=n_peaks_lower_bound, n_peaks_upper_bound=n_peaks_upper_bound, additional_peak_columns=additional_peak_columns, 
         n_peaks_sample_gap=n_peaks_sample_gap, non_redundant=non_redundant, filter_by_min_depth=filter_by_min_depth,
+        random_shift_peak=random_shift_peak, invert_peak=invert_peak,
         use_insulation=use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=leave_out_celltypes,
         leave_out_chromosomes=leave_out_chromosomes, is_train=is_train, dataset_size=dataset_size)
     return dataset

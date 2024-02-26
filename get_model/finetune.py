@@ -135,6 +135,18 @@ def get_args():
         help="Filter out samples that do not meet minimum depth threshold"
     )
     parser.add_argument(
+        "--invert_peak",
+        default=None,
+        choices=[0.1, None],
+        help="Probability to generate background peaks as null samples"
+    )
+    parser.add_argument(
+        "--random_shift_peak",
+        action="store_true",
+        default=False,
+        help="Random shift peak boundary",
+    )
+    parser.add_argument(
         "--freeze_atac_attention",
         action="store_true",
         default=False,

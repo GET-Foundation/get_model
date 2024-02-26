@@ -117,6 +117,18 @@ def get_args_parser():
         help="use insulation score",
     )
     parser.add_argument(
+        "--invert_peak",
+        default=None,
+        choices=[0.1, None],
+        help="Probability to generate background peaks as null samples"
+    )
+    parser.add_argument(
+        "--random_shift_peak",
+        action="store_true",
+        default=False,
+        help="Random shift peak boundary",
+    )
+    parser.add_argument(
         "--mask_ratio",
         default=0.75,
         type=float,
