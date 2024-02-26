@@ -137,7 +137,7 @@ def get_args():
     parser.add_argument(
         "--invert_peak",
         default=None,
-        choices=[0.1, None],
+        choices=['0.1', None],
         help="Probability to generate background peaks as null samples"
     )
     parser.add_argument(

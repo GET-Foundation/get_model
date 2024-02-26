@@ -43,7 +43,10 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
     n_peaks_upper_bound=args.n_peaks_upper_bound
     use_insulation=args.use_insulation
     random_shift_peak=args.random_shift_peak
-    invert_peak=args.invert_peak
+    if args.invert_peak is not None:
+        invert_peak=float(args.invert_peak)
+    else:
+        invert_peak=None
     peak_inactivation=args.peak_inactivation
     leave_out_celltypes=args.leave_out_celltypes
     leave_out_chromosomes=args.leave_out_chromosomes
