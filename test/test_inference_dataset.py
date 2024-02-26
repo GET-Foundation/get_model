@@ -1,5 +1,6 @@
 #%%
 import random
+import pyliftover
 
 import numpy as np
 import pandas as pd
@@ -21,10 +22,10 @@ gencode_config = {
     "version": 40,
     "gtf_dir": "/manitou/pmg/users/xf2217/bmms/caesar/data/"
 }
-
+model_checkpoint = "/burg/pmg/users/xf2217/get_checkpoints/Expression_Finetune_K562_HSC.Chr4_14.conv50.atac_loss.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.20240225.99.pth"
 # Configuration for the dataset
 dataset_config = {
-    "zarr_dirs": ["/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr"],
+    "zarr_dirs": ["/pmglocal/xf2217/get_data/encode_hg38atac_dense.zarr"],
     "genome_seq_zarr": "/pmglocal/xf2217/get_data/hg38.zarr",
     "genome_motif_zarr": "/pmglocal/xf2217/get_data/hg38_motif_result.zarr",
     "insulation_paths": [
@@ -33,11 +34,15 @@ dataset_config = {
     ],
     "peak_name": "peaks_q0.01_tissue_open_exp",
     "additional_peak_columns": ["Expression_positive", "Expression_negative", "aTPM", "TSS"],
-    "n_peaks_upper_bound": 100
+    "n_peaks_upper_bound": 100,
 }
 #%%
-import pyliftover
-
+hg38 = DenseZarrIO('/pmglocal/xf2217/get_data/hg38.zarr')
+gencode = Gencode(**gencode_config)
+dataset = InferenceDataset(**dataset_config, gencode_obj=gencode)
+#%%
+def peak_join(df1, df2):
+    return pr(df1).join(pr(df2)).df
 
 def load_erythroblast_abe_data(csv_path='/burg/pmg/users/xf2217/Editable_A_scores.combined.scores.csv'):
     base_edit = pd.read_csv(csv_path)
@@ -54,27 +59,41 @@ def load_erythroblast_abe_data(csv_path='/burg/pmg/users/xf2217/Editable_A_score
     base_edit['Alt'] = base_edit['Strand'].map({'+':'G', '-':'C'})
     return base_edit, base_edit[['Chromosome', 'Start', 'End', 'Ref', 'Alt']]
 
+base_edit_annot, base_edit = load_erythroblast_abe_data()
+
 #%%
-def load_k562_crispr_data(csv_path='/burg/pmg/users/xf2217/CRISPR_comparison/resources/example/EPCrisprBenchmark_Fulco2019_K562_GRCh38.tsv.gz'):
+
+def load_crispr_data(dataset, csv_path='/burg/pmg/users/xf2217/CRISPR_comparison/resources/example/EPCrisprBenchmark_Fulco2019_K562_GRCh38.tsv.gz'):
     crispr = pd.read_csv(csv_path, sep='\t')
     crispr.rename(columns={'chrom':'Chromosome',
                            'chromStart': 'Start',
                            'chromEnd': 'End'}, inplace=True)
+    crispr['peak_name'] = crispr.name.str.split('|').str[1]
+    k562_peaks = dataset.datapool.zarr_dict['encode_hg38atac_dense.zarr'].get_peaks('k562.encode_hg38atac.ENCFF128WZG.max', 'peaks_q0.01_tissue_open_exp')
+    overlap = peak_join(crispr, k562_peaks).name.unique()
+    insulations = dataset.datapool.insulation.reset_index().rename({'index':'insulation_index'}, axis=1)
+    insulation_peak_overlap_count_dict = peak_join(insulations, crispr)[['insulation_index', 'peak_name']].drop_duplicates().groupby('insulation_index').count().sort_values('peak_name').to_dict()
+    insulation_peak_overlap = peak_join(insulations, crispr)
+    insulation_peak_overlap['overlap_count'] = insulation_peak_overlap['insulation_index'].map(insulation_peak_overlap_count_dict['peak_name'])
+    # for each peak_name, select the insulation_index with the highest overlap_count
+    insulation_peak_overlap = insulation_peak_overlap.query('startTSS> Start & startTSS < End')
+    peak_to_insulation_index = insulation_peak_overlap.query('mean_num_celltype>5').sort_values('overlap_count').groupby('peak_name').last().sort_values('overlap_count').insulation_index.to_dict()
+    crispr['overlap_with_k562_atac'] = crispr['name'].isin(overlap)
+    crispr['insulation_index'] = crispr['peak_name'].map(peak_to_insulation_index)
+    crispr['insulation_start'] = insulations.loc[crispr['insulation_index']].Start.values
+    crispr['insulation_end'] = insulations.loc[crispr['insulation_index']].End.values
+    crispr['Distance'] = (crispr['startTSS']-crispr['Start']).abs()
+    # convert all boolean columns to int
+    crispr = crispr.astype({col:int for col in crispr.columns if crispr[col].dtype=='bool'})
     return crispr
-k562_crispr = load_k562_crispr_data()
+
+k562_crispr = load_crispr_data(dataset)
+k562_crispr['EffectSize_pred'] = np.nan
+k562_crispr['ob_exp'] = np.nan
 #%%
-k562_crispr
+# shuffle the crispr data
+k562_crispr = k562_crispr.query('measuredGeneSymbol=="MYC"')
 #%%
-base_edit_annot, base_edit = load_erythroblast_abe_data()
-#%%
-gencode = Gencode(**gencode_config)
-dataset = InferenceDataset(**dataset_config, gencode_obj=gencode)
-#%%
-# Path to the model checkpoint
-model_checkpoint = "/burg/pmg/users/xf2217/get_checkpoints/fetal_hsc_gbm.all_chr.best.pth"
-#%%
-hg38 = DenseZarrIO('/pmglocal/xf2217/get_data/hg38.zarr')
-# %%
 # random generate variants in chr8:126000000-130000000
 def one_hot_to_dna(one_hot_array):
     """Converts a one-hot encoded DNA sequence back to a string representation."""
@@ -98,10 +117,45 @@ def generate_variant_in(chr, start, end, n=1000):
 
 # %%
 engine = InferenceEngine(dataset, model_checkpoint, with_sequence=False)
-engine.setup_data('MYC', 'Fetal Erythroblast 2.shendure_fetal.sample_7_liver.4096')
 #%%
-chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std  = engine.data
-batch = engine.dataset.datapool.generate_sample(chr_name, start, end, engine.data_key, celltype_id, track, celltype_peaks, motif_mean_std=motif_mean_std, mut=None, peak_inactivation=None)
+def infer_k562_crispr(row):
+    engine.setup_data(row.measuredGeneSymbol, 'k562.encode_hg38atac.ENCFF128WZG.max', 0, track_start=row.insulation_start, track_end=row.insulation_end)
+    chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std  = engine.data
+    batch_inactivated = engine.dataset.datapool.generate_sample(chr_name, start, end, engine.data_key, celltype_id, track, celltype_peaks, motif_mean_std=motif_mean_std, mut=None, peak_inactivation=pd.DataFrame(row).T)
+    batch_wt = engine.dataset.datapool.generate_sample(chr_name, start, end, engine.data_key, celltype_id, track, celltype_peaks, motif_mean_std=motif_mean_std, mut=None, peak_inactivation=None)
+    result_inactivated = engine.run_inference_with_batch(batch_inactivated)
+    result_wt = engine.run_inference_with_batch(batch_wt)
+    # effect_size = ((10**result_inactivated[0]['pred_exp']-1)-(10**result_wt[0]['pred_exp']-1))/(10**result_wt[0]['pred_exp']-1)
+    effect_size = (result_inactivated[0]['pred_exp']-result_wt[0]['pred_exp'])
+    effect_size = effect_size.reshape(-1,2)[engine.tss_peak, engine.strand].mean() 
+    return result_inactivated, result_wt, effect_size, result_wt[0]['ob_exp'].reshape(-1,2)[engine.tss_peak, engine.strand].mean()
+#%%
+
+#%%
+for i, row in tqdm(k562_crispr.iterrows()):
+    # skip if computed
+    if not pd.isna(row['EffectSize_pred']):
+        continue
+    try:
+        result_inactivated, result_wt, effect_size, ob_exp = infer_k562_crispr(row)
+        k562_crispr.loc[i, 'EffectSize_pred'] = effect_size
+        k562_crispr.loc[i, 'ob_exp'] = ob_exp
+    except Exception as e:
+        continue
+#%%
+k562_crispr['EffectSize_pred']= k562_crispr['EffectSize_pred'].fillna(0)
+# save to csv
+k562_crispr.to_csv('k562_crispr_effect_size.csv')
+#%%
+k562_crispr['logDis'] = np.log10(1/k562_crispr['Distance'])
+k562_crispr['Combined'] = k562_crispr['EffectSize_pred']+k562_crispr['logDis']
+pr(k562_crispr).join(pr(engine.peak_info)).df.plot(x='Combined', y='EffectSize', kind='scatter', c='ob_exp', legend=True, cmap='viridis')
+#%%
+# k562_crispr['EffectSize_pred_abs'] = k562_crispr['EffectSize_pred'].abs()
+# k562_crispr.loc[k562_crispr['overlap_with_k562_atac']==0 ,'EffectSize_pred']=0
+k562_crispr.query('~EffectSize_pred.isna()').plot(x='Combined', y='EffectSize', kind='scatter', c='Distance', legend=True, cmap='viridis')
+#%%
+k562_crispr.dropna()[['EffectSize', 'Combined']].corr()
 #%%
 # Initialize the InferenceEngine
 # Specify the gene and cell type for inference
@@ -199,4 +253,11 @@ random_aupr = (data['HbFBase']>threshold).sum()/len(data)
 ax.plot([0, 1], [(data['HbFBase']>threshold).sum()/len(data)]*2, linestyle='--', color = 'black', label=f'Random AUPR: {random_aupr:.2f}')
 ax.legend()
 plt.tight_layout()
+# %%
+peaks = pr(engine.dataset.datapool._query_peaks('k562.encode_hg38atac.ENCFF128WZG.max', 'chr1', 0, 1000000)).merge()
+# %%
+peak_boundary = pr(pd.DataFrame({'Chromosome': 'chr1', 'Start': 0, 'End': 1000000}, index=[0]))
+
+# %%
+peak_boundary.subtract(peaks).tile(1000).sample(200)
 # %%
