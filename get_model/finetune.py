@@ -147,6 +147,12 @@ def get_args():
         help="Random shift peak boundary",
     )
     parser.add_argument(
+        "--peak_inactivation",
+        default=None,
+        choices=['random_tss', None],
+        help="CRISPR inactivation (pass a dataframe in script) or random TSS inactivation during training"
+    )
+    parser.add_argument(
         "--freeze_atac_attention",
         action="store_true",
         default=False,

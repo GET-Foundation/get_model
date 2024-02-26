@@ -6,7 +6,7 @@ from get_model.dataset.augmentation import (DataAugmentationForGETPeak,
                                             DataAugmentationForGETPeakFinetune)
 from get_model.dataset.zarr_dataset import DenseZarrIO
 from get_model.dataset.zarr_dataset import \
-    PretrainDataset as ZarrPretrainDataset
+    PretrainDataset
 
 def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override=None, sequence_obj=None, root=None, codebase=None):
     """A template to build a dataset for training or evaluation."""
@@ -44,6 +44,7 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
     use_insulation=args.use_insulation
     random_shift_peak=args.random_shift_peak
     invert_peak=args.invert_peak
+    peak_inactivation=args.peak_inactivation
     leave_out_celltypes=args.leave_out_celltypes
     leave_out_chromosomes=args.leave_out_chromosomes
     n_peaks_sample_gap=50
@@ -61,12 +62,12 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
                 genome_motif_zarr = v
             else:
                 exec(f'{k} = {v}')
-    dataset = ZarrPretrainDataset(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths,
+    dataset = PretrainDataset(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths,
         peak_name=peak_name, preload_count=preload_count, insulation_subsample_ratio=insulation_subsample_ratio, n_packs=n_packs, max_peak_length=max_peak_length, center_expand_target=center_expand_target, 
         padding=padding, mask_ratio=mask_ratio, 
         n_peaks_lower_bound=n_peaks_lower_bound, n_peaks_upper_bound=n_peaks_upper_bound, additional_peak_columns=additional_peak_columns, 
         n_peaks_sample_gap=n_peaks_sample_gap, non_redundant=non_redundant, filter_by_min_depth=filter_by_min_depth,
-        random_shift_peak=random_shift_peak, invert_peak=invert_peak,
+        random_shift_peak=random_shift_peak, invert_peak=invert_peak, peak_inactivation=peak_inactivation,
         use_insulation=use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=leave_out_celltypes,
         leave_out_chromosomes=leave_out_chromosomes, is_train=is_train, dataset_size=dataset_size)
     return dataset
