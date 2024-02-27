@@ -92,7 +92,12 @@ def get_args_parser():
         type=int,
         help="lower bound of number of peaks",
     )
-
+    parser.add_argument(
+            "--peak_inactivation",
+            default=None,
+            choices=['random_tss', None],
+            help="CRISPR inactivation (pass a dataframe in script) or random TSS inactivation during training"
+            )
     parser.add_argument(
         "--n_peaks_upper_bound",
         default=200,
@@ -104,6 +109,12 @@ def get_args_parser():
         default=None,
         choices=["max_depth", "depth_512", "depth_1024", "depth_2048", "depth_4096", None],
     )
+    parser.add_argument(
+            "--filter_by_min_depth",
+            default=None,
+            choices=["depth_512", "depth_1024", "depth_2048", "depth_4096", "depth_8192", None],
+            help="Filter out samples that do not meet minimum depth threshold"
+            )
     parser.add_argument(
         "--num_motif",
         default=1273,

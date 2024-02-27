@@ -111,6 +111,7 @@ def get_rev_collate_fn(batch):
         exp_label = torch.from_numpy(exp_label) # B, R, C=2 RNA+,RNA-,ATAC
         other_peak_labels = torch.from_numpy(other_peak_labels)
     else:
+        exp_label = 0
         peak_labels = 0
         other_peak_labels = 0
 

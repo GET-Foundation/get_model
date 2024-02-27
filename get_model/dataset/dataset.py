@@ -8,84 +8,103 @@ from get_model.dataset.zarr_dataset import DenseZarrIO
 from get_model.dataset.zarr_dataset import \
     PretrainDataset
 
+
 def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override=None, sequence_obj=None, root=None, codebase=None):
     """A template to build a dataset for training or evaluation."""
     logging.info(f'Using {dataset_name}')
     transform = DataAugmentationForGETPeak(args)
     print("Data Aug = %s" % str(transform))
-    if root==None:
+
+    if root is None:
         root = args.data_path
-    # get FILEPATH
-    if codebase==None:
+
+    if codebase is None:
         codebase = os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__))))
+            os.path.dirname(os.path.abspath(__file__))))
+
     if sequence_obj is None:
         sequence_obj = DenseZarrIO(f'{root}/hg38.zarr', dtype='int8')
         sequence_obj.load_to_memory_dense()
     else:
         logging.info('sequence_obj is provided')
-    zarr_dirs = [f'{root}/shendure_fetal_dense.zarr']
-    genome_seq_zarr = f'{root}/hg38.zarr'
-    genome_motif_zarr = f'{root}/hg38_motif_result.zarr'
-    insulation_paths = [
-        f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather',
-        f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather']
-    peak_name=args.peak_name
-    additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS']
-    preload_count=args.preload_count
-    padding=50
-    mask_ratio=0.5
-    n_packs=args.n_packs
-    max_peak_length=args.max_peak_length
-    center_expand_target=args.center_expand_target
-    insulation_subsample_ratio=0.8
-    n_peaks_lower_bound=args.n_peaks_lower_bound
-    n_peaks_upper_bound=args.n_peaks_upper_bound
-    use_insulation=args.use_insulation
-    random_shift_peak=args.random_shift_peak
-    if args.invert_peak is not None:
-        invert_peak=float(args.invert_peak)
-    else:
-        invert_peak=None
-    peak_inactivation=args.peak_inactivation
-    leave_out_celltypes=args.leave_out_celltypes
-    leave_out_chromosomes=args.leave_out_chromosomes
-    n_peaks_sample_gap=50
-    non_redundant=args.non_redundant
-    filter_by_min_depth=args.filter_by_min_depth
-    dataset_size=40_960
-    # override parameters above from parameter_override
-    if parameter_override is not None:
+
+    # Default parameter values
+    parameters = {
+        'zarr_dirs': [f'{root}/shendure_fetal_dense.zarr'],
+        'genome_seq_zarr': f'{root}/hg38.zarr',
+        'genome_motif_zarr': f'{root}/hg38_motif_result.zarr',
+        'insulation_paths': [
+            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather',
+            f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'],
+        'peak_name': args.peak_name,
+        'additional_peak_columns': ['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'],
+        'preload_count': args.preload_count,
+        'padding': 50,
+        'mask_ratio': 0.5,
+        'n_packs': args.n_packs,
+        'max_peak_length': args.max_peak_length,
+        'center_expand_target': args.center_expand_target,
+        'insulation_subsample_ratio': 0.8,
+        'n_peaks_lower_bound': args.n_peaks_lower_bound,
+        'n_peaks_upper_bound': args.n_peaks_upper_bound,
+        'use_insulation': args.use_insulation,
+        'random_shift_peak': args.random_shift_peak,
+        'invert_peak': float(args.invert_peak) if args.invert_peak is not None else None,
+        'peak_inactivation': args.peak_inactivation,
+        'leave_out_celltypes': args.leave_out_celltypes,
+        'leave_out_chromosomes': args.leave_out_chromosomes,
+        'n_peaks_sample_gap': 50,
+        'non_redundant': args.non_redundant,
+        'filter_by_min_depth': args.filter_by_min_depth,
+        'dataset_size': 40_960
+    }
+
+    # Override parameters from parameter_override
+    if parameter_override:
         for k, v in parameter_override.items():
-            if k == 'zarr_dirs':
-                zarr_dirs = v
-            elif k == 'genome_seq_zarr':
-                genome_seq_zarr = v
-            elif k == 'genome_motif_zarr':
-                genome_motif_zarr = v
-            else:
-                exec(f'{k} = {v}')
-    dataset = PretrainDataset(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths,
-        peak_name=peak_name, preload_count=preload_count, insulation_subsample_ratio=insulation_subsample_ratio, n_packs=n_packs, max_peak_length=max_peak_length, center_expand_target=center_expand_target, 
-        padding=padding, mask_ratio=mask_ratio, 
-        n_peaks_lower_bound=n_peaks_lower_bound, n_peaks_upper_bound=n_peaks_upper_bound, additional_peak_columns=additional_peak_columns, 
-        n_peaks_sample_gap=n_peaks_sample_gap, non_redundant=non_redundant, filter_by_min_depth=filter_by_min_depth,
-        random_shift_peak=random_shift_peak, invert_peak=invert_peak, peak_inactivation=peak_inactivation,
-        use_insulation=use_insulation, sequence_obj=sequence_obj, leave_out_celltypes=leave_out_celltypes,
-        leave_out_chromosomes=leave_out_chromosomes, is_train=is_train, dataset_size=dataset_size)
+            parameters[k] = v
+
+    # Create dataset with updated parameters
+    dataset = PretrainDataset(
+        parameters['zarr_dirs'], parameters['genome_seq_zarr'], parameters['genome_motif_zarr'], parameters['insulation_paths'],
+        peak_name=parameters['peak_name'], preload_count=parameters['preload_count'], insulation_subsample_ratio=parameters['insulation_subsample_ratio'], n_packs=parameters[
+            'n_packs'], max_peak_length=parameters['max_peak_length'], center_expand_target=parameters['center_expand_target'],
+        padding=parameters['padding'], mask_ratio=parameters['mask_ratio'],
+        n_peaks_lower_bound=parameters['n_peaks_lower_bound'], n_peaks_upper_bound=parameters[
+            'n_peaks_upper_bound'], additional_peak_columns=parameters['additional_peak_columns'],
+        n_peaks_sample_gap=parameters['n_peaks_sample_gap'], non_redundant=parameters[
+            'non_redundant'], filter_by_min_depth=parameters['filter_by_min_depth'],
+        random_shift_peak=parameters['random_shift_peak'], invert_peak=parameters[
+            'invert_peak'], peak_inactivation=parameters['peak_inactivation'],
+        use_insulation=parameters['use_insulation'], sequence_obj=sequence_obj, leave_out_celltypes=parameters['leave_out_celltypes'],
+        leave_out_chromosomes=parameters['leave_out_chromosomes'], is_train=is_train, dataset_size=parameters['dataset_size']
+    )
+
     return dataset
+
 
 def dataset_pretrain(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Pretrain", is_train, args, sequence_obj=sequence_obj, parameter_override={
+            'zarr_dirs': [f'{args.data_path}/shendure_fetal_dense.zarr',
+                          f'{args.data_path}/encode_hg38atac_dense.zarr',
+                          f'{args.data_path}/vijay_hematopoiesis_dense.zarr',
+                          f'{args.data_path}/htan_gbm_dense.zarr',
+                          f'{args.data_path}/bingren_adult_dense.zarr',],
+            'leave_out_celltypes': None,
+            'additional_peak_columns': None,
         })
+
 
 def dataset_pretrain_gbm_eval(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Pretrain.GBM_eval", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'dataset_size': 4096,
-        'leave_out_celltypes': 'Astrocytes',
-        'leave_out_chromosomes': None
+            'additional_peak_columns': None,
+            'zarr_dirs': [
+                f'{args.data_path}/htan_gbm_dense.zarr',
+            ],
+            'leave_out_celltypes': None,
+            'dataset_size': 4096,
         })
 
 
@@ -94,114 +113,118 @@ def dataset_fintune_fetal(is_train, args, sequence_obj=None):
         "Expression_Finetune_Fetal", is_train, args, sequence_obj=sequence_obj, parameter_override={
         })
 
+
 def dataset_fintune_fetal_eval(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_Fetal.fetal_eval", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'dataset_size': 4096,
+            'dataset_size': 4096,
         })
+
 
 def dataset_fintune_fetal_all_chr(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_Fetal.All_Chr", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'leave_out_chromosomes': None
+            'leave_out_chromosomes': None
         })
+
 
 def dataset_fintune_fetal_all_chr_eval(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_Fetal.All_Chr.eval", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'dataset_size': 4096,
-        'leave_out_chromosomes': None
+            'dataset_size': 4096,
+            'leave_out_chromosomes': None
         })
+
 
 def dataset_fintune_fetal_k562_hsc(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_K562_HSC.Chr4&14", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'zarr_dirs': [f'{args.data_path}/shendure_fetal_dense.zarr', 
-                      f'{args.data_path}/encode_hg38atac_dense.zarr',
-                      f'{args.data_path}/vijay_hematopoiesis_dense.zarr'],
+            'zarr_dirs': [f'{args.data_path}/shendure_fetal_dense.zarr',
+                          f'{args.data_path}/encode_hg38atac_dense.zarr',
+                          f'{args.data_path}/vijay_hematopoiesis_dense.zarr'],
         })
 
 
 def dataset_fintune_fetal_k562_hsc_eval(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_K562_HSC.Chr4&14.Eval", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'zarr_dirs': [f'{args.data_path}/vijay_hematopoiesis_dense.zarr'],
+            'zarr_dirs': [f'{args.data_path}/vijay_hematopoiesis_dense.zarr'],
         })
+
 
 def dataset_fintune_fetal_k562(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_K562.Chr4&14", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'zarr_dirs': [ 
-                      f'{args.data_path}/encode_hg38atac_dense.zarr'],
-        'dataset_size': 40_960,
+            'zarr_dirs': [
+                f'{args.data_path}/encode_hg38atac_dense.zarr'],
+            'dataset_size': 40_960,
         })
 
 
 def dataset_fintune_fetal_k562_eval(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_K562.Chr4&14.Eval", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'zarr_dirs': [f'{args.data_path}/encode_hg38atac_dense.zarr'],
-        'dataset_size': 40_96,
+            'zarr_dirs': [f'{args.data_path}/encode_hg38atac_dense.zarr'],
+            'dataset_size': 40_96,
         })
+
 
 def dataset_htan_gbm(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "HTAN_GBM", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'dataset_size': 65_536,
+            'dataset_size': 65_536,
         })
+
 
 def dataset_htan_gbm_eval(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "HTAN_GBM.eval", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'dataset_size': 4096,
-        'leave_out_chromosomes': None
+            'dataset_size': 4096,
+            'leave_out_chromosomes': None
         })
 
 
 def dataset_htan_gbm_alb2281(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "HTAN_GBM", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'dataset_size': 65_536,
+            'dataset_size': 65_536,
         }, root="/pmglocal/alb2281/get_resources", codebase="/pmglocal/alb2281/repos/get_model")
+
 
 def dataset_htan_gbm_eval_alb2281(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "HTAN_GBM.eval", is_train, args, sequence_obj=sequence_obj, parameter_override={
-        'dataset_size': 4096,
-        'leave_out_chromosomes': None
+            'dataset_size': 4096,
+            'leave_out_chromosomes': None
         }, root="/pmglocal/alb2281/get_resources", codebase="/pmglocal/alb2281/repos/get_model")
 
+
 def build_dataset_zarr(is_train, args, sequence_obj=None):
-    if is_train and args.data_set == "Pretrain":
-        dataset = dataset_pretrain(is_train, args, sequence_obj)
-    elif not is_train and args.eval_data_set == "Pretrain.GBM_eval":
-        dataset = dataset_pretrain_gbm_eval(is_train, args, sequence_obj)
-    elif is_train and args.data_set == "Expression_Finetune_Fetal":
-        dataset = dataset_fintune_fetal(is_train, args, sequence_obj)
-    elif not is_train and args.eval_data_set == "Expression_Finetune_Fetal.fetal_eval":
-        dataset = dataset_fintune_fetal_eval(is_train, args, sequence_obj)
-    elif is_train and args.data_set == "HTAN_GBM":
-        dataset = dataset_htan_gbm(is_train, args, sequence_obj)
-    elif not is_train and args.eval_data_set == "HTAN_GBM.eval":
-        dataset = dataset_htan_gbm_eval(is_train, args, sequence_obj)
-    elif is_train and args.data_set == "HTAN_GBM.alb2281":
-        dataset = dataset_htan_gbm_alb2281(is_train, args, sequence_obj)
-    elif not is_train and args.eval_data_set == "HTAN_GBM.eval.alb2281":
-        dataset = dataset_htan_gbm_eval_alb2281(is_train, args, sequence_obj)
-    elif is_train and args.data_set == "Expression_Finetune_Fetal.All_Chr":
-        dataset = dataset_fintune_fetal_all_chr(is_train, args, sequence_obj)
-    elif not is_train and args.eval_data_set == "Expression_Finetune_Fetal.All_Chr.eval":
-        dataset = dataset_fintune_fetal_all_chr_eval(is_train, args, sequence_obj)
-    elif is_train and args.data_set == "Expression_Finetune_K562_HSC.Chr4&14":
-        dataset = dataset_fintune_fetal_k562_hsc(is_train, args, sequence_obj)
-    elif not is_train and args.eval_data_set == "Expression_Finetune_K562_HSC.Chr4&14.Eval":
-        dataset = dataset_fintune_fetal_k562_hsc_eval(is_train, args, sequence_obj)
-    elif is_train and args.data_set == "Expression_Finetune_K562.Chr4&14":
-        dataset = dataset_fintune_fetal_k562(is_train, args, sequence_obj)
-    elif not is_train and args.eval_data_set == "Expression_Finetune_K562.Chr4&14.Eval":
-        dataset = dataset_fintune_fetal_k562_eval(is_train, args, sequence_obj)
+    """
+    Determines the appropriate dataset configuration based on training or evaluation mode and dataset type.
+    """
+    dataset_mapping = {
+        ('Pretrain', True): dataset_pretrain,
+        ('Pretrain.GBM_eval', False): dataset_pretrain_gbm_eval,
+        ('Expression_Finetune_Fetal', True): dataset_fintune_fetal,
+        ('Expression_Finetune_Fetal.fetal_eval', False): dataset_fintune_fetal_eval,
+        ('HTAN_GBM', True): dataset_htan_gbm,
+        ('HTAN_GBM.eval', False): dataset_htan_gbm_eval,
+        ('HTAN_GBM.alb2281', True): dataset_htan_gbm_alb2281,
+        ('HTAN_GBM.eval.alb2281', False): dataset_htan_gbm_eval_alb2281,
+        ('Expression_Finetune_Fetal.All_Chr', True): dataset_fintune_fetal_all_chr,
+        ('Expression_Finetune_Fetal.All_Chr.eval', False): dataset_fintune_fetal_all_chr_eval,
+        ('Expression_Finetune_K562_HSC.Chr4&14', True): dataset_fintune_fetal_k562_hsc,
+        ('Expression_Finetune_K562_HSC.Chr4&14.Eval', False): dataset_fintune_fetal_k562_hsc_eval,
+        ('Expression_Finetune_K562.Chr4&14', True): dataset_fintune_fetal_k562,
+        ('Expression_Finetune_K562.Chr4&14.Eval', False): dataset_fintune_fetal_k562_eval,
+    }
 
-    else:
-        raise NotImplementedError()
+    dataset_key = (args.data_set if is_train else args.eval_data_set, is_train)
+    dataset_function = dataset_mapping.get(dataset_key)
 
-    return dataset
+    if not dataset_function:
+        raise NotImplementedError(
+            "The specified dataset configuration is not implemented.")
+
+    return dataset_function(is_train, args, sequence_obj)

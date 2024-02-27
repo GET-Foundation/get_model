@@ -331,7 +331,7 @@ class ZarrDataPool(object):
                 if self.max_peak_length is not None:
                     peak = peak.query(
                         'End-Start<@self.max_peak_length').reset_index(drop=True)
-                if self.center_expand_target is not None:
+                if self.center_expand_target!=0:
                     # peak_shorter = peak.query(
                     # 'End-Start<@self.center_expand_target').reset_index(drop=True)
                     # peak_longer = peak.query(
