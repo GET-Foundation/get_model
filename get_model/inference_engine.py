@@ -1,7 +1,7 @@
 # inference_engine.py
 import numpy as np
 import torch
-
+from pyranges import PyRanges as pr
 from get_model.dataset.collate import get_rev_collate_fn
 from get_model.dataset.zarr_dataset import PreloadDataPack, get_padding_pos
 from get_model.model.model import GETFinetuneExpATAC, GETFinetuneExpATACFromSequence
@@ -104,9 +104,9 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
     return loss, atac, exp, exp_target 
 
 class InferenceEngine:
-    def __init__(self, dataset, model_checkpoint, mut=None, peak_inactivation=None, with_sequence=False):
+    def __init__(self, dataset, model_checkpoint, mut=None, peak_inactivation=None, with_sequence=False, device='cuda'):
         self.dataset = dataset
-        self.model_wrapper = ModelWrapper(model_checkpoint, with_sequence=with_sequence)
+        self.model_wrapper = ModelWrapper(model_checkpoint, with_sequence=with_sequence, device=device)
         self.mut = mut
         self.peak_inactivation = peak_inactivation
 
@@ -123,7 +123,8 @@ class InferenceEngine:
         peak_info = self.dataset.datapool.zarr_dict[data_key].get_peaks(celltype, 'peaks_q0.01_tissue_open_exp').reset_index(drop=True).reset_index()
         self.data_key = data_key
         self.peak_info = peak_info
-        track_start, track_end, tss_peak, strand = self.get_peak_start_end_from_gene_peak(self.gene_info, self.peak_info, gene_name, track_start, track_end)
+        track_start, track_end, tss_peak, peak_start, strand = self.get_peak_start_end_from_gene_peak(self.gene_info, self.peak_info, gene_name, track_start, track_end)
+        self.peak_start = peak_start
         self.strand = strand
         self.track_start = track_start
         self.track_end = track_end
@@ -152,14 +153,17 @@ class InferenceEngine:
         chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std = self.data
         # 5. Extract the sample data for inference
 
-        batch = self.dataset.datapool.generate_sample(chr_name, start, end, celltype_id, track, celltype_peaks, motif_mean_std, mut=None, peak_inactivation=None)
+        batch = self.dataset.datapool.generate_sample(chr_name, start, end, self.data_key, celltype_id, track, celltype_peaks, motif_mean_std, mut=mut, peak_inactivation=peak_inactivation)
         tss_peak = self.tss_peak - offset
+        mut_peak = None
+        if mut is not None:
+            mut_peak = pr(self.peak_info).join(pr(mut)).df['index'].values - offset - self.peak_start
 
         # 7. Run the model inference
         inference_results, prepared_batch = self.run_inference_with_batch(batch)
 
         # 8. Handle the inference results as needed
-        return inference_results, prepared_batch, tss_peak
+        return inference_results, prepared_batch, tss_peak, mut_peak
     
     def run_inference_with_batch(self, batch):
         prepared_batch = get_rev_collate_fn([batch])
@@ -202,4 +206,4 @@ class InferenceEngine:
         track_start = peak_info.iloc[peak_start].Start
         track_end = peak_info.iloc[peak_end].End
 
-        return track_start, track_end, tss_peak, strand
+        return track_start, track_end, tss_peak, peak_start, strand

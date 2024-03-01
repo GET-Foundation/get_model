@@ -1,7 +1,7 @@
 #!/bin/bash
 # Set the path to save checkpoints
 DATE=`date +%Y%m%d`
-OUTPUT_DIR="/pmglocal/xf2217/Expression_Finetune_K562.Chr4&14.conv50.atac_loss.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.augmented.${DATE}/"
+OUTPUT_DIR="/pmglocal/xf2217/Expression_Finetune_K562.Chr4&14.conv50.atac_loss.from_pretrain_399.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.augmented.${DATE}/"
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7957
@@ -13,7 +13,7 @@ export NCCL_P2P_LEVEL=NVL
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=6 --rdzv-endpoint=localhost:$PORT get_model/finetune.py \
     --data_set "Expression_Finetune_K562.Chr4&14" \
     --eval_data_set "Expression_Finetune_K562.Chr4&14.Eval" \
-    --finetune "/burg/pmg/users/xf2217/get_checkpoints/EvalTSS.AllChr.fetal_hsc_gbm.conv50.atac_loss.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.from_sequence.20240224.344.pth" \
+    --finetune "/burg/pmg/users/xf2217/get_checkpoints/checkpoint-399.from_shentong.R100L1000.pth" \
     --data_path ${DATA_PATH} \
     --input_dim 639 \
     --output_dim 2 \
@@ -35,7 +35,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=6 --rdzv-endpoint=localhost:$PORT ge
     --lr 1e-3 \
     --opt adamw \
     --wandb_project_name "get_finetune.st_checkpoint399" \
-    --wandb_run_name "Expression_Finetune_K562.Chr4&14.conv50.atac_loss.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.augmented."${DATE} \
+    --wandb_run_name "Expression_Finetune_K562.Chr4&14.conv50.atac_loss.from_pretrain_399.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.augmented."${DATE} \
     --eval_freq 2 \
     --dist_eval \
     --eval_tss \

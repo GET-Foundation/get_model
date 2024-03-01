@@ -19,7 +19,7 @@ pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/manitou/pmg/users/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open', preload_count=100, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=10, n_peaks_upper_bound=100, use_insulation=False, leave_out_celltypes='Astrocyte', leave_out_chromosomes='chr1', is_train=False, dataset_size=65536, additional_peak_columns=None)
+                           max_peak_length=5000, center_expand_target=500, n_peaks_lower_bound=10, n_peaks_upper_bound=100, use_insulation=True, leave_out_celltypes='Astrocyte', leave_out_chromosomes='chr1', is_train=False, dataset_size=65536, additional_peak_columns=None)
 pretrain.__len__()
 #%%
 from get_model.dataset.zarr_dataset import worker_init_fn_get
@@ -34,11 +34,11 @@ data_loader_train = torch.utils.data.DataLoader(
 )
 
 # %%
-from get_model.model.model import GETPretrain  
+from get_model.model.model import GETPretrain, GETPretrainMaxNorm  
 from get_model.utils import load_state_dict
 import torch.nn as nn
 loss_masked = nn.MSELoss()
-model = GETPretrain(
+model = GETPretrainMaxNorm(
         num_regions=100,
         num_res_block=0,
         motif_prior=False,
@@ -57,7 +57,7 @@ model = GETPretrain(
         pos_emb_components=[],
     )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/output_rev_pretrain_ATACSplitPool_unnorm_bidirectional_no_insulation_no_affine_no_final_bn/checkpoint-140.pth')
+checkpoint = torch.load('/pmglocal/xf2217/pretrain_conv50.maxnorm.R100L500/checkpoint-21.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=False)
 
@@ -79,8 +79,8 @@ fig, ax = plt.subplots(1, 10, figsize=(15, 2))
 for i in range(10):
     # calculate reorder index
     from scipy.cluster.hierarchy import linkage, dendrogram
-    # Z = linkage((weight[i+10,:,:]-weight[3+10,:,:]), 'ward')
-    # g = dendrogram(Z, no_plot=True)
+    Z = linkage((weight[i+10,:,:]-weight[3+10,:,:]), 'ward')
+    g = dendrogram(Z, no_plot=True)
     ax[i].imshow((weight[i+20,:,:])[np.array(g['ivl']).astype('int')], aspect=0.01)
     
 #%%
@@ -97,7 +97,7 @@ from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
 for i, batch in tqdm(enumerate(data_loader_train)):
     if i > 100:
         break
-    sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _ = batch
+    sample_track, peak_seq, sample_metadata, celltype_peaks, peak_signal_track_boundary, peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, exp_label, other_peak_labels = batch
     if min(chunk_size)<0:
         continue
 # for i in tqdm(range(100)):
@@ -152,8 +152,8 @@ import numpy as np
 import seaborn as sns
 # output_masked_values_fetal = np.load('output_masked_values_rcc.npy')#[:,:,100]#.flatten()
 # regions_embed_values_fetal = np.load('regions_embed_values_rcc.npy')#[:,:,100]#.flatten()
-output_masked_values_gbm = np.load('output_masked_values_rcc.npy')[:,:,639:].flatten()
-regions_embed_values_gbm = np.load('regions_embed_values_rcc.npy')[:,:,639:].flatten()
+# output_masked_values_gbm = np.load('output_masked_values_rcc.npy')[:,:,639:].flatten()
+# regions_embed_values_gbm = np.load('regions_embed_values_rcc.npy')[:,:,639:].flatten()
 output_masked_values = output_masked_values_gbm[regions_embed_values_gbm!=0]
 regions_embed_values = regions_embed_values_gbm[regions_embed_values_gbm!=0]
 #%%
@@ -166,7 +166,10 @@ regions_embed_values = regions_embed_values_gbm[regions_embed_values_gbm!=0]
 # regions_embed_values = regions_embed_values[idx]
 from matplotlib import pyplot as plt
 # kde plot with shade 
-sns.scatterplot(x = output_masked_values, y = regions_embed_values,s=1, alpha=0.5)
+idx = 2
+output_masked_values = output_masked_list[idx][:,:,0].reshape(-1)
+regions_embed_values = target_list[idx][:,:,0].reshape(-1)
+sns.scatterplot(x = output_masked_values, y = regions_embed_values,s=10, alpha=0.5)
 # xlim and ylim 0, 0.8
 # plt.xlim(0, 0.1)
 # plt.ylim(0, 0.1)
