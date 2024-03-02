@@ -128,6 +128,9 @@ class TFEncoder(nn.Module):
     """
     pass
 
+
+
+
 class MotifScanner(nn.Module):
     """A motif encoder based on Conv1D.
     Input: one-hot encoding of DNA sequences of all regions in batch (BATCH_SIZE, NUM_REGION, SEQ_LEN, 4)
@@ -511,7 +514,6 @@ class ATACHead(nn.Module):
         x = self.fc2(x)
         x = self.drop2(x)
         return x
-
 
 
 class GETFinetune(nn.Module):

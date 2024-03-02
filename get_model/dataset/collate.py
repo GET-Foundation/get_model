@@ -34,13 +34,14 @@ def sparse_batch_collate(batch: list):
 
 def get_rev_collate_fn(batch):
     # zip and convert to list
-    peak_signal_track, peak_sequence, sample_metadata, celltype_peaks, motif_mean_std, peak_labels  = zip(*batch)
+    peak_signal_track, peak_sequence, sample_metadata, celltype_peaks, motif_mean_std, peak_labels, hic_matrix  = zip(*batch)
     celltype_peaks = list(celltype_peaks)
     peak_signal_track = list(peak_signal_track)
     peak_sequence = list(peak_sequence)
     sample_metadata = list(sample_metadata)
     motif_mean_std = list(motif_mean_std)
     peak_labels = list(peak_labels)
+    hic_matrix = list(hic_matrix)
     
     batch_size = len(celltype_peaks)
     mask_ratio = sample_metadata[0]['mask_ratio']
@@ -74,6 +75,8 @@ def get_rev_collate_fn(batch):
     peak_sequence = peak_sequence.transpose(0,1)
     motif_mean_std = np.stack(motif_mean_std, axis=0)
     motif_mean_std = torch.FloatTensor(motif_mean_std)
+    hic_matrix = np.stack(hic_matrix, axis=0)
+    hic_matrix = torch.FloatTensor(hic_matrix)
     peak_len = celltype_peaks[:,:,1]-celltype_peaks[:,:,0]
     padded_peak_len = peak_len + 100
     total_peak_len = peak_len.sum(1)
@@ -115,4 +118,4 @@ def get_rev_collate_fn(batch):
         peak_labels = 0
         other_peak_labels = 0
 
-    return peak_signal_track, peak_sequence, sample_metadata, celltype_peaks, peak_signal_track_boundary, peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, exp_label, other_peak_labels
+    return peak_signal_track, peak_sequence, sample_metadata, celltype_peaks, peak_signal_track_boundary, peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, exp_label, other_peak_labels, hic_matrix

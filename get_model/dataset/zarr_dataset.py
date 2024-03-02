@@ -197,6 +197,8 @@ class ZarrDataPool(object):
         self.random_shift_peak = random_shift_peak
         self.non_redundant = non_redundant
         self.filter_by_min_depth = filter_by_min_depth
+        self.hic_path = hic_path
+        self.hic_obj = None
         self.initialize_datasets()
         self.calculate_metadata()
         # logging.info('ZarrDataPool initialized')
@@ -597,7 +599,7 @@ class ZarrDataPool(object):
         else:
             inactivated_peak_idx = None
 
-                        
+        hic_matrix = None       
         if self.hic_obj is not None:
             hic_matrix = get_hic_from_idx(self.hic_obj, celltype_peaks)
 
@@ -856,7 +858,7 @@ class PreloadDataPack(object):
                     sequence, track_start, track_end, mut_peak)
                 sequence = sequence_mut
 
-                
+        hic_matrix = None
         if self.zarr_data_pool.hic_obj is not None:
             hic_matrix = get_hic_from_idx(self.zarr_data_pool.hic_obj, celltype_peaks)
 
@@ -1067,6 +1069,10 @@ class PretrainDataset(Dataset):
         self.peak_inactivation = peak_inactivation
         self.mut = mut
         self.hic_path = hic_path
+        # ensure use_insulation is False if hic_path is not None
+        if self.hic_path is not None:
+            logging.info('hic_path is not None, use_insulation is set to False')
+            self.use_insulation = False
         if sequence_obj is None:
             self.sequence = DenseZarrIO(
                 genome_seq_zarr, dtype='int8', mode='r')
