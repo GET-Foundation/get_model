@@ -1096,8 +1096,6 @@ def get_pretrain_motif_base(pretrained=False, **kwargs):
         model.load_state_dict(checkpoint["model"])
     return model
 
-# GETPretrainMaxNorm
-
 @register_model
 def get_pretrain_motif_base_maxnorm(pretrained=False, **kwargs):
     model = GETPretrainMaxNorm(

@@ -51,7 +51,7 @@ def pretrain_one_epoch(
     for step, batch in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
     ):
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _, _ = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _, _, _ = batch
         if min(chunk_size)<0:
             continue
         # assign learning rate & weight decay for each step
@@ -260,7 +260,7 @@ def finetune_train_one_epoch(
     ):  
         # logging.info("data_iter_step: {}".format(data_iter_step))
         # logging.info("start getting batch")
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels, _ = batch
         if min(chunk_size)<0:
             continue
         # logging.info("Got batch")
@@ -438,7 +438,7 @@ def evaluate_pretrain(data_loader, model, device, args, epoch=0, printlog=True):
     output_masked_list = []
     target_list = []
     for i, batch in enumerate(data_loader):
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _, _ = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _, _, _ = batch
         if min(chunk_size)<0:
             continue
     # for i in tqdm(range(100)):
@@ -516,7 +516,7 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
     obs_atac = []
     from tqdm import tqdm
     for batch in tqdm(data_loader):
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels, _ = batch
         if min(chunk_size)<0:
             continue
         sample_track = sample_track.to(device, non_blocking=True).bfloat16()

@@ -106,6 +106,25 @@ def apply_indel(arr, start, end, alt_sequence):
     arr = np.insert(arr, start, alt_sequence, axis=0)
     return arr
 
+def get_hic_from_idx(hic, csv, start=None, end=None, resolution=5000, method='observed'):
+    if start is not None and end is not None:
+        csv_region = csv.iloc[start:end]
+    else:
+        csv_region = csv
+    chrom = csv_region.iloc[0].Chromosome.replace("chr", "")
+    if chrom != csv_region.iloc[-1].Chromosome.replace("chr", ""):
+        return None
+    start = csv_region.iloc[0].Start // resolution
+    end = csv_region.iloc[-1].End // resolution + 1
+    if (end-start) * resolution > 4000000:
+        return None
+    hic_idx = np.array([row.Start // resolution - start + 1 for _, row in csv_region.iterrows()])
+    mzd = hic.getMatrixZoomData(chrom, chrom, method, "KR", "BP", resolution)
+    numpy_matrix = mzd.getRecordsAsMatrix(start * resolution, end * resolution, start * resolution, end * resolution)
+    dst = np.log10(numpy_matrix[hic_idx,:][:, hic_idx]+1)
+    return dst
+
+
 class MotifMeanStd(object):
     """A class that reads the mean and std of motif scores from a zarr file.
     e.g. z['mean_std/chr1']
@@ -155,7 +174,7 @@ class ZarrDataPool(object):
     def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', insulation_subsample_ratio=0.1,
                  max_peak_length=None, center_expand_target=None, sequence_obj=None, motif_mean_std_obj=None,
                  additional_peak_columns=None, leave_out_celltypes=None, leave_out_chromosomes=None, non_redundant='max_depth', invert_peak=False, random_shift_peak=True,
-                 filter_by_min_depth=None, is_train=True):
+                 filter_by_min_depth=None, is_train=True, hic_path=None):
         # logging.info('Initializing ZarrDataPool')
         if sequence_obj is None:
             self.sequence = DenseZarrIO(
@@ -190,6 +209,16 @@ class ZarrDataPool(object):
         self.data_keys = list(self.zarr_dict.keys())
         self.peaks_dict = self._load_peaks()
         self.insulation = self._load_insulation()
+        self.hic_obj = self._load_hic()
+
+    def _load_hic(self):
+        try:
+            import hicstraw
+            hic_obj = hicstraw.HiCFile(self.hic_path)
+        except:
+            logging.warning('hicstraw is not installed, cannot load hic data, or the hic file is not found')
+            hic_obj = None
+        return hic_obj
 
     def _subset_datasets(self):
         """
@@ -373,7 +402,6 @@ class ZarrDataPool(object):
                 insulation = insulation.query(
                     'Chromosome in @self.leave_out_chromosomes').reset_index(drop=True)
         return insulation.sample(frac=self.insulation_subsample_ratio).reset_index(drop=True)
-
 
     def _get_celltype_info(self, window_index):
         """
@@ -569,6 +597,11 @@ class ZarrDataPool(object):
         else:
             inactivated_peak_idx = None
 
+                        
+        if self.hic_obj is not None:
+            hic_matrix = get_hic_from_idx(self.hic_obj, celltype_peaks)
+
+
         if self.additional_peak_columns is not None:
             # assume numeric columns
             additional_peak_columns_data = celltype_peaks[self.additional_peak_columns].to_numpy(
@@ -615,7 +648,7 @@ class ZarrDataPool(object):
             'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': 0.5
         }
 
-        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, motif_mean_std, additional_peak_columns_data
+        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, motif_mean_std, additional_peak_columns_data, hic_matrix
                              
 
 class PreloadDataPack(object):
@@ -823,6 +856,10 @@ class PreloadDataPack(object):
                     sequence, track_start, track_end, mut_peak)
                 sequence = sequence_mut
 
+                
+        if self.zarr_data_pool.hic_obj is not None:
+            hic_matrix = get_hic_from_idx(self.zarr_data_pool.hic_obj, celltype_peaks)
+
         celltype_peaks = celltype_peaks[[
             'Start', 'End']].to_numpy().astype(np.int64)
 
@@ -849,7 +886,7 @@ class PreloadDataPack(object):
             'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': self.mask_ratio
         }
 
-        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, motif_mean_std, additional_peak_columns_data
+        return sample_track, sample_peak_sequence, sample_metadata, celltype_peaks, motif_mean_std, additional_peak_columns_data, hic_matrix
 
     def _extract_sample_from_window(self, window, insulation_index):
         """
@@ -968,7 +1005,7 @@ class PreloadDataPack(object):
 
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, use_insulation=True, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None, n_peaks_sample_gap=50, is_train=True, non_redundant=False, filter_by_min_depth=False, dataset_size=655_360, peak_inactivation=None, mut=None, invert_peak=None, random_shift_peak=True):
+    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks', additional_peak_columns=None, preload_count=50, padding=50, mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None, insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200, use_insulation=True, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None, n_peaks_sample_gap=50, is_train=True, non_redundant=False, filter_by_min_depth=False, dataset_size=655_360, peak_inactivation=None, mut=None, invert_peak=None, random_shift_peak=True, hic_path=None):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -1029,6 +1066,7 @@ class PretrainDataset(Dataset):
         self.additional_peak_columns = additional_peak_columns
         self.peak_inactivation = peak_inactivation
         self.mut = mut
+        self.hic_path = hic_path
         if sequence_obj is None:
             self.sequence = DenseZarrIO(
                 genome_seq_zarr, dtype='int8', mode='r')
@@ -1043,7 +1081,7 @@ class PretrainDataset(Dataset):
                                      leave_out_celltypes=self.leave_out_celltypes,
                                      leave_out_chromosomes=self.leave_out_chromosomes,
                                      is_train=self.is_train, non_redundant=self.non_redundant, filter_by_min_depth=self.filter_by_min_depth,
-                                     invert_peak=self.invert_peak, random_shift_peak=self.random_shift_peak)
+                                     invert_peak=self.invert_peak, random_shift_peak=self.random_shift_peak, hic_path=self.hic_path)
 
         # initialize n_packs preload data packs
         self.preload_data_packs = None

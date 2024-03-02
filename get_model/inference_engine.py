@@ -54,7 +54,7 @@ class ModelWrapper:
     def infer(self, batch_data):
         device = self.device
         # Placeholder for inference code
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels_data  = batch_data
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels_data, hic_matrix  = batch_data
         sample_track = sample_track.to(device, non_blocking=True).float()
         peak_seq = peak_seq.to(device, non_blocking=True).float()
         motif_mean_std = motif_mean_std.to(device, non_blocking=True).float()

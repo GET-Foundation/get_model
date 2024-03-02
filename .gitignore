@@ -25,3 +25,4 @@ log*
 test/*.npy
 test/*results*.csv
 data/ukbb_variants.hg19.tsv.bgz
+data/resources_core.tar.gz
