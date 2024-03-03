@@ -1,5 +1,6 @@
 # simplified GET model
 import os
+from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,6 +11,57 @@ from get_model.model.position_encoding import CTCFPositionalEncoding, AbsolutePo
 from get_model.model.motif import parse_meme_file
 from get_model.model.transformer import GETTransformer
 from get_model.model.pooling import SplitPool, ATACSplitPool, ATACSplitPoolMaxNorm
+
+import torch
+from torch.nn import Linear
+
+class OuterProductMean(nn.Module):
+    """
+    Implements a simplified version of the OuterProductMean.
+    """
+
+    def __init__(self, c_m, c_z, c_hidden, eps=1e-3):
+        """
+        Args:
+            c_m: MSA embedding channel dimension
+            c_z: Pair embedding channel dimension
+            c_hidden: Hidden channel dimension
+        """
+        super(OuterProductMean, self).__init__()
+
+        self.eps = eps
+        self.layer_norm = nn.LayerNorm(c_m)
+        self.linear_1 = Linear(c_m, c_hidden)
+        self.linear_2 = Linear(c_m, c_hidden)
+        self.linear_out = Linear(c_hidden ** 2, c_z, init="final")
+
+    def forward(self, m: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Args:
+            m: [*, N_seq, N_res, C_m] MSA embedding
+            mask: [*, N_seq, N_res] MSA mask, if None, create a mask of ones
+        Returns:
+            [*, N_res, N_res, C_z] pair embedding update
+        """
+        if mask is None:
+            mask = m.new_ones(m.shape[:-1])
+
+        ln = self.layer_norm(m)
+        mask = mask.unsqueeze(-1)
+        a = self.linear_1(ln) * mask
+        b = self.linear_2(ln) * mask
+        a = a.transpose(-2, -3)
+        b = b.transpose(-2, -3)
+
+        # Calculate the outer product mean
+        outer = torch.einsum("...bac,...dae->...bdce", a, b)
+        outer = outer.reshape(outer.shape[:-2] + (-1,))
+        outer = self.linear_out(outer)
+
+        norm = torch.einsum("...abc,...adc->...bdc", mask, mask) + self.eps
+        outer = outer / norm
+
+        return outer
 
 class SequenceEncoder(nn.Module):
     """A sequence encoder based on Conv1D.
@@ -1070,6 +1122,7 @@ class GETFinetuneExpATACFromSequence(nn.Module):
     @torch.jit.ignore
     def no_weight_decay(self):
         return {"pos_embed", "cls_token"}
+
 
 
 
