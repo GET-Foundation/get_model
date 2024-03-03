@@ -1,16 +1,13 @@
 #!/bin/bash
-
-#SBATCH --job-name=get_started_finetune    # Job name
-#SBATCH --output=%x_%j.out                # Output file
-#SBATCH --error=%x_%j.err                 # Error file
-#SBATCH --time=1-00:00:00                   # Time limit hrs:min:sec
-#SBATCH --partition=short                 # Partition
-#SBATCH --ntasks=1                        # Number of tasks (processes)
+#SBATCH --job-name=get_finetune
+#SBATCH --output=/pmglocal/xf2217/%x_%j.out                # Output file
+#SBATCH --error=/pmglocal/xf2217/%x_%j.err                 # Error file
+#SBATCH --time=1-00:00:00
+#SBATCH --nodes=1
 #SBATCH --account pmg
-#SBATCH --constraint=pmgnode
-#SBATCH --gres=gpu:6
-#SBATCH --cpus-per-task=64                 # Number of CPU cores per task
-#SBATCH --mem=4G                          # Memory per node
+#SBATCH --gpus-per-node=6
+#SBATCH --cpus-per-task=64
+#SBATCH --mem-per-cpu=4G
 
 # Set the root and data directories
 ROOT_DIR=/pmglocal/xf2217/GET_STARTED
@@ -26,20 +23,26 @@ fi
 # Navigate to the root directory
 cd $ROOT_DIR
 
-# Define and clone the get_model repository
 CODEBASE_DIR=$ROOT_DIR/get_model
-git clone git@github.com:fuxialexander/get_model.git $CODEBASE_DIR
+# Define and clone the get_model repository
+if [ ! -d $CODEBASE_DIR ]; then
+  git clone git@github.com:fuxialexander/get_model.git $CODEBASE_DIR
+fi
 cd $CODEBASE_DIR
 git checkout finetune-with-atac
+git pull --rebase
 
 # Create and activate a new mamba environment
-mamba env create -f ${CODEBASE_DIR}/environment.yml -p ${ROOT_DIR}/mambaforge/get_started
+if [ ! -d ${ROOT_DIR}/mambaforge/get_started ]; then
+  mamba env create -f ${CODEBASE_DIR}/environment.yml -p ${ROOT_DIR}/mambaforge/get_started
 source activate ${ROOT_DIR}/mambaforge/get_started
 
 # Copy and decompress data
-cp -r $DATA_DIR ${ROOT_DIR}/get_data
-cd ${ROOT_DIR}/get_data
-for f in *.tar; do tar -xvf $f; done
+if [ ! -d ${ROOT_DIR}/get_data ]; then
+  cp -r $DATA_DIR ${ROOT_DIR}/get_data
+  cd ${ROOT_DIR}/get_data
+  for f in *.tar; do tar -xvf $f; done
+fi
 
 # Return to the codebase directory and install the package
 cd $CODEBASE_DIR
