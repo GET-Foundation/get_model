@@ -5,42 +5,45 @@ from pyranges import PyRanges as pr
 from get_model.dataset.collate import get_rev_collate_fn
 from get_model.dataset.zarr_dataset import PreloadDataPack, get_padding_pos
 from get_model.model.model import GETFinetuneExpATAC, GETFinetuneExpATACFromSequence
-
+from get_model.engine import train_class_batch
 
 class ModelWrapper:
-    def __init__(self, checkpoint_path, device='cuda', with_sequence=False):
-        if with_sequence:
-            self.model = GETFinetuneExpATACFromSequence(
-                num_regions=100,
-                num_res_block=0,
-                motif_prior=False,
-                embed_dim=768,
-                num_layers=12,
-                d_model=768,
-                flash_attn=False,
-                nhead=12,
-                dropout=0.1,
-                output_dim=2,
-                pos_emb_components=[],
-            )
+    def __init__(self, checkpoint_path, device='cuda', with_sequence=False, model=None):
+        if model is not None:
+            self.model = model
         else:
-            self.model = GETFinetuneExpATAC(
-                num_regions=100,
-                num_res_block=0,
-                motif_prior=False,
-                embed_dim=768,
-                num_layers=12,
-                d_model=768,
-                flash_attn=False,
-                nhead=12,
-                dropout=0.1,
-                output_dim=2,
-                pos_emb_components=[],
-                atac_kernel_num=161,
-                atac_kernel_size=3,
-                joint_kernel_num=161,
-                final_bn=False,
-            )
+            if with_sequence:
+                self.model = GETFinetuneExpATACFromSequence(
+                    num_regions=100,
+                    num_res_block=0,
+                    motif_prior=False,
+                    embed_dim=768,
+                    num_layers=12,
+                    d_model=768,
+                    flash_attn=False,
+                    nhead=12,
+                    dropout=0.1,
+                    output_dim=2,
+                    pos_emb_components=[],
+                )
+            else:
+                self.model = GETFinetuneExpATAC(
+                    num_regions=100,
+                    num_res_block=0,
+                    motif_prior=False,
+                    embed_dim=768,
+                    num_layers=12,
+                    d_model=768,
+                    flash_attn=False,
+                    nhead=12,
+                    dropout=0.1,
+                    output_dim=2,
+                    pos_emb_components=[],
+                    atac_kernel_num=161,
+                    atac_kernel_size=3,
+                    joint_kernel_num=161,
+                    final_bn=False,
+                )
         self.device=device
         self._load_checkpoint(checkpoint_path)
         self.loss = torch.nn.PoissonNLLLoss(reduction='mean', log_input=False)
@@ -61,9 +64,10 @@ class ModelWrapper:
         n_peaks = n_peaks.to(device, non_blocking=True)
         labels_data = labels_data.to(device, non_blocking=True).float()
         other_labels_data = other_labels_data.to(device, non_blocking=True).float()
+        hic_matrix = hic_matrix.to(device, non_blocking=True).float()
         
         # compute output
-        loss, atac, exp, exp_target = train_class_batch(self.model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data[:,:,0], labels_data, self.loss, other_labels_data)
+        loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target = train_class_batch(self.model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data[:,:,0], labels_data, other_labels_data, self.loss, hic_matrix)
 
         # other_labels_data is B, R, N where [:,:, 1] is TSS indicator
         # only append tss preds and obs
@@ -74,39 +78,11 @@ class ModelWrapper:
         return pred_exp, ob_exp, pred_atac, ob_atac
 
 
-def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, criterion,other_labels_data):
-    device = peak_seq.device
-    padding_mask = get_padding_pos(mask)
-    mask_for_loss = 1-padding_mask
-    padding_mask = padding_mask.to(device, non_blocking=True).bool()
-    mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
-    with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
-        atac, exp, confidence = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data)
         
-
-    exp = exp * mask_for_loss
-    indices = torch.where(mask_for_loss==1)
-    exp = exp[indices[0], indices[1], :].flatten()
-    exp_target = exp_target * mask_for_loss
-    exp_target = exp_target[indices[0], indices[1], :].flatten()
-    loss_exp = criterion(exp, exp_target)
-    
-    if atac is not None:
-        atac = atac * mask_for_loss
-        indices = torch.where(mask_for_loss==1)
-        atac = atac[indices[0], indices[1], :].flatten()
-        atac_target = atac_target.unsqueeze(-1) * mask_for_loss
-        atac_target = atac_target[indices[0], indices[1], :].flatten()
-        loss_atac = criterion(atac, atac_target)
-        loss = loss_exp + loss_atac 
-    else:
-        loss = loss_exp
-    return loss, atac, exp, exp_target 
-
 class InferenceEngine:
-    def __init__(self, dataset, model_checkpoint, mut=None, peak_inactivation=None, with_sequence=False, device='cuda'):
+    def __init__(self, dataset, model_checkpoint, mut=None, peak_inactivation=None, with_sequence=False, device='cuda', model=None):
         self.dataset = dataset
-        self.model_wrapper = ModelWrapper(model_checkpoint, with_sequence=with_sequence, device=device)
+        self.model_wrapper = ModelWrapper(model_checkpoint, with_sequence=with_sequence, device=device, model=model)
         self.mut = mut
         self.peak_inactivation = peak_inactivation
 
