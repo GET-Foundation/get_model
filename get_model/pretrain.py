@@ -140,6 +140,12 @@ def get_args_parser():
         help="Random shift peak boundary",
     )
     parser.add_argument(
+        "--hic_path",
+        default=None,
+        type=str,
+        help="Hi-C dataset path",
+    )
+    parser.add_argument(
         "--mask_ratio",
         default=0.75,
         type=float,

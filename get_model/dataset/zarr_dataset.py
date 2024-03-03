@@ -599,7 +599,7 @@ class ZarrDataPool(object):
         else:
             inactivated_peak_idx = None
 
-        hic_matrix = None       
+        hic_matrix = 0       
         if self.hic_obj is not None:
             hic_matrix = get_hic_from_idx(self.hic_obj, celltype_peaks)
 

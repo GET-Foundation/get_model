@@ -171,14 +171,14 @@ def pretrain_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion):
+def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=None):
     device = peak_seq.device
     padding_mask = get_padding_pos(mask)
     mask_for_loss = 1-padding_mask
     padding_mask = padding_mask.to(device, non_blocking=True).bool()
     mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
-        atac, exp, confidence = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels)
+        atac, exp, confidence = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels, hic_matrix=hic_matrix)
 
     B, R, N = exp.shape
     exp = exp * mask_for_loss
@@ -212,11 +212,11 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
         atac_target = atac_target.unsqueeze(-1) * mask_for_loss
         atac_target = atac_target[indices[0], indices[1], :].flatten()
         loss_atac = criterion(atac, atac_target)
-        loss = loss_exp + loss_atac * 0.2
+        loss = loss_exp + loss_atac 
     else:
         loss = loss_exp
     if confidence is not None:
-        loss = loss + loss_confidence * 0.01
+        loss = loss + loss_confidence * 0.1
     return loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target
 
 
@@ -260,7 +260,7 @@ def finetune_train_one_epoch(
     ):  
         # logging.info("data_iter_step: {}".format(data_iter_step))
         # logging.info("start getting batch")
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels, _ = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels, hic_matrix = batch
         if min(chunk_size)<0:
             continue
         # logging.info("Got batch")
@@ -289,11 +289,12 @@ def finetune_train_one_epoch(
         n_peaks = n_peaks.to(device, non_blocking=True)
         labels_data = labels_data.to(device, non_blocking=True).bfloat16()
         other_labels = other_labels.to(device, non_blocking=True).bfloat16()
+        hic_matrix = hic_matrix.to(device, non_blocking=True).bfloat16()
         if loss_scaler is None:
             peaks = peaks.half()
-            loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion)
+            loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion, hic_matrix=hic_matrix)
         else:
-            loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion)
+            loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion, hic_matrix=hic_matrix)
 
         loss_value = loss.item()
 

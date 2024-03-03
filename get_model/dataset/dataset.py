@@ -56,7 +56,8 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
         'n_peaks_sample_gap': 50,
         'non_redundant': args.non_redundant,
         'filter_by_min_depth': args.filter_by_min_depth,
-        'dataset_size': 40_960
+        'dataset_size': 40_960,
+        'hic_path': args.hic_path
     }
 
     # Override parameters from parameter_override
@@ -77,7 +78,7 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
         random_shift_peak=parameters['random_shift_peak'], invert_peak=parameters[
             'invert_peak'], peak_inactivation=parameters['peak_inactivation'],
         use_insulation=parameters['use_insulation'], sequence_obj=sequence_obj, leave_out_celltypes=parameters['leave_out_celltypes'],
-        leave_out_chromosomes=parameters['leave_out_chromosomes'], is_train=is_train, dataset_size=parameters['dataset_size']
+        leave_out_chromosomes=parameters['leave_out_chromosomes'], is_train=is_train, dataset_size=parameters['dataset_size'], hic_path=parameters['hic_path']
     )
 
     return dataset

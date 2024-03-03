@@ -40,7 +40,7 @@ class Attention(nn.Module):
         self.proj = nn.Linear(all_head_dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x, attention_mask=None):
+    def forward(self, x, attention_mask=None, attention_bias=None):
         B, N, C = x.shape
         qkv_bias = None
         if self.q_bias is not None:
@@ -79,7 +79,15 @@ class Attention(nn.Module):
             )
 
             attn = attn.masked_fill(attention_mask, attn_mask_value)
+        if attention_bias is not None:
+            if attention_bias.dim() == 1:
+                attention_bias = attention_bias.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+            elif attention_bias.dim() == 2:
+                attention_bias = attention_bias.unsqueeze(1).unsqueeze(1)
+            elif attention_bias.dim() == 3:
+                attention_bias = attention_bias.unsqueeze(1)
 
+            attn = attn + attention_bias
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
@@ -227,13 +235,13 @@ class Block(nn.Module):
         else:
             self.gamma_1, self.gamma_2 = None, None
 
-    def forward(self, x, attention_mask=None):
+    def forward(self, x, attention_mask=None, attention_bias=None):
         if self.gamma_1 is None:
-            x_attn, attn = self.attn(self.norm1(x), attention_mask=attention_mask)
+            x_attn, attn = self.attn(self.norm1(x), attention_mask=attention_mask, attention_bias=attention_bias)
             x = x + self.drop_path(x_attn)
             x = x + self.drop_path(self.mlp(self.norm2(x)))
         else:
-            x_attn, attn = self.attn(self.norm1(x), attention_mask=attention_mask)
+            x_attn, attn = self.attn(self.norm1(x), attention_mask=attention_mask, attention_bias=attention_bias)
             x = x + self.drop_path(self.gamma_1 * x_attn)
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
         return x, attn
@@ -285,10 +293,10 @@ class GETTransformer(nn.Module):
         self.norm = nn.Identity() if use_mean_pooling else norm_layer(embed_dim)
         self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
 
-    def forward(self, x, mask=None, return_attns=False):
+    def forward(self, x, mask=None, return_attns=False, bias=None):
         attn_output = [] if return_attns else None
         for blk in self.blocks:
-            x, attn = blk(x, mask)
+            x, attn = blk(x, mask, bias)
             if return_attns:
                 attn_output.append(attn)
         x = self.norm(x)

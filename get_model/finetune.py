@@ -147,6 +147,12 @@ def get_args():
         help="Random shift peak boundary",
     )
     parser.add_argument(
+        "--hic_path",
+        default=None,
+        type=str,
+        help="Hi-C dataset path",
+    )
+    parser.add_argument(
         "--peak_inactivation",
         default=None,
         choices=['random_tss', None],
