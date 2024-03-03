@@ -28,6 +28,7 @@ CODEBASE_DIR=$ROOT_DIR/get_model
 if [ ! -d $CODEBASE_DIR ]; then
   git clone git@github.com:fuxialexander/get_model.git $CODEBASE_DIR
 fi
+
 cd $CODEBASE_DIR
 git checkout finetune-with-atac
 git pull --rebase
@@ -35,6 +36,7 @@ git pull --rebase
 # Create and activate a new mamba environment
 if [ ! -d ${ROOT_DIR}/mambaforge/get_started ]; then
   mamba env create -f ${CODEBASE_DIR}/environment.yml -p ${ROOT_DIR}/mambaforge/get_started
+fi
 source activate ${ROOT_DIR}/mambaforge/get_started
 
 # Copy and decompress data
