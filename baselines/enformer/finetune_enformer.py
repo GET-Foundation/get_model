@@ -31,8 +31,6 @@ from get_model.optim import (
 torch.autograd.set_detect_anomaly(True)
 
 hg38_path = "/pmglocal/alb2281/get_data/get_resources/hg38.ml.fa"
-atac_data = "/pmglocal/alb2281/get_data/k562_count_10/k562_count_10.csv"
-labels_path = "/pmglocal/alb2281/get_data/k562_count_10/k562_count_10.watac.npz"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class GenomeIntervalFinetuneDataset(Dataset):
@@ -408,16 +406,176 @@ def train_enformer(args):
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-b", "--batch_size", type=int, default=2)
-    parser.add_argument("-w", "--num_workers", type=int, default=4)
-    parser.add_argument("-e", "--num_epochs", type=int, default=10)
-    parser.add_argument("-a", "--accumulation_steps", type=int, default=1)
-    parser.add_argument("-l", "--learning_rate", type=float, default=1e-5)
-    parser.add_argument("--eval_freq", type=int, default=1, help="Frequency of evaluation")
-    parser.add_argument("--wandb_project_name", type=str, default="enformer-baseline", help="Wandb project name")
-    parser.add_argument("--wandb_entity_name", type=str, default="get-v3", help="Wandb entity name")
-    parser.add_argument("--wandb_run_name", type=str, default="None", help="Wandb entity name")
-    parser.add_argument("--leaveout_chr", type=str, default="chr11")
+    parser.add_argument("--batch_size", default=64, type=int)
+    parser.add_argument("--epochs", default=30, type=int)
+    parser.add_argument("--update_freq", default=1, type=int)
+    parser.add_argument("--save_ckpt_freq", default=1, type=int)
+    # wandb params
+    parser.add_argument("--wandb_project_name", type=str, default="get-finetune", help="wandb project name")
+    parser.add_argument("--wandb_run_name", type=str, default=None, help="wandb run name")
+    # torch compile
+    parser.add_argument(
+        "--compile_model",
+        action="store_true",
+        help="compile model with torch compile",
+    )
 
+    # Optimizer parameters
+    parser.add_argument(
+        "--opt",
+        default="adamw",
+        type=str,
+        metavar="OPTIMIZER",
+        help='Optimizer (default: "adamw"',
+    )
+    parser.add_argument(
+        "--opt_eps",
+        default=1e-8,
+        type=float,
+        metavar="EPSILON",
+        help="Optimizer Epsilon (default: 1e-8)",
+    )
+    parser.add_argument(
+        "--opt_betas",
+        default=None,
+        type=float,
+        nargs="+",
+        metavar="BETA",
+        help="Optimizer Betas (default: None, use opt default)",
+    )
+    parser.add_argument(
+        "--clip_grad",
+        type=float,
+        default=None,
+        metavar="NORM",
+        help="Clip gradient norm (default: None, no clipping)",
+    )
+    parser.add_argument(
+        "--momentum",
+        type=float,
+        default=0.9,
+        metavar="M",
+        help="SGD momentum (default: 0.9)",
+    )
+    parser.add_argument(
+        "--weight_decay", type=float, default=0.05, help="weight decay (default: 0.05)"
+    )
+    parser.add_argument(
+        "--weight_decay_end",
+        type=float,
+        default=None,
+        help="""Final value of the
+        weight decay. We use a cosine schedule for WD and using a larger decay by
+        the end of training improves performance for ViTs.""",
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=1e-3,
+        metavar="LR",
+        help="learning rate (default: 1e-3)",
+    )
+    parser.add_argument("--layer_decay", type=float, default=0.75)
+
+    parser.add_argument(
+        "--warmup_lr",
+        type=float,
+        default=1e-6,
+        metavar="LR",
+        help="warmup learning rate (default: 1e-6)",
+    )
+    parser.add_argument(
+        "--min_lr",
+        type=float,
+        default=1e-5,
+        metavar="LR",
+        help="lower lr bound for cyclic schedulers that hit 0 (1e-5)",
+    )
+
+    parser.add_argument(
+        "--warmup_epochs",
+        type=int,
+        default=1,
+        metavar="N",
+        help="epochs to warmup LR, if scheduler supports",
+    )
+    parser.add_argument(
+        "--warmup_steps",
+        type=int,
+        default=-1,
+        metavar="N",
+        help="num of steps to warmup LR, will overload warmup_epochs if set > 0",
+    )
+    parser.add_argument(
+        "--mask_ratio",
+        default=0.5,
+        type=float,
+        help="ratio of the visual tokens/patches need be masked",
+    )
+
+    # Dataset parameters
+    parser.add_argument(
+        "--atac_data",
+        default=None,
+        type=str,
+        help="atac dataset path",
+    )
+    parser.add_argument(
+        "--labels_path", default=None, type=str, help="labels path"
+    )
+
+    parser.add_argument(
+        "--output_dir", default="", help="path where to save, empty for no saving"
+    )
+    parser.add_argument(
+        "--device", default="cuda", help="device to use for training / testing"
+    )
+    parser.add_argument("--seed", default=0, type=int)
+    parser.add_argument("--save_ckpt", action="store_true")
+    parser.add_argument("--no_save_ckpt", action="store_false", dest="save_ckpt")
+    parser.set_defaults(save_ckpt=True)
+
+    parser.add_argument(
+        "--start_epoch", default=0, type=int, metavar="N", help="start epoch"
+    )
+    parser.add_argument("--eval", action="store_true", help="Perform evaluation only")
+    parser.add_argument(
+        "--eval_freq",
+        default=1,
+        type=int,
+        metavar="N",
+    )
+    parser.add_argument(
+        "--dist_eval",
+        action="store_true",
+        default=False,
+        help="Enabling distributed evaluation",
+    )
+    parser.add_argument("--num_workers", default=10, type=int)
+    parser.add_argument(
+        "--pin_mem",
+        action="store_true",
+        help="Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.",
+    )
+    parser.add_argument("--no_pin_mem", action="store_false", dest="pin_mem")
+    parser.set_defaults(pin_mem=True)
+
+    # distributed training parameters
+    parser.add_argument("--distributed", default=True, action="store_true")
+    parser.add_argument(
+        "--world_size", default=1, type=int, help="number of distributed processes"
+    )
+    parser.add_argument("--local_rank", default=-1, type=int)
+    parser.add_argument("--dist_on_itp", action="store_true")
+    parser.add_argument(
+        "--dist_url", default="env://", help="url used to set up distributed training"
+    )
+
+    parser.add_argument("--eval_each_step", action="store_true", default=False)
+    parser.add_argument("--eval_tss", action="store_true", default=False)
+    parser.add_argument("--target_type", default="Log", type=str)
+    parser.add_argument("--target_thresh", default=32, type=int)
+
+    parser.add_argument("--leave_out_chromosomes", default="chr4", type=str)
     args = parser.parse_args()
     train_enformer(args)

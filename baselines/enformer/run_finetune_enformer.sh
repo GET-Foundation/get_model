@@ -1,16 +1,27 @@
 #!/bin/bash
 # ATAC baseline
+ATAC_DATA="/pmglocal/alb2281/get_data/k562_count_10/k562_count_10.csv"
+LABELS_PATH="/pmglocal/alb2281/get_data/k562_count_10/k562_count_10.watac.npz"
 LEAVEOUT_CHR="chr11"
-RUN_NAME="enformer_finetune_atac_leaveout_$LEAVEOUT_CHR"
+FINETUNE_EXP_NAME="enformer_finetune_atac_leaveout_$LEAVEOUT_CHR"
+OUTPUT_DIR="/pmglocal/alb2281/get_ckpts/output/k562-baseline/$FINETUNE_EXP_NAME/"
+PORT=7960
 
-CUDA_VISIBLE_DEVICES=0 python /pmglocal/alb2281/repos/get_model/baselines/enformer/enformer.py \
-    --batch_size 2 \
-    --num_workers 1 \
-    --num_epochs 10 \
-    --accumulation_steps 1 \
-    --learning_rate 1e-5 \
-    --eval_freq 5 \
-    --leaveout_chr ${LEAVEOUT_CHR} \
-    --wandb_project_name "get-baselines" \
-    --wandb_entity_name "get-v3" \
-    --wandb_run_name ${RUN_NAME} 
+export NCCL_P2P_LEVEL=NVL
+
+# batch_size can be adjusted according to the graphics card
+CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=1 python -m torch.distributed.run --nproc_per_node=2 --rdzv-endpoint=localhost:$PORT /pmglocal/alb2281/repos/get_model/baselines/enformer/finetune_enformer.py \
+    --atac_data ${DATA_PATH} \
+    --labels_path ${LABELS_PATH} \
+    --batch_size 16 \
+    --num_workers 32 \
+    --lr 5e-4 \
+    --opt adamw \
+    --wandb_project_name "get-baselines-atac" \
+    --wandb_run_name "$FINETUNE_EXP_NAME" \
+    --eval_freq 1 \
+    --dist_eval \
+    --leave_out_chromosomes ${LEAVEOUT_CHR} \
+    --warmup_epochs 20 \
+    --epochs 100 \
+    --output_dir ${OUTPUT_DIR} 
