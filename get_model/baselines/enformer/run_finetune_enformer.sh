@@ -10,8 +10,8 @@ PORT=7960
 export NCCL_P2P_LEVEL=NVL
 
 # batch_size can be adjusted according to the graphics card
-CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=1 python -m torch.distributed.run --nproc_per_node=2 --rdzv-endpoint=localhost:$PORT /pmglocal/alb2281/repos/get_model/baselines/enformer/finetune_enformer.py \
-    --atac_data ${DATA_PATH} \
+CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=1 python -m torch.distributed.run --nproc_per_node=2 --rdzv-endpoint=localhost:$PORT /pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/finetune_enformer.py \
+    --atac_data ${ATAC_DATA} \
     --labels_path ${LABELS_PATH} \
     --batch_size 16 \
     --num_workers 32 \

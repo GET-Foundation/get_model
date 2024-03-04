@@ -5,9 +5,11 @@ import os
 import time
 from collections import OrderedDict
 from pathlib import Path
+import polars as pl
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
+from torch.utils.data import Dataset
 from timm.data.mixup import Mixup
 from timm.models import create_model
 from timm.utils import ModelEma
@@ -19,8 +21,8 @@ from enformer_pytorch.data import FastaInterval, identity
 
 import get_model.utils as utils
 from get_model.utils import NativeScalerWithGradNormCount as NativeScaler
-from get_model.engine import evaluate_all
-from get_model.engine import finetune_train_one_epoch as train_one_epoch
+from get_model.baselines.enformer.engine import evaluate_all
+from get_model.baselines.enformer.engine import finetune_train_one_epoch as train_one_epoch
 from get_model.optim import (
     LayerDecayValueAssigner,
     create_optimizer,
@@ -91,16 +93,13 @@ def split_data_by_chr(base_dir, leaveout_chr):
 def train_enformer(args):
     utils.init_distributed_mode(args)
 
-    if ds_init is not None:
-        utils.create_ds_config(args)
-
     print(args)
 
     if utils.is_main_process(): # Log metrics only on main process
         wandb.login()
         run = wandb.init(
-            project=opts.wandb_project_name,
-            name=opts.wandb_run_name,
+            project=args.wandb_project_name,
+            name=args.wandb_run_name,
         )
 
     device = torch.device(args.device)
@@ -111,11 +110,11 @@ def train_enformer(args):
     np.random.seed(seed)
     cudnn.benchmark = True
 
-    base_dir = f"/pmglocal/alb2281/get_data/k562_count_10/splits/{args.leaveout_chr}"
+    base_dir = f"/pmglocal/alb2281/get_data/k562_count_10/splits/{args.leave_out_chromosomes}"
 
     if not os.path.exists(base_dir):
         os.makedirs(base_dir)
-        train_path, val_path = split_data_by_chr(base_dir, args.leaveout_chr)
+        train_path, val_path = split_data_by_chr(base_dir, args.leave_out_chromosomes)
     else:
         train_path = f"{base_dir}/train.bed"
         val_path = f"{base_dir}/val.bed"
@@ -158,11 +157,8 @@ def train_enformer(args):
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
-    if args.log_dir is not None:
-        os.makedirs(args.log_dir, exist_ok=True)
-        log_writer = utils.TensorboardLogger(log_dir=args.log_dir)
-    else:
-        log_writer = None
+
+    log_writer = None
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
@@ -211,7 +207,6 @@ def train_enformer(args):
 
     if dataset_val is not None:
         print("Number of testing examples = %d" % len(dataset_val))
-    num_layers = model_without_ddp.num_layers
 
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(
