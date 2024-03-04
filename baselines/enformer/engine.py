@@ -1,5 +1,16 @@
-from enformer_pytorch.modeling_enformer import poisson_loss
+import logging
+import math
+import sys
+from typing import Iterable, Optional
+from tqdm import tqdm
+import numpy as np
+import torch
+import torch.nn as nn
+from timm.data import Mixup
+from timm.utils import ModelEma
 
+from get_model.metrics import score_pearsonr, score_r2, score_spearmanr
+import get_model.utils as utils
 
 
 def train_class_batch(model, seq_batch, target_batch):
@@ -7,6 +18,19 @@ def train_class_batch(model, seq_batch, target_batch):
     loss = poisson_loss(preds_batch, target_batch)
     return loss
 
+
+def cal_score_stats(preds, obs, data_loader, args):
+    if args.eval_nonzero:
+        r2score = score_r2(preds[obs > 0], obs[obs > 0])
+        spearmanr_score = score_spearmanr(preds[obs > 0], obs[obs > 0])
+        pearsonr_score = score_pearsonr(preds[obs > 0], obs[obs > 0])
+    else:
+        r2score = score_r2(preds, obs)
+        spearmanr_score = score_spearmanr(preds, obs)
+        pearsonr_score = score_pearsonr(preds, obs)
+
+    return r2score, spearmanr_score, pearsonr_score
+    
 
 def finetune_train_one_epoch(
     model: torch.nn.Module,
@@ -148,4 +172,46 @@ def finetune_train_one_epoch(
             log_writer.set_step()
 
     print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+@torch.no_grad()
+def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=True):
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = "Test:"
+
+    # switch to evaluation mode
+    model.eval()
+    preds = []
+    obs = []
+    
+    for batch in tqdm(data_loader):
+        seq_batch, target_batch = batch
+        target_batch = target_batch.unsqueeze(1)
+        target_batch = target_batch.unsqueeze(2)
+        loss, preds = train_class_batch(model, pred_batch, target_batch)
+        # compute output
+        loss, preds_output = train_class_batch(model, pred_batch, target_batch)
+        preds.append(preds_output.reshape(-1).detach().cpu().numpy())
+        obs.append(target_batch.reshape(-1).detach().cpu().numpy())
+        metric_logger.update(loss=loss.item())
+
+    preds = np.concatenate(preds, axis=0).reshape(-1)
+    obs = np.concatenate(obs, axis=0).reshape(-1)
+    r2score, pearsonr_score, spearmanr_score = cal_score_stats(preds, obs, data_loader, args)
+
+    metric_logger.meters["r2score"].update(r2score, n=1)
+    metric_logger.meters["pearsonr_score"].update(pearsonr_score, n=1)
+    metric_logger.meters["spearmanr_score"].update(spearmanr_score, n=1)
+
+    if printlog:
+        print(
+            "* Score@R2 {r2:.3f} Score@pearsonr {pearson:.3f} Score@spearmanr {spearman:.3f}  loss {losses.global_avg:.3f}".format(
+                r2=r2score,
+                pearson=pearsonr_score,
+                spearman=spearmanr_score,
+                losses=metric_logger.loss,
+            )
+        )
+
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}

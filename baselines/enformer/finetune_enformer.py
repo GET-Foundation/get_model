@@ -1,28 +1,39 @@
 import argparse
-import numpy as np
+import datetime
+import json
 import os
-import pandas as pd
+import time
+from collections import OrderedDict
 from pathlib import Path
-import polars as pl
-from scipy.sparse import load_npz
+import numpy as np
 import torch
-from torch.cuda.amp import autocast, GradScaler
-from torch.utils.data import Dataset, DataLoader, TensorDataset
+import torch.backends.cudnn as cudnn
+from timm.data.mixup import Mixup
+from timm.models import create_model
+from timm.utils import ModelEma
 import wandb
 
 from enformer_pytorch import from_pretrained, Enformer, GenomeIntervalDataset
 from enformer_pytorch.finetune import HeadAdapterWrapper
 from enformer_pytorch.data import FastaInterval, identity
 
-from get_model.metrics import score_r2, score_spearmanr, score_pearsonr
-from get_model.utils import get_test_stats
+import get_model.utils as utils
+from get_model.utils import NativeScalerWithGradNormCount as NativeScaler
+from get_model.engine import evaluate_all
+from get_model.engine import finetune_train_one_epoch as train_one_epoch
+from get_model.optim import (
+    LayerDecayValueAssigner,
+    create_optimizer,
+    get_parameter_groups,
+)
 
+
+torch.autograd.set_detect_anomaly(True)
 
 hg38_path = "/pmglocal/alb2281/get_data/get_resources/hg38.ml.fa"
 atac_data = "/pmglocal/alb2281/get_data/k562_count_10/k562_count_10.csv"
 labels_path = "/pmglocal/alb2281/get_data/k562_count_10/k562_count_10.watac.npz"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 
 class GenomeIntervalFinetuneDataset(Dataset):
     def __init__(
@@ -77,22 +88,6 @@ def split_data_by_chr(base_dir, leaveout_chr):
     train_df.to_csv(train_path, sep="\t", header=False, index=False)
     val_df.to_csv(val_path, sep="\t", header=False, index=False)
     return train_path, val_path
-
-
-def get_eval_stats(preds, targets):
-    r2score = score_r2(preds, targets)
-    spearmanr_score = score_spearmanr(preds, targets)
-    pearsonr_score = score_pearsonr(preds, targets)
-    ret_scores = {
-        "val_r2": r2score,
-        "val_spearmanr": spearmanr_score,
-        "val_pearsonr": pearsonr_score
-    }
-    return ret_scores
-
-
-def poisson_loss(pred, target):
-    return (pred - target * log(pred)).mean()
 
 
 def train_enformer(args):
@@ -201,18 +196,6 @@ def train_enformer(args):
         auto_set_target_length = False, # Override infer target_length from target dimensions
     ).to(device)
     model.to(device)
-
-    # model_ema = None
-    # if args.model_ema:
-    #     # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper
-    #     model_ema = ModelEma(
-    #         model,
-    #         decay=args.model_ema_decay,
-    #         device="cpu" if args.model_ema_force_cpu else "",
-    #         resume="",
-    #     )
-    #     print("Using EMA with decay = %.8f" % args.model_ema_decay)
-
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -307,6 +290,7 @@ def train_enformer(args):
     max_r2score_atac = 0.0
     max_pearsonr_score_atac = 0.0
     max_spearmanr_score_atac = 0.0
+
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -358,18 +342,10 @@ def train_enformer(args):
             print(
                 f"R2, Pearson, Spearmanr Score of the network on the {len(dataset_val)} test expression: {test_stats['r2score']:.1f}, {test_stats['pearsonr_score']:.1f}, {test_stats['spearmanr_score']:.1f}"
             )
-            # print(
-            #     f"R2, Pearson, Spearmanr Score of the network on the {len(dataset_val)} test atac: {test_stats['r2score_atac']:.1f}, {test_stats['pearsonr_score_atac']:.1f}, {test_stats['spearmanr_score_atac']:.1f}"
-            # )
-
             if max_r2score < test_stats["r2score"]:
                 max_r2score = test_stats["r2score"]
                 max_pearsonr_score = test_stats["pearsonr_score"]
                 max_spearmanr_score = test_stats["spearmanr_score"]
-
-                # max_r2score_atac = test_stats["r2score_atac"]
-                # max_pearsonr_score_atac = test_stats["pearsonr_score_atac"]
-                # max_spearmanr_score_atac = test_stats["spearmanr_score_atac"]
 
                 if args.output_dir and args.save_ckpt:
                     utils.save_model(
@@ -410,7 +386,6 @@ def train_enformer(args):
         else:
             log_stats = {
                 **{f"train_{k}": v for k, v in train_stats.items()},
-                # **{f'test_{k}': v for k, v in test_stats.items()},
                 "epoch": epoch,
                 "n_parameters": n_parameters,
             }
@@ -430,49 +405,6 @@ def train_enformer(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time {}".format(total_time_str))
 
-
-            
-            
-            running_loss += loss
-            loss.backward()
-
-            if (idx + 1) % args.accumulation_steps == 0:  # Update every accumulation_steps
-                optimizer.step()
-                optimizer.zero_grad()
-
-            if (train_steps + 1) % 10 == 0:
-                print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{train_steps+1}/{len(train_loader)}], Train Loss: {running_loss.item() / (idx+1):.4f}")
-            train_steps += 1
-            
-
-        avg_loss = running_loss.item() / len(train_loader)
-        train_stats = {
-            "train_epoch": epoch,
-            "train_loss": avg_loss,
-        }
-        # wandb.log(train_stats)
-        print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{train_steps+1}/{len(train_loader)}], Train Loss: {avg_loss:.4f}")
-
-        if args.eval_freq > 0 and (epoch + 1) % args.eval_freq == 0:
-            val_loss = 0.0
-            for idx, (seq_batch, target_batch) in enumerate(val_loader):
-                target_batch = target_batch.unsqueeze(1)
-                target_batch = target_batch.unsqueeze(2)
-                seq_batch = seq_batch.to(device)
-                target_batch = target_batch.to(device)
-
-                preds = enformer(seq_batch)
-                loss = poisson_loss(preds, target_batch)
-                val_loss += loss
-            
-            avg_val_loss = val_loss.item() / len(val_loader)
-            test_stats = get_test_stats(preds, target_batch)
-            test_stats += {
-                "val_loss": avg_val_loss,
-            }
-            # wandb.log(test_stats)
-            print(f"Epoch [{epoch+1}/{num_epochs}], Val Loss: {avg_val_loss:.4f}")
-            
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
