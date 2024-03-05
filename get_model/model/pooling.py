@@ -163,7 +163,7 @@ class ConvPool(nn.Module):
         self.pool_method = pool_method
         self.motif_proj = nn.Conv1d(motif_dim, hidden_dim, 1, bias=False)
         self.dila_conv_tower = DilatedConv1dBlock(hidden_dim, depth = 7)
-        self.aprofile_header = nn.Conv1d(hidden_dim, 4, 20, padding='same')
+        self.aprofile_header = nn.Conv1d(hidden_dim, 1, 20, padding='same')
         self.atpm_header = nn.Conv1d(hidden_dim, 1, 1, padding='same')
         
     def forward(self, x, peak_split, n_peaks, max_n_peaks):
