@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 from torch import nn
+import math
 
 def pool(x, method='mean'):
     """
@@ -55,6 +56,153 @@ class SplitPool(nn.Module):
 
         return x
 
+class DoubleConv(nn.Module):
+    """(convolution => [BN] => ReLU) * 2"""
+
+    def __init__(self, in_channels, out_channels, mid_channels=None):
+        super().__init__()
+        if not mid_channels:
+            mid_channels = out_channels
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
+def exponential_linspace_int(start, end, num, divisible_by = 1):
+    def _round(x):
+        return int(round(x / divisible_by) * divisible_by)
+
+    base = math.exp(math.log(end / start) / (num - 1))
+    return [_round(start * base**i) for i in range(num)]
+class Residual(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, x, **kwargs):
+        return self.fn(x, **kwargs) + x
+
+
+class DilatedConv1d(nn.Module):
+    """A dilated 1D convolution with gated activation units. Don't change the 
+    sequence length. 
+    """
+    def __init__(self, dim, kernel_size = 3, dilation = 1):
+        super().__init__()
+        self.conv = nn.Conv1d(dim, dim, kernel_size, padding = (kernel_size - 1) * dilation // 2, dilation = dilation)
+        self.activation = nn.GELU()
+    def forward(self, x):
+        x = self.conv(x)
+        return self.activation(x) + x
+    
+class DilatedConv1dBlock(nn.Module):
+    """A series of dilated 1D convolutions with expanding dilation by a factor of 2, starting from 4"""
+    def __init__(self, dim, depth = 3, kernel_size = 3):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+        for i in range(depth):
+            dilation = 2 ** (i+1)
+            self.layers.append(DilatedConv1d(dim, kernel_size = kernel_size, dilation = dilation))
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+
+
+
+
+class SequenceDecoder(nn.Module):
+    """A sequence decoder that takes in a sequence of embeddings and outputs a sequence of logits for one-hot prediction"""
+    def __init__(self, dim, depth, num_tokens, max_seq_len, kernel_size = 3):
+        super().__init__()
+        self.dim = dim
+        self.num_tokens = num_tokens
+        self.max_seq_len = max_seq_len
+        self.layers = nn.ModuleList([])
+        for _ in range(depth):
+            self.layers.append(nn.Sequential(
+                nn.Conv1d(dim, dim, kernel_size, padding = kernel_size // 2),
+                nn.GELU()
+            ))
+        self.to_logits = nn.Conv1d(dim, num_tokens, 1)
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return self.to_logits(x)
+    
+class MotifEmbedder(nn.Module):
+    """Conv1D block that map motif_dim to hidden_dim"""
+    def __init__(self, motif_dim, hidden_dim, kernel_size = 1):
+        super().__init__()
+        self.conv = nn.Conv1d(motif_dim, hidden_dim, kernel_size)
+    def forward(self, x):
+        return self.conv(x)
+
+
+
+class ConvPool(nn.Module):
+    """
+    Receive a tensor of shape (batch, length, dimension) and split along length
+    dimension based on a celltype_peak tensor of shape (batch, n_peak, 2) where
+    the second dimension is the start and end of the peak. The length dimension 
+    can be decomposed into a sum of the peak lengths with each peak padded left 
+    and right with 50bp and directly concatenated. Thus the boundary for the 
+    splitting can be calculated by cumsum of the padded peak lengths. The output
+    is a tensor of shape (batch, n_peak, dimension). 
+    """
+    def __init__(self, motif_dim, hidden_dim, pool_method='mean'):
+        super().__init__()
+        self.pool_method = pool_method
+        self.motif_proj = nn.Conv1d(motif_dim, hidden_dim, 1, bias=False)
+        self.dila_conv_tower = DilatedConv1dBlock(hidden_dim, depth = 7)
+        self.aprofile_header = nn.Conv1d(hidden_dim, 4, 20, padding='same')
+        self.atpm_header = nn.Conv1d(hidden_dim, 1, 1, padding='same')
+        
+    def forward(self, x, peak_split, n_peaks, max_n_peaks):
+        """
+        x: (batch, length, dimension)
+        chunk_size: the size of each chunk to pool        
+        n_peaks: the number of peaks for each sample
+        max_n_peaks: the maximum number of peaks in the batch
+        pool_method: the method to pool the tensor
+        """
+
+        # linear prob motif_dim to 512
+        x = self.motif_proj(x.transpose(1,2)).transpose(1,2)
+        batch, length, motif_dim = x.shape
+        # split the tensor
+        peak_list = torch.split(x.reshape(-1,motif_dim), peak_split, dim=0)
+        # each element is L, D, pool the tensor
+
+        peak_atpm_list = []
+        peak_profiles = []
+        for peak in peak_list:
+            peak_profile = self.dila_conv_tower(peak)
+            peak_profile = self.aprofile_header(peak_profile)
+            peak_atpm = self.pool(peak_profile, self.pool_method)
+            peak_atpm = self.atpm_header(peak_atpm)
+            peak_atpm_list.append(peak_atpm)
+            peak_profiles.append(peak_profile)
+        peak_atpm_list = torch.vstack(peak_atpm_list)
+        peak_profiles = torch.vstack(peak_profiles)
+        # remove the padded part
+        pool_idx = torch.cumsum(n_peaks+1,0)
+        pool_left_pad = torch.tensor(0).unsqueeze(0).to(pool_idx.device)
+        pool_start = torch.cat([pool_left_pad, pool_idx[:-1]])
+        pool_end = pool_idx-1
+        pool_list = [peak_list[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
+        # pad the element in pool_list if the number of peaks is not the same
+        peak_atpms = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks-n_peaks[i], motif_dim).to(pool_list[i].device)]) for i in range(len(pool_list))])
+
+        return peak_atpms, peak_profiles
 
 class ATACSplitPool(nn.Module):
     """
@@ -288,36 +436,52 @@ class ATACSplitPoolMaxNorm(nn.Module):
         return x
 
 
-class AttentionPool(nn.Module):
-    def __init__(self, dim, pool_size = 2):
+
+class AttentionPooling(nn.Module):
+    # Copied from https://github.com/deep-floyd/IF/blob/2f91391f27dd3c468bf174be5805b4cc92980c0b/deepfloyd_if/model/nn.py#L54
+
+    def __init__(self, num_heads, embed_dim, dtype=None):
         super().__init__()
-        self.pool_size = pool_size
-        self.pool_fn = Rearrange('b d (n p) -> b d n p', p = pool_size)
-
-        self.to_attn_logits = nn.Conv2d(dim, dim, 1, bias = False)
-
-        nn.init.dirac_(self.to_attn_logits.weight)
-
-        with torch.no_grad():
-            self.to_attn_logits.weight.mul_(2)
+        self.dtype = dtype
+        self.positional_embedding = nn.Parameter(torch.randn(1, embed_dim) / embed_dim**0.5)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, dtype=self.dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, dtype=self.dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, dtype=self.dtype)
+        self.num_heads = num_heads
+        self.dim_per_head = embed_dim // self.num_heads
 
     def forward(self, x):
-        b, _, n = x.shape
-        remainder = n % self.pool_size
-        needs_padding = remainder > 0
+        bs, length, width = x.size()
 
-        if needs_padding:
-            x = F.pad(x, (0, remainder), value = 0)
-            mask = torch.zeros((b, 1, n), dtype = torch.bool, device = x.device)
-            mask = F.pad(mask, (0, remainder), value = True)
+        def shape(x):
+            # (bs, length, width) --> (bs, length, n_heads, dim_per_head)
+            x = x.view(bs, -1, self.num_heads, self.dim_per_head)
+            # (bs, length, n_heads, dim_per_head) --> (bs, n_heads, length, dim_per_head)
+            x = x.transpose(1, 2)
+            # (bs, n_heads, length, dim_per_head) --> (bs*n_heads, length, dim_per_head)
+            x = x.reshape(bs * self.num_heads, -1, self.dim_per_head)
+            # (bs*n_heads, length, dim_per_head) --> (bs*n_heads, dim_per_head, length)
+            x = x.transpose(1, 2)
+            return x
 
-        x = self.pool_fn(x)
-        logits = self.to_attn_logits(x)
+        class_token = x.mean(dim=1, keepdim=True) + self.positional_embedding.to(x.dtype)
+        x = torch.cat([class_token, x], dim=1)  # (bs, length+1, width)
 
-        if needs_padding:
-            mask_value = -torch.finfo(logits.dtype).max
-            logits = logits.masked_fill(self.pool_fn(mask), mask_value)
+        # (bs*n_heads, class_token_length, dim_per_head)
+        q = shape(self.q_proj(class_token))
+        # (bs*n_heads, length+class_token_length, dim_per_head)
+        k = shape(self.k_proj(x))
+        v = shape(self.v_proj(x))
 
-        attn = logits.softmax(dim = -1)
+        # (bs*n_heads, class_token_length, length+class_token_length):
+        scale = 1 / math.sqrt(math.sqrt(self.dim_per_head))
+        weight = torch.einsum("bct,bcs->bts", q * scale, k * scale)  # More stable with f16 than dividing afterwards
+        weight = torch.softmax(weight.float(), dim=-1).type(weight.dtype)
 
-        return (x * attn).sum(dim = -1)
+        # (bs*n_heads, dim_per_head, class_token_length)
+        a = torch.einsum("bts,bcs->bct", weight, v)
+
+        # (bs, length+1, width)
+        a = a.reshape(bs, -1, 1).transpose(1, 2)
+
+        return a[:, 0, :]  # cls_token

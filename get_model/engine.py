@@ -170,8 +170,14 @@ def pretrain_one_epoch(
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
+def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=None, args=None):
+    if args.model=='get_finetune_motif_chrombpnet':
+        return train_chrombpnet(model, peak_seq, atac_target, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, exp_target, atac_target, other_labels, criterion, hic_matrix=hic_matrix)
+    else:
+        return train_class_batch_exp(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=hic_matrix)
 
-def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=None):
+
+def train_class_batch_exp(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=None):
     device = peak_seq.device
     padding_mask = get_padding_pos(mask)
     mask_for_loss = 1-padding_mask
@@ -217,8 +223,36 @@ def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, 
         loss = loss_exp
     if confidence is not None:
         loss = loss + loss_confidence * 0.1
-    return loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target
+    # return loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target
+    return {'loss': loss, 'loss_atac': loss_atac, 'loss_exp': loss_exp, 'loss_confidence': loss_confidence,
+            'exp_pred': exp, 'exp_target': exp_target, 
+            'atac_pred': atac, 'atac_target': atac_target, 
+            'confidence_pred': confidence_pred, 'confidence_target': confidence_target}
 
+def train_chrombpnet(model, peak_seq, aprofile_target, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atpm_target, exp_target, other_labels, criterion, hic_matrix=None):
+    device = peak_seq.device
+    padding_mask = get_padding_pos(mask)
+    mask_for_loss = 1-padding_mask
+    padding_mask = padding_mask.to(device, non_blocking=True).bool()
+    mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
+    with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
+        atpm, aprofile = model(peak_seq, aprofile_target, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels, hic_matrix=hic_matrix)
+
+    B, R, N = atpm.shape
+    atpm = atpm * mask_for_loss
+    indices = torch.where(mask_for_loss==1)
+    atpm = atpm[indices[0], indices[1], :].flatten()
+    atpm_target = atpm_target.unsqueeze(-1) * mask_for_loss
+    atpm_target = atpm_target[indices[0], indices[1], :].flatten()
+    aprofile_target = aprofile_target
+    loss_atpm = criterion(atpm, atpm_target)
+    loss_aprofile = criterion(aprofile, aprofile_target)
+    
+    loss = loss_atpm + loss_aprofile 
+    # return loss, atpm, atpm_target, aprofile, aprofile_target
+    return {'loss': loss, 'loss_atpm': loss_atpm, 'loss_aprofile': loss_aprofile,
+            'atpm_pred': atpm, 'atpm_target': atpm_target, 
+            'aprofile_pred': aprofile, 'aprofile_target': aprofile_target}
 
 def finetune_train_one_epoch(
     model: torch.nn.Module,
@@ -292,10 +326,8 @@ def finetune_train_one_epoch(
         hic_matrix = hic_matrix.to(device, non_blocking=True).bfloat16()
         if loss_scaler is None:
             peaks = peaks.half()
-            loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion, hic_matrix=hic_matrix)
-        else:
-            loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion, hic_matrix=hic_matrix)
-
+        result = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion, hic_matrix=hic_matrix, args=args)
+        loss = result['loss']
         loss_value = loss.item()
 
         # logging.info("Got loss")
@@ -515,9 +547,14 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
     obs = []
     preds_atac = []
     obs_atac = []
+    preds_atpm = []
+    obs_atpm = []
+    preds_aprofile = []
+    obs_aprofile = []
+
     from tqdm import tqdm
     for batch in tqdm(data_loader):
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels, _ = batch
+        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels, hic_matrix = batch
         if min(chunk_size)<0:
             continue
         sample_track = sample_track.to(device, non_blocking=True).bfloat16()
@@ -529,57 +566,125 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
         other_labels = other_labels.to(device, non_blocking=True).bfloat16()
         # compute output
         atac_targets = other_labels[:,:,0]
-        loss, exp, exp_target, atac, atac_target, _, _ = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
-        , atac_targets, labels_data, other_labels, criterion)
-
-        if args.eval_tss:
-            padding_mask = get_padding_pos(mask)
-            mask_for_loss = 1-padding_mask
-            padding_mask = padding_mask.to(device, non_blocking=True).bool()
-            mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
-            indices = torch.where(mask_for_loss==1)
-            # other_labels is B, R, N where [:,:, 1] is TSS indicator
-            other_labels_reshape = other_labels[indices[0], indices[1], 1].flatten()
-            preds.append(exp.reshape(-1, 2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
-            obs.append(exp_target.reshape(-1,2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
-        else:
-            preds.append(exp.reshape(-1).detach().cpu().numpy())
-            obs.append(exp_target.reshape(-1).detach().cpu().numpy())
-        preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
-        obs_atac.append(atac_target.reshape(-1).detach().cpu().numpy())
-
-        metric_logger.update(loss=loss.item())
-
-    preds = np.concatenate(preds, axis=0).reshape(-1)
-    obs = np.concatenate(obs, axis=0).reshape(-1)
-    preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
-    obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
-
-    r2score, pearsonr_score, spearmanr_score = cal_score_stats(preds, obs, data_loader, args)
-    r2score_atac, pearsonr_score_atac, spearmanr_score_atac = cal_score_stats(preds_atac, obs_atac, data_loader, args)
-
-    # gather the stats from all processes
-    # metric_logger.synchronize_between_processes()
-
-    metric_logger.meters["r2score"].update(r2score, n=1)
-    metric_logger.meters["pearsonr_score"].update(pearsonr_score, n=1)
-    metric_logger.meters["spearmanr_score"].update(spearmanr_score, n=1)
-
-    metric_logger.meters["r2score_atac"].update(r2score_atac, n=1)
-    metric_logger.meters["pearsonr_score_atac"].update(pearsonr_score_atac, n=1)
-    metric_logger.meters["spearmanr_score_atac"].update(spearmanr_score_atac, n=1)
-
-    if printlog:
-        print(
-            "* Score@R2 {r2:.3f} Score@pearsonr {pearson:.3f} Score@spearmanr {spearman:.3f}  loss {losses.global_avg:.3f}".format(
-                r2=r2score,
-                pearson=pearsonr_score,
-                spearman=spearmanr_score,
-                r2_atac=r2score_atac,
-                pearson_atac=pearsonr_score_atac,
-                spearman_atac=spearmanr_score_atac,
-                losses=metric_logger.loss,
-            )
+        result = train_class_batch(
+            model=model, 
+            peak_seq=peak_seq, 
+            sample_track=sample_track,
+            mask=mask,
+            chunk_size=chunk_size,
+            n_peaks=n_peaks,
+            max_n_peaks=max_n_peaks,
+            motif_mean_std=motif_mean_std,
+            atac_target=atac_targets,
+            exp_target=labels_data,
+            other_labels=other_labels,
+            criterion=criterion,
+            hic_matrix=hic_matrix,
+            args=args
         )
+        if args.model=='get_finetune_motif_chrombpnet':
+            loss = result['loss'].item()
+            loss_atpm = result['loss_atpm'].item()
+            loss_aprofile = result['loss_aprofile'].item()
+            atpm = result['atpm_pred']
+            atpm_target = result['atpm_target']
+            aprofile = result['aprofile_pred']
+            aprofile_target = result['aprofile_target']
+            preds_atpm.append(atpm.reshape(-1).detach().cpu().numpy())
+            obs_atpm.append(atpm_target.reshape(-1).detach().cpu().numpy())
+            preds_aprofile.append(aprofile.reshape(-1).detach().cpu().numpy())
+            obs_aprofile.append(aprofile_target.reshape(-1).detach().cpu().numpy())
+
+            metric_logger.update(loss=loss)
+            metric_logger.update(loss_atpm=loss_atpm)
+            metric_logger.update(loss_aprofile=loss_aprofile)
+
+        else:
+            exp = result['exp_pred']
+            exp_target = result['exp_target']
+            atac = result['atac_pred']
+            atac_target = result['atac_target']
+            loss = result['loss'].item()
+            loss_atac = result['loss_atac'].item()
+            loss_exp = result['loss_exp'].item()
+            loss_confidence = result['loss_confidence'].item()
+            if args.eval_tss:
+                padding_mask = get_padding_pos(mask)
+                mask_for_loss = 1-padding_mask
+                padding_mask = padding_mask.to(device, non_blocking=True).bool()
+                mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
+                indices = torch.where(mask_for_loss==1)
+                # other_labels is B, R, N where [:,:, 1] is TSS indicator
+                other_labels_reshape = other_labels[indices[0], indices[1], 1].flatten()
+                preds.append(exp.reshape(-1, 2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
+                obs.append(exp_target.reshape(-1,2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
+            else:
+                preds.append(exp.reshape(-1).detach().cpu().numpy())
+                obs.append(exp_target.reshape(-1).detach().cpu().numpy())
+            preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
+            obs_atac.append(atac_target.reshape(-1).detach().cpu().numpy())
+
+            metric_logger.update(loss=loss)
+            metric_logger.update(loss_atac=loss_atac)
+            metric_logger.update(loss_exp=loss_exp)
+            metric_logger.update(loss_confidence=loss_confidence)
+
+    if args.model=='get_finetune_motif_chrombpnet':
+        preds_atpm = np.concatenate(preds_atpm, axis=0).reshape(-1)
+        obs_atpm = np.concatenate(obs_atpm, axis=0).reshape(-1)
+        preds_aprofile = np.concatenate(preds_aprofile, axis=0).reshape(-1)
+        obs_aprofile = np.concatenate(obs_aprofile, axis=0).reshape(-1)
+        r2score_atpm, pearsonr_score_atpm, spearmanr_score_atpm = cal_score_stats(preds_atpm, obs_atpm, data_loader, args)
+        r2score_aprofile, pearsonr_score_aprofile, spearmanr_score_aprofile = cal_score_stats(preds_aprofile, obs_aprofile, data_loader, args)
+
+        metric_logger.meters["r2score_atpm"].update(r2score_atpm, n=1)
+        metric_logger.meters["pearsonr_score_atpm"].update(pearsonr_score_atpm, n=1)    
+        metric_logger.meters["spearmanr_score_atpm"].update(spearmanr_score_atpm, n=1)
+        metric_logger.meters["r2score_aprofile"].update(r2score_aprofile, n=1)
+        metric_logger.meters["pearsonr_score_aprofile"].update(pearsonr_score_aprofile, n=1)
+        metric_logger.meters["spearmanr_score_aprofile"].update(spearmanr_score_aprofile, n=1)
+
+        if printlog:
+            print(
+                "* Score@R2 {r2:.3f} Score@pearsonr {pearson:.3f} Score@spearmanr {spearman:.3f}  loss {losses.global_avg:.3f}\n Score@R2 {r2score_aprofile:.3f} Score@pearsonr {pearsonr_score_aprofile:.3f} Score@spearmanr {spearmanr_score_aprofile:.3f}  loss {losses.global_avg:.3f}".format(
+                    r2=r2score_atpm,
+                    pearson=pearsonr_score_atpm,
+                    spearman=spearmanr_score_atpm,
+                    r2score_aprofile=r2score_aprofile,
+                    pearsonr_score_aprofile=pearsonr_score_aprofile,
+                    spearmanr_score_aprofile=spearmanr_score_aprofile,
+                    losses=metric_logger.loss,
+                )
+            )
+
+    else:
+        preds = np.concatenate(preds, axis=0).reshape(-1)
+        obs = np.concatenate(obs, axis=0).reshape(-1)
+        preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
+        obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
+
+        r2score, pearsonr_score, spearmanr_score = cal_score_stats(preds, obs, data_loader, args)
+        r2score_atac, pearsonr_score_atac, spearmanr_score_atac = cal_score_stats(preds_atac, obs_atac, data_loader, args)
+
+        metric_logger.meters["r2score"].update(r2score, n=1)
+        metric_logger.meters["pearsonr_score"].update(pearsonr_score, n=1)
+        metric_logger.meters["spearmanr_score"].update(spearmanr_score, n=1)
+
+        metric_logger.meters["r2score_atac"].update(r2score_atac, n=1)
+        metric_logger.meters["pearsonr_score_atac"].update(pearsonr_score_atac, n=1)
+        metric_logger.meters["spearmanr_score_atac"].update(spearmanr_score_atac, n=1)
+
+        if printlog:
+            print(
+                "* Score@R2 {r2:.3f} Score@pearsonr {pearson:.3f} Score@spearmanr {spearman:.3f}  loss {losses.global_avg:.3f}".format(
+                    r2=r2score,
+                    pearson=pearsonr_score,
+                    spearman=spearmanr_score,
+                    r2_atac=r2score_atac,
+                    pearson_atac=pearsonr_score_atac,
+                    spearman_atac=spearmanr_score_atac,
+                    losses=metric_logger.loss,
+                )
+            )
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}

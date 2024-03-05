@@ -17,23 +17,22 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=1 --rdzv-endpoint=localhost:$PORT ge
     --input_dim 639 \
     --output_dim 2 \
     --num_motif 637 \
-    --model get_finetune_motif_with_atac_hic \
+    --model get_finetune_motif_chrombpnet \
     --batch_size 32 \
     --num_workers 32 \
     --n_peaks_lower_bound 10 \
     --n_peaks_upper_bound 100 \
-    --center_expand_target 1000 \
+    --center_expand_target 512 \
     --preload_count 200 \
     --peak_inactivation 'random_tss' \
     --random_shift_peak \
-    --hic_path "${DATA_PATH}/4DNFI2TK7L2F.hic" \
     --pin_mem \
     --peak_name "peaks_q0.01_tissue_open_exp" \
     --save_ckpt_freq 5 \
     --n_packs 1 \
     --lr 1e-3 \
     --opt adamw \
-    --wandb_project_name "debug" \
+    --wandb_project_name "chrombpnet" \
     --wandb_run_name "Expression_Finetune_K562.Chr4&14.conv50.atac_loss.nofreeze.nodepth.gap50.shift10.R100L1000.augmented."${DATE} \
     --eval_freq 2 \
     --dist_eval \

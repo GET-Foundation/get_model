@@ -10,7 +10,7 @@ from timm.models.registry import register_model
 from get_model.model.position_encoding import CTCFPositionalEncoding, AbsolutePositionalEncoding
 from get_model.model.motif import parse_meme_file
 from get_model.model.transformer import GETTransformer
-from get_model.model.pooling import SplitPool, ATACSplitPool, ATACSplitPoolMaxNorm
+from get_model.model.pooling import SplitPool, ATACSplitPool, ATACSplitPoolMaxNorm, ConvPool
 
 import torch
 from torch.nn import Linear
@@ -1274,6 +1274,67 @@ class GETFinetuneExpATACWithHiC(nn.Module):
     def no_weight_decay(self):
         return {"pos_embed", "cls_token"}
 
+class GETFinetuneChrombpNet(nn.Module):
+    """A GET model for finetuning using classification head."""
+
+    def __init__(
+        self,
+        num_motif=637,
+        motif_dim=639,
+        embed_dim=768,
+        num_regions=200,
+        motif_prior=True,
+        num_layers=1,
+        d_model=768,
+        nhead=1,
+        dropout=0.1,
+        output_dim=1,
+    ):
+        super().__init__()
+        self.num_regions = num_regions
+        self.num_motif = num_motif
+        self.motif_prior = motif_prior
+        self.embed_dim = embed_dim
+        self.num_layers = num_layers
+        self.d_model = d_model
+        self.nhead = nhead
+        self.dropout = dropout
+        self.output_dim = output_dim
+        self.motif_scanner = MotifScanner(
+            num_motif=num_motif, include_reverse_complement=True,
+            bidirectional_except_ctcf=True
+        )
+        self.atac_attention = ConvPool(
+            pool_method='mean',
+            motif_dim=motif_dim,
+            hidden_dim=embed_dim//2
+        )
+        self.apply(self._init_weights)
+
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels, hic_matrix):
+        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
+        # peak_seq: [B, L, 4]
+        # [B, L, 4] --> [B, L, 1274]
+        x = self.motif_scanner(peak_seq)
+        x = x - motif_mean_std[:,0, :].unsqueeze(1)
+        x = x / motif_mean_std[:,1, :].unsqueeze(1)
+        x = F.relu(x)
+        atpm, aprofile = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+        return atpm, aprofile
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {"pos_embed", "cls_token"}
 
 @register_model
 def get_pretrain_motif_base(pretrained=False, **kwargs):
@@ -1416,6 +1477,18 @@ def get_finetune_motif_with_atac_hic(pretrained=False, **kwargs):
         atac_kernel_num=161,
         joint_kernel_num=161,
         final_bn=kwargs["final_bn"],
+    )
+    if pretrained:
+        checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
+        model.load_state_dict(checkpoint["model"])
+    return model
+
+@register_model
+def get_finetune_motif_chrombpnet(pretrained=False, **kwargs):
+    model = GETFinetuneChrombpNet(
+        num_motif=kwargs["num_motif"],
+        motif_dim=kwargs["motif_dim"],
+        embed_dim=768,
     )
     if pretrained:
         checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
