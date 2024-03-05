@@ -39,6 +39,8 @@ def get_rev_collate_fn(batch):
     peak_signal_track = list(peak_signal_track)
     peak_sequence = list(peak_sequence)
     sample_metadata = list(sample_metadata)
+    for i, meta in enumerate(sample_metadata):
+        peak_signal_track[i] = peak_signal_track[i]/meta['libsize'] * 1e6
     motif_mean_std = list(motif_mean_std)
     peak_labels = list(peak_labels)
     hic_matrix = list(hic_matrix)
