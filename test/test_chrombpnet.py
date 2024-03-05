@@ -95,7 +95,7 @@ with torch.amp.autocast('cuda', dtype=torch.bfloat16):
         , atac_targets, labels_data,  other_labels, criterion)
 
 # %%
-for i in tqdm(range(100)):
-    result = train_chrombpnet(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
-        , atac_targets, labels_data,  other_labels, criterion)
+result = train_chrombpnet(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_targets, labels_data,  other_labels, criterion)
+# %%
+results
 # %%

@@ -171,6 +171,8 @@ class ConvPool(nn.Module):
         self.dila_conv_tower = DilatedConv1dBlock(hidden_dim, depth = n_dil_layers)
         self.aprofile_header = nn.Conv1d(hidden_dim, 1, profile_kernel_size, padding='same')
         self.atpm_header = nn.Linear(hidden_dim, 1)
+        self.atpm_activation = nn.Softplus()
+        self.aprofile_activation = nn.Softplus()
         
     def forward(self, x, peak_split, n_peaks, max_n_peaks):
         """
@@ -204,6 +206,8 @@ class ConvPool(nn.Module):
             # reshape the tensor back
             peak_atpm = peak_atpm.reshape(batch, num_peaks, 1)
             peak_profile = peak_profile.reshape(batch, num_peaks * peak_size)
+            peak_atpm = self.atpm_activation(peak_atpm)
+            peak_profile = self.aprofile_activation(peak_profile)
             return peak_atpm, peak_profile
         else:
             # split the tensor
@@ -233,6 +237,8 @@ class ConvPool(nn.Module):
             pool_list = [peak_atpm[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
             # pad the element in pool_list if the number of peaks is not the same
             peak_atpms = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks-n_peaks[i], 1).to(pool_list[i].device)]) for i in range(len(pool_list))])
+            peak_atpm = self.atpm_activation(peak_atpm)
+            peak_profile = self.aprofile_activation(peak_profile)
             return peak_atpms, peak_profiles
 
 class ATACSplitPool(nn.Module):

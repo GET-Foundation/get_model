@@ -172,7 +172,7 @@ def pretrain_one_epoch(
 
 def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=None, args=None):
     if args.model=='get_finetune_motif_chrombpnet':
-        return train_chrombpnet(model, peak_seq, atac_target, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=hic_matrix)
+        return train_chrombpnet(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=hic_matrix)
     else:
         return train_class_batch_exp(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=hic_matrix)
 
