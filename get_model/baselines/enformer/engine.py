@@ -34,7 +34,6 @@ def cal_score_stats(preds, obs, data_loader, args):
 
 def finetune_train_one_epoch(
     model: torch.nn.Module,
-    criterion: torch.nn.Module,
     data_loader: Iterable,
     data_loader_val: Iterable,
     optimizer: torch.optim.Optimizer,
@@ -127,7 +126,7 @@ def finetune_train_one_epoch(
         # NOTE: evaluation
         if (data_iter_step + 1) % update_freq == 0 and args.eval_each_step:
             test_stats = evaluate_all(
-                data_loader_val, model, device, criterion, args, printlog=False
+                data_loader_val, model, device, args, printlog=False
             )
         else:
             test_stats = None
@@ -176,7 +175,7 @@ def finetune_train_one_epoch(
 
 
 @torch.no_grad()
-def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=True):
+def evaluate_all(data_loader, model, device, args, epoch=0, printlog=True):
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Test:"
 

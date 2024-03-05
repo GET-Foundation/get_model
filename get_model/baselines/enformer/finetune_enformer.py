@@ -190,6 +190,7 @@ def train_enformer(args):
         auto_set_target_length = False, # Override infer target_length from target dimensions
     ).to(device)
     model.to(device)
+    model_ema = None
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -219,9 +220,9 @@ def train_enformer(args):
     optimizer = create_optimizer(
         args,
         model_without_ddp,
-        skip_list=skip_weight_decay_list,
-        get_num_layer=assigner.get_layer_id if assigner is not None else None,
-        get_layer_scale=assigner.get_scale if assigner is not None else None,
+        skip_list=None,
+        get_num_layer=None,
+        get_layer_scale=None,
     )
     loss_scaler = NativeScaler()
 
@@ -246,13 +247,6 @@ def train_enformer(args):
         "Max WD = %.7f, Min WD = %.7f"
         % (max(wd_schedule_values), min(wd_schedule_values))
     )
-
-    if args.criterion == "mse":
-        criterion = torch.nn.MSELoss(reduction="sum")
-    elif args.criterion == "poisson":
-        criterion = torch.nn.PoissonNLLLoss(log_input=False, reduction="mean")
-
-    print("criterion = %s" % str(criterion))
 
     utils.auto_load_model(
         args=args,
@@ -291,7 +285,6 @@ def train_enformer(args):
             log_writer.set_step(epoch * num_training_steps_per_epoch * args.update_freq)
         train_stats = train_one_epoch(
             model,
-            criterion,
             data_loader_train,
             data_loader_val,
             optimizer,
@@ -526,6 +519,11 @@ if __name__=="__main__":
         "--device", default="cuda", help="device to use for training / testing"
     )
     parser.add_argument("--seed", default=0, type=int)
+    parser.add_argument("--resume", default="", help="resume from checkpoint")
+    parser.add_argument("--auto_resume", action="store_true")
+    parser.add_argument("--no_auto_resume", action="store_false", dest="auto_resume")
+    parser.set_defaults(auto_resume=True)
+
     parser.add_argument("--save_ckpt", action="store_true")
     parser.add_argument("--no_save_ckpt", action="store_false", dest="save_ckpt")
     parser.set_defaults(save_ckpt=True)
