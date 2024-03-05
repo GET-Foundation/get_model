@@ -326,7 +326,7 @@ class ZarrDataPool(object):
         chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std = self.load_data(data_key, celltype_id, chr_name, start, end)
         item_insulation['key'] = str(
             window_index) + '_' + item_insulation['index'].astype(str)
-        return window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
+        return window_index, chr_name, start, end, data_key, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
 
     def _inactivated_peaks(self, celltype_peaks, peak_inactivation):
         """
@@ -646,7 +646,7 @@ class ZarrDataPool(object):
             additional_peak_columns_data[inactivated_peak_idx, 0:3] = 0 # keep the TSS column but set aTPM and expression to 0
         
         sample_metadata = {
-            'celltype_id': celltype_id, 'chr_name': chr_name,
+            'celltype_id': celltype_id, 'chr_name': chr_name, 'libsize': self.zarr_dict[data_key].libsize[celltype_id],
             'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': 0.5
         }
 
@@ -801,7 +801,7 @@ class PreloadDataPack(object):
         tuple: A tuple containing the extracted sample track, peak sequence, and a dictionary with metadata
             about the extracted sample, including cell type ID, chromosome name, and positions.
         """
-        window_index, chr_name, start, end, celltype_id, track, insulations, celltype_peaks, motif_mean_std = window
+        window_index, chr_name, start, end, data_key, celltype_id, track, insulations, celltype_peaks, motif_mean_std = window
 
         if peak_start is None or peak_end is None:
             peak_start = peak_index * self.n_peaks_sample_gap
@@ -809,7 +809,7 @@ class PreloadDataPack(object):
         celltype_peaks = celltype_peaks.iloc[peak_start:peak_end]
         track_start = celltype_peaks['Start'].min() - self.padding
         track_end = celltype_peaks['End'].max() + self.padding
-        return self._generate_sample(chr_name, start, end, celltype_id, track, celltype_peaks, motif_mean_std,
+        return self._generate_sample(chr_name, start, end, data_key, celltype_id, track, celltype_peaks, motif_mean_std,
                                      track_start, track_end, mut)
 
     def _inactivated_peaks(self, celltype_peaks, peak_inactivation):
@@ -827,7 +827,7 @@ class PreloadDataPack(object):
     
 
     
-    def _generate_sample(self, chr_name, start, end, celltype_id, track, celltype_peaks, motif_mean_std,
+    def _generate_sample(self, chr_name, start, end, data_key, celltype_id, track, celltype_peaks, motif_mean_std,
                          track_start, track_end, mut=None):
         """
         Generate a single sample from a window.
@@ -884,7 +884,7 @@ class PreloadDataPack(object):
             additional_peak_columns_data[inactivated_peak_idx, 0:3] = 0 # keep the TSS column but set aTPM and expression to 0
         
         sample_metadata = {
-            'celltype_id': celltype_id, 'chr_name': chr_name,
+            'celltype_id': celltype_id, 'chr_name': chr_name, 'libsize': self.zarr_data_pool.zarr_dict[data_key].libsize[celltype_id],
             'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': self.mask_ratio
         }
 
@@ -909,7 +909,7 @@ class PreloadDataPack(object):
         This implementation relies on the availability of insulation data. If insulation data is empty,
         it attempts to load data from another randomly selected window.
         """
-        window_index, chr_name, start, end, celltype_id, track, insulations, celltype_peaks, motif_mean_std = window
+        window_index, chr_name, start, end, data_key, celltype_id, track, insulations, celltype_peaks, motif_mean_std = window
         if len(insulations) == 0:
             raise ValueError('Empty insulation')
         track_start, track_end = self._insulation_sampler(
@@ -917,7 +917,7 @@ class PreloadDataPack(object):
         celltype_peaks = celltype_peaks.query('Start>@track_start and End<@track_end')
         if celltype_peaks.shape[0] < self.n_peaks_lower_bound:
             logging.info('No enough peaks')
-        return self._generate_sample(chr_name, start, end, celltype_id, track, celltype_peaks, motif_mean_std,
+        return self._generate_sample(chr_name, start, end, data_key, celltype_id, track, celltype_peaks, motif_mean_std,
                                      track_start, track_end)
 
     def _insulation_sampler(self, insulation_df, insulation_index=None):
@@ -944,7 +944,7 @@ class PreloadDataPack(object):
         pandas.DataFrame: A pandas dataframe containing the number of peaks per sample.
         """
         insulation_pool_peak_num = {}
-        for window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std in self.preloaded_data:
+        for window_index, chr_name, start, end, data_key, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std in self.preloaded_data:
             try:
                 insulation_pool_peak_num.update(
                     self._get_peak_count(item_insulation, celltype_peaks))
@@ -973,7 +973,7 @@ class PreloadDataPack(object):
         window_peak_counts = {}
         per_window_n_samples = []
 
-        for window_index, chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std in self.preloaded_data:
+        for window_index, chr_name, start, end, data_key, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std in self.preloaded_data:
             per_window_n_samples.append(
             (celltype_peaks.shape[0] - self.n_peaks_upper_bound) // self.n_peaks_sample_gap)
             window_peak_counts[window_index] = celltype_peaks.shape[0]
@@ -1131,6 +1131,11 @@ class PretrainDataset(Dataset):
         # self.preload_data_packs[slot].preload_data()
         # add the index back to avaliable packs
         self.avaliable_packs.append(slot)
+    
+    def debug_getitem(self, index):
+        self.preload_data_packs=[0]
+        self.reload_data(0)
+        return self._getitem(index)
 
 
 def worker_init_fn_get(worker_id):

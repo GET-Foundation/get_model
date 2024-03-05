@@ -34,15 +34,9 @@ pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/encode_hg38atac_dense.zar
                            '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
                            max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=10, insulation_subsample_ratio=0.8, n_peaks_upper_bound=100, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=400)
 pretrain.__len__()
-#  #%%
-# dfs = []
-# for key in pretrain.datapool.peaks_dict:
-    # df = pretrain.datapool.peaks_dict[key]
-    # break
-    # if df.query('Chromosome=="chr8" & Start<129633446 & End>129633446').shape[0]>0:
-#         df = df.query('Chromosome=="chr8" & Start<129633446 & End>129633446')
-#         df['sample'] = key
-#         dfs.append(df)
+#%%
+pretrain.debug_getitem(0)
+
 #%%
 # import pandas as pd
 # pd.concat(dfs).sort_values('aTPM').query('aTPM>0.1')['sample'].str.split('.').str[2].str.split('_').str[0].unique()
