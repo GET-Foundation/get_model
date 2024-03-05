@@ -1284,7 +1284,7 @@ class GETFinetuneChrombpNet(nn.Module):
         embed_dim=768,
         num_regions=200,
         motif_prior=True,
-        num_layers=1,
+        num_layers=7,
         d_model=768,
         nhead=1,
         dropout=0.1,
@@ -1306,6 +1306,7 @@ class GETFinetuneChrombpNet(nn.Module):
         )
         self.atac_attention = ConvPool(
             pool_method='mean',
+            n_dil_layers=self.num_layers,
             motif_dim=motif_dim,
             hidden_dim=embed_dim//2
         )
@@ -1335,6 +1336,7 @@ class GETFinetuneChrombpNet(nn.Module):
     @torch.jit.ignore
     def no_weight_decay(self):
         return {"pos_embed", "cls_token"}
+
 
 @register_model
 def get_pretrain_motif_base(pretrained=False, **kwargs):

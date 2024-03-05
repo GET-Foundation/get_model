@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 from torch import nn
 import math
-
+import numpy as np
 def pool(x, method='mean'):
     """
     x: (L,D)
@@ -95,10 +95,12 @@ class DilatedConv1d(nn.Module):
     """
     def __init__(self, dim, kernel_size = 3, dilation = 1):
         super().__init__()
-        self.conv = nn.Conv1d(dim, dim, kernel_size, padding = (kernel_size - 1) * dilation // 2, dilation = dilation)
+        self.conv = nn.Conv1d(dim, dim, kernel_size, padding = 'same', dilation = dilation)
         self.activation = nn.GELU()
+        self.batch_norm = nn.BatchNorm1d(dim)
     def forward(self, x):
         x = self.conv(x)
+        x = self.batch_norm(x)
         return self.activation(x) + x
     
 class DilatedConv1dBlock(nn.Module):
@@ -113,7 +115,6 @@ class DilatedConv1dBlock(nn.Module):
         for layer in self.layers:
             x = layer(x)
         return x
-
 
 
 
@@ -158,13 +159,18 @@ class ConvPool(nn.Module):
     splitting can be calculated by cumsum of the padded peak lengths. The output
     is a tensor of shape (batch, n_peak, dimension). 
     """
-    def __init__(self, motif_dim, hidden_dim, pool_method='mean'):
+    def __init__(self, 
+                 motif_dim, 
+                 hidden_dim,
+                 n_dil_layers=7,
+                 profile_kernel_size=75, 
+                 pool_method='mean'):
         super().__init__()
         self.pool_method = pool_method
-        self.motif_proj = nn.Conv1d(motif_dim, hidden_dim, 1, bias=False)
-        self.dila_conv_tower = DilatedConv1dBlock(hidden_dim, depth = 7)
-        self.aprofile_header = nn.Conv1d(hidden_dim, 1, 20, padding='same')
-        self.atpm_header = nn.Conv1d(hidden_dim, 1, 1, padding='same')
+        self.motif_proj = nn.Conv1d(motif_dim, hidden_dim, 1, bias=True)
+        self.dila_conv_tower = DilatedConv1dBlock(hidden_dim, depth = n_dil_layers)
+        self.aprofile_header = nn.Conv1d(hidden_dim, 1, profile_kernel_size, padding='same')
+        self.atpm_header = nn.Linear(hidden_dim, 1)
         
     def forward(self, x, peak_split, n_peaks, max_n_peaks):
         """
@@ -178,31 +184,56 @@ class ConvPool(nn.Module):
         # linear prob motif_dim to 512
         x = self.motif_proj(x.transpose(1,2)).transpose(1,2)
         batch, length, motif_dim = x.shape
-        # split the tensor
-        peak_list = torch.split(x.reshape(-1,motif_dim), peak_split, dim=0)
-        # each element is L, D, pool the tensor
 
-        peak_atpm_list = []
-        peak_profiles = []
-        for peak in peak_list:
-            peak_profile = self.dila_conv_tower(peak)
-            peak_atpm = peak_profile.mean(2) # (B, R, 1)
-            peak_profile = self.aprofile_header(peak_profile) # (B, R, L,1)
+        # check if we can do batch processing: 
+        # 1. the number of peaks is the same for all samples
+        # 2. the peak_split tensor is the same for all peaks, unique would be [0, peak_length]
+        if torch.all(n_peaks == max_n_peaks) and np.unique(peak_split).shape[0] == 2:
+            # reshape the tensor by the peak_split
+            peak_size = np.unique(peak_split).max()
+            num_peaks = n_peaks[0]
+            x = x.reshape(batch * num_peaks, peak_size, motif_dim).transpose(1,2)
+            # forward through the dilated conv tower
+            peak_profile = self.dila_conv_tower(x)
+            # pool the tensor to get the aTPM
+            peak_atpm = peak_profile.mean(2)
+            # get the aprofile
+            peak_profile = self.aprofile_header(peak_profile).squeeze(1)
+            # get the atpm
             peak_atpm = self.atpm_header(peak_atpm)
-            peak_atpm_list.append(peak_atpm)
-            peak_profiles.append(peak_profile)
-        peak_atpm_list = torch.vstack(peak_atpm_list)
-        peak_profiles = torch.vstack(peak_profiles)
-        # remove the padded part
-        pool_idx = torch.cumsum(n_peaks+1,0)
-        pool_left_pad = torch.tensor(0).unsqueeze(0).to(pool_idx.device)
-        pool_start = torch.cat([pool_left_pad, pool_idx[:-1]])
-        pool_end = pool_idx-1
-        pool_list = [peak_list[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
-        # pad the element in pool_list if the number of peaks is not the same
-        peak_atpms = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks-n_peaks[i], motif_dim).to(pool_list[i].device)]) for i in range(len(pool_list))])
+            # reshape the tensor back
+            peak_atpm = peak_atpm.reshape(batch, num_peaks, 1)
+            peak_profile = peak_profile.reshape(batch, num_peaks * peak_size)
+            return peak_atpm, peak_profile
+        else:
+            # split the tensor
+            peak_list = torch.split(x.reshape(-1,motif_dim), peak_split, dim=0)
+            # each element is L, D, pool the tensor
+            peak_atpm_list = []
+            peak_profiles = []
+            for peak in peak_list:
+                if peak.shape[0] == 0:
+                    peak_atpm_list.append(torch.zeros(384).to(peak.device))
+                    peak_profiles.append(torch.zeros(0).to(peak.device))
+                    continue
+                peak_profile = self.dila_conv_tower(peak.unsqueeze(0).transpose(1,2)) #(1,H,L)
+                peak_atpm = peak_profile.mean(2) # (1, H)
+                peak_profile = self.aprofile_header(peak_profile).squeeze(0) # (1, L ,1)
+                peak_atpm_list.append(peak_atpm)
+                peak_profiles.append(peak_profile)
+            peak_atpm_list = torch.vstack(peak_atpm_list)
+            peak_profiles = torch.cat(peak_profiles).view(batch, length)
+            peak_atpm = self.atpm_header(peak_atpm_list) #(1,1)
 
-        return peak_atpms, peak_profiles
+            # remove the padded part
+            pool_idx = torch.cumsum(n_peaks+1,0)
+            pool_left_pad = torch.tensor(0).unsqueeze(0).to(pool_idx.device)
+            pool_start = torch.cat([pool_left_pad, pool_idx[:-1]])
+            pool_end = pool_idx-1
+            pool_list = [peak_atpm[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
+            # pad the element in pool_list if the number of peaks is not the same
+            peak_atpms = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks-n_peaks[i], 1).to(pool_list[i].device)]) for i in range(len(pool_list))])
+            return peak_atpms, peak_profiles
 
 class ATACSplitPool(nn.Module):
     """
