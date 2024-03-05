@@ -78,7 +78,10 @@ def get_rev_collate_fn(batch):
     motif_mean_std = np.stack(motif_mean_std, axis=0)
     motif_mean_std = torch.FloatTensor(motif_mean_std)
     hic_matrix = np.stack(hic_matrix, axis=0)
-    hic_matrix = torch.FloatTensor(hic_matrix)
+    if hic_matrix[0] is not None:
+        hic_matrix = torch.FloatTensor(hic_matrix)
+    else:
+        hic_matrix = torch.FloatTensor(0)
     peak_len = celltype_peaks[:,:,1]-celltype_peaks[:,:,0]
     padded_peak_len = peak_len + 100
     total_peak_len = peak_len.sum(1)
