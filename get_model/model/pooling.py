@@ -186,8 +186,8 @@ class ConvPool(nn.Module):
         peak_profiles = []
         for peak in peak_list:
             peak_profile = self.dila_conv_tower(peak)
-            peak_profile = self.aprofile_header(peak_profile)
-            peak_atpm = self.pool(peak_profile, self.pool_method)
+            peak_atpm = peak_profile.mean(2) # (B, R, 1)
+            peak_profile = self.aprofile_header(peak_profile) # (B, R, L,1)
             peak_atpm = self.atpm_header(peak_atpm)
             peak_atpm_list.append(peak_atpm)
             peak_profiles.append(peak_profile)
