@@ -534,7 +534,8 @@ def rename_keys(state_dict):
             new_key = new_key.replace("region_embed.proj.", "region_embed.embed.")
         new_state_dict[new_key] = state_dict[key]
     
-    new_state_dict['region_embed.embed.weight'] = new_state_dict['region_embed.embed.weight']#.unsqueeze(2)
+    if 'region_embed.embed.weight' in new_state_dict:
+        new_state_dict['region_embed.embed.weight'] = new_state_dict['region_embed.embed.weight']#.unsqueeze(2)
     return new_state_dict
 
 def auto_load_model(
