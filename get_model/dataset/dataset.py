@@ -53,7 +53,7 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
         'peak_inactivation': args.peak_inactivation,
         'leave_out_celltypes': args.leave_out_celltypes,
         'leave_out_chromosomes': args.leave_out_chromosomes,
-        'n_peaks_sample_gap': 50,
+        'n_peaks_sample_gap': args.n_peaks_upper_bound,
         'non_redundant': args.non_redundant,
         'filter_by_min_depth': args.filter_by_min_depth,
         'dataset_size': 40_960,
@@ -150,6 +150,26 @@ def dataset_fintune_fetal_k562_hsc_eval(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_K562_HSC.Chr4&14.Eval", is_train, args, sequence_obj=sequence_obj, parameter_override={
             'zarr_dirs': [f'{args.data_path}/vijay_hematopoiesis_dense.zarr'],
+            'dataset_size': 40_96,
+        })
+
+
+def dataset_fintune_monocyte(is_train, args, sequence_obj=None):
+    return build_dataset_zarr_template(
+        "Expression_Finetune_monocyte.Chr4&14", False, args, sequence_obj=sequence_obj, parameter_override={
+            'zarr_dirs': [f'{args.data_path}/vijay_hematopoiesis_dense.zarr'],
+            'leave_out_celltypes': "Mono.vijay_hematopoiesis.Young2_BMMC.1024",
+            'leave_out_chromosomes': ['chr1', 'chr2', 'chr3', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9', 'chr10', 'chr11', 'chr12', 'chr13', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chrX'],
+        })
+
+
+def dataset_fintune_monocyte_eval(is_train, args, sequence_obj=None):
+    return build_dataset_zarr_template(
+        "Expression_Finetune_monocyte.Chr4&14.Eval", False, args, sequence_obj=sequence_obj, parameter_override={
+            'zarr_dirs': [f'{args.data_path}/vijay_hematopoiesis_dense.zarr'],
+            'leave_out_celltypes': "Mono.vijay_hematopoiesis.Young2_BMMC.1024",
+            'leave_out_chromosomes': ['chr4', 'chr14'],
+            'dataset_size': 8192,
         })
 
 
@@ -219,6 +239,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         ('Expression_Finetune_K562_HSC.Chr4&14.Eval', False): dataset_fintune_fetal_k562_hsc_eval,
         ('Expression_Finetune_K562.Chr4&14', True): dataset_fintune_fetal_k562,
         ('Expression_Finetune_K562.Chr4&14.Eval', False): dataset_fintune_fetal_k562_eval,
+        ('Expression_Finetune_monocyte.Chr4&14', True): dataset_fintune_monocyte,
+        ('Expression_Finetune_monocyte.Chr4&14.Eval', False): dataset_fintune_monocyte_eval,
     }
 
     dataset_key = (args.data_set if is_train else args.eval_data_set, is_train)
