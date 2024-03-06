@@ -67,15 +67,22 @@ class ModelWrapper:
         hic_matrix = hic_matrix.to(device, non_blocking=True).float()
         
         # compute output
-        loss, exp, exp_target, atac, atac_target, confidence_pred, confidence_target = train_class_batch(self.model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data[:,:,0], labels_data, other_labels_data, self.loss, hic_matrix)
+        results = train_class_batch(self.model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data[:,:,0], labels_data, other_labels_data, self.loss, hic_matrix)
 
         # other_labels_data is B, R, N where [:,:, 1] is TSS indicator
         # only append tss preds and obs
-        pred_exp = exp.reshape(-1).detach().cpu().numpy()
-        ob_exp = exp_target.reshape(-1).detach().cpu().numpy()
-        pred_atac = atac.reshape(-1).detach().cpu().numpy()
-        ob_atac = other_labels_data[:,:,0].float().reshape(-1).detach().cpu().numpy()
-        return pred_exp, ob_exp, pred_atac, ob_atac
+        if self.model._get_name()=='GETFinetuneChrombpNet':
+            atpm_pred = results['atpm_pred']
+            atpm_target = results['atpm_target']
+            aprofile_pred = results['aprofile_pred']
+            aprofile_target = results['aprofile_target']
+            return atpm_pred, atpm_target, aprofile_pred, aprofile_target
+        else:
+            pred_exp = exp.reshape(-1).detach().cpu().numpy()
+            ob_exp = exp_target.reshape(-1).detach().cpu().numpy()
+            pred_atac = atac.reshape(-1).detach().cpu().numpy()
+            ob_atac = other_labels_data[:,:,0].float().reshape(-1).detach().cpu().numpy()
+            return pred_exp, ob_exp, pred_atac, ob_atac
 
 
         
@@ -95,8 +102,9 @@ class InferenceEngine:
         self.gene_name = gene_name
         self.gene_info = self.dataset._get_gene_info_from_window_idx(window_idx[0]+window_idx_offset).query('gene_name==@gene_name')
         self.chr_name = self.gene_info['Chromosome'].values[0]
+        self.tss_coord = self.gene_info.Start.values[0]
 
-        peak_info = self.dataset.datapool.zarr_dict[data_key].get_peaks(celltype, 'peaks_q0.01_tissue_open_exp').reset_index(drop=True).reset_index()
+        peak_info = self.dataset.datapool._query_peaks(celltype, self.chr_name, self.tss_coord-4000000, self.tss_coord+4000000).reset_index(drop=True).reset_index()
         self.data_key = data_key
         self.peak_info = peak_info
         track_start, track_end, tss_peak, peak_start, strand = self.get_peak_start_end_from_gene_peak(self.gene_info, self.peak_info, gene_name, track_start, track_end)
@@ -105,12 +113,6 @@ class InferenceEngine:
         self.track_start = track_start
         self.track_end = track_end
         self.tss_peak = np.unique(tss_peak)
-        self.data = self.dataset.datapool.load_data(
-            data_key=self.data_key, 
-            celltype_id=self.celltype,
-            chr_name=self.chr_name,
-            start=self.track_start,
-            end=self.track_end)
 
     def run_inference_for_gene_and_celltype(self, offset=0, mut=None, peak_inactivation=None):
         """
@@ -125,11 +127,8 @@ class InferenceEngine:
         if peak_inactivation is None:
             peak_inactivation = self.peak_inactivation
             
-        # 1. Get the gene and cell type information
-        chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std = self.data
-        # 5. Extract the sample data for inference
 
-        batch = self.dataset.datapool.generate_sample(chr_name, start, end, self.data_key, celltype_id, track, celltype_peaks, motif_mean_std, mut=mut, peak_inactivation=peak_inactivation)
+        batch = self.dataset.datapool.generate_sample(self.chr_name, self.track_start, self.track_end, self.data_key, self.celltype, mut=mut, peak_inactivation=peak_inactivation)
         tss_peak = self.tss_peak - offset
         mut_peak = None
         if mut is not None:
@@ -163,23 +162,22 @@ class InferenceEngine:
         """
         # Assuming PyRanges is used for managing genomic ranges
         from pyranges import PyRanges as pr
-        df = pr(peak_info.copy().reset_index(drop=True).reset_index()).join(pr(gene_info.copy().query('gene_name==@gene')[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates()).extend(300), suffix="_gene", how='left', apply_strand_suffix=False).df[['index', 'Chromosome', 'Start', 'End', 'Expression_positive', 'Expression_negative', 'aTPM', 'TSS', 'gene_name', 'Strand', 'chunk_idx']].reset_index(drop=True)
+        df = pr(peak_info.copy().reset_index()).join(pr(gene_info.copy().query('gene_name==@gene')[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates()).extend(300), suffix="_gene", how='left', apply_strand_suffix=False).df[['index', 'Chromosome', 'Start', 'End', 'Expression_positive', 'Expression_negative', 'aTPM', 'TSS', 'gene_name', 'Strand', 'chunk_idx']].set_index('index')
         gene_df = df.query('gene_name==@gene')
         strand = gene_df.Strand.replace({'+': 1, '-': -1}).values[0]
         if gene_df.shape[0] == 0:
             raise ValueError(f"Gene {gene} not found in the peak information.")
-        idx = gene_df.aTPM.idxmax()
+        tss_peak = gene_df.aTPM.idxmax()
         if track_start is None or track_end is None:
             # Get the peak start and end positions based on n_peaks_upper_bound
-            peak_start, peak_end = df.iloc[idx]['index'] - self.dataset.n_peaks_upper_bound // 2, df.iloc[idx]['index'] + self.dataset.n_peaks_upper_bound // 2
-            tss_peak = gene_df['index'].values
+            peak_start, peak_end = tss_peak - self.dataset.n_peaks_upper_bound // 2, tss_peak + self.dataset.n_peaks_upper_bound // 2
             tss_peak = tss_peak - peak_start
         else:
             peak_info_subset = peak_info.query('Chromosome==@self.chr_name').query('Start>=@track_start & End<=@track_end')
             peak_start, peak_end = peak_info_subset.index.min(), peak_info_subset.index.max()
             tss_peak = pr(peak_info_subset).join(pr(gene_df)).df['index'].values
             tss_peak = tss_peak - peak_start
-        track_start = peak_info.iloc[peak_start].Start
-        track_end = peak_info.iloc[peak_end].End
+        track_start = peak_info.iloc[peak_start].Start-self.dataset.padding
+        track_end = peak_info.iloc[peak_end].End+self.dataset.padding
 
         return track_start, track_end, tss_peak, peak_start, strand

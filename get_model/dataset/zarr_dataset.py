@@ -583,17 +583,17 @@ class ZarrDataPool(object):
         chunk_idx = sum([self.chrom_n_chunks[list(self.chrom_n_chunks.keys())[i]]-1 for i in range(current_chr_idx)]) + chr_chunk_idx
         return chunk_idx
     
-    def generate_sample(self, chr_name, start, end, data_key, celltype_id, track, celltype_peaks, motif_mean_std,
+    def generate_sample(self, chr_name, start, end, data_key, celltype_id, 
                          mut=None, peak_inactivation=None, padding=50):
         """
-        Generate a single sample.
+        Convenient handler for generate a single sample.
         """
-        chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std = self.load_data(
+        chr_name, start, end, celltype_id, track, _, celltype_peaks, motif_mean_std = self.load_data(
             data_key, celltype_id, chr_name, start, end)
         track_start = celltype_peaks['Start'].min() - padding
         track_end = celltype_peaks['End'].max() + padding
-        # peak_inactivation is a dataframe of peaks to inactivate
-        # overlap with celltype_peaks to keep the peaks that are not in peak_inactivation
+        assert track_start>=start and track_end<=end, f"Celltype peaks after padding is not within the input range {chr_name}:{start}-{end}"
+
         if peak_inactivation is not None:
             inactivated_peak_idx = self._inactivated_peaks(celltype_peaks, peak_inactivation)
         else:
@@ -1151,7 +1151,7 @@ def worker_init_fn_get(worker_id):
 class InferenceDataset(PretrainDataset):
     def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, gencode_obj, peak_name='peaks', 
                  n_peaks_upper_bound=100, sequence_obj=None, additional_peak_columns=None, center_expand_target=1000, max_peak_length=5000, use_insulation=False, random_shift_peak=False, hic_path=None):
-        super().__init__(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name=peak_name, n_peaks_upper_bound=n_peaks_upper_bound, sequence_obj=sequence_obj, additional_peak_columns=additional_peak_columns, n_packs=1, max_peak_length=max_peak_length,  use_insulation=use_insulation, center_expand_target=center_expand_target, preload_count=1, insulation_subsample_ratio=1, random_shift_peak=random_shift_peak, hic_path=hic_path)
+        super().__init__(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name=peak_name, n_peaks_upper_bound=n_peaks_upper_bound, sequence_obj=sequence_obj, additional_peak_columns=additional_peak_columns, n_packs=1, max_peak_length=max_peak_length,  use_insulation=use_insulation, center_expand_target=center_expand_target, preload_count=1, insulation_subsample_ratio=1, random_shift_peak=random_shift_peak, hic_path=hic_path, dataset_size=400)
         self.gencode_obj = gencode_obj
         self.tss_chunk_idx = self._generate_tss_chunk_idx()
 
