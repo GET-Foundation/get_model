@@ -744,7 +744,7 @@ def main(args, ds_init):
     )
 
     if args.criterion == "mse":
-        criterion = torch.nn.MSELoss(reduction="sum")
+        criterion = torch.nn.MSELoss(reduction="mean")
     elif args.criterion == "poisson":
         criterion = torch.nn.PoissonNLLLoss(log_input=False, reduction="mean")
 
