@@ -20,6 +20,10 @@ from timm.utils import ModelEma
 from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
 
 
+import torch
+import torch.nn.functional as F
+from torch.distributions import Multinomial
+
 def pretrain_one_epoch(
     model: torch.nn.Module,
     data_loader: Iterable,
@@ -171,7 +175,7 @@ def pretrain_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=None, args=None):
-    if args.model=='get_finetune_motif_chrombpnet':
+    if model._get_name()=='GETFinetuneChrombpNet' or args.model=='get_finetune_motif_chrombpnet':
         return train_chrombpnet(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=hic_matrix)
     else:
         return train_class_batch_exp(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=hic_matrix)
@@ -229,6 +233,22 @@ def train_class_batch_exp(model, peak_seq, sample_track, mask, chunk_size, n_pea
             'atac_pred': atac, 'atac_target': atac_target, 
             'confidence_pred': confidence_pred, 'confidence_target': confidence_target}
 
+
+def multinomial_nll(true_counts, logits):
+    """
+    Compute the multinomial negative log-likelihood in PyTorch
+    Args:
+      true_counts (Tensor): observed count values
+      logits (Tensor): predicted logit values
+    """
+    counts_per_example = torch.sum(true_counts, dim=-1)
+    # Creating a Multinomial distribution in PyTorch
+    dist = Multinomial(total_count=counts_per_example, logits=logits)
+    # Calculating the log probability and then the negative log-likelihood
+    log_prob = dist.log_prob(true_counts)
+    nll = -torch.sum(log_prob) / true_counts.size(0)
+    return nll
+
 def train_chrombpnet(model, peak_seq, aprofile_target, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atpm_target, exp_target, other_labels, criterion, hic_matrix=None):
     device = peak_seq.device
     padding_mask = get_padding_pos(mask)
@@ -245,8 +265,8 @@ def train_chrombpnet(model, peak_seq, aprofile_target, mask, chunk_size, n_peaks
     atpm_target = atpm_target.unsqueeze(-1) * mask_for_loss
     atpm_target = atpm_target[indices[0], indices[1], :].flatten()
     aprofile_target = aprofile_target
-    loss_atpm = criterion(atpm, atpm_target)
-    loss_aprofile = criterion(aprofile, aprofile_target)
+    loss_atpm = criterion(atpm.float(), atpm_target.float())
+    loss_aprofile = criterion(aprofile.float(), aprofile_target.float())
     
     loss = loss_atpm + loss_aprofile 
     # return loss, atpm, atpm_target, aprofile, aprofile_target
@@ -582,7 +602,7 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
             hic_matrix=hic_matrix,
             args=args
         )
-        if args.model=='get_finetune_motif_chrombpnet':
+        if model._get_name() =='GETFinetuneChrombpNet' or args.model=='get_finetune_motif_chrombpnet':
             loss = result['loss'].item()
             loss_atpm = result['loss_atpm'].item()
             loss_aprofile = result['loss_aprofile'].item()
@@ -590,10 +610,10 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
             atpm_target = result['atpm_target']
             aprofile = result['aprofile_pred']
             aprofile_target = result['aprofile_target']
-            preds_atpm.append(atpm.reshape(-1).detach().cpu().numpy())
-            obs_atpm.append(atpm_target.reshape(-1).detach().cpu().numpy())
-            preds_aprofile.append(aprofile.reshape(-1).detach().cpu().numpy())
-            obs_aprofile.append(aprofile_target.reshape(-1).detach().cpu().numpy())
+            preds_atpm.append(atpm.float().reshape(-1).detach().cpu().numpy())
+            obs_atpm.append(atpm_target.float().reshape(-1).detach().cpu().numpy())
+            preds_aprofile.append(aprofile.float().reshape(-1).detach().cpu().numpy())
+            obs_aprofile.append(aprofile_target.float().reshape(-1).detach().cpu().numpy())
 
             metric_logger.update(loss=loss)
             metric_logger.update(loss_atpm=loss_atpm)
@@ -629,31 +649,35 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
             metric_logger.update(loss_exp=loss_exp)
             metric_logger.update(loss_confidence=loss_confidence)
 
-    if args.model=='get_finetune_motif_chrombpnet':
+    if model._get_name()=='GETFinetuneChrombpNet' or args.model=='get_finetune_motif_chrombpnet':
         preds_atpm = np.concatenate(preds_atpm, axis=0).reshape(-1)
         obs_atpm = np.concatenate(obs_atpm, axis=0).reshape(-1)
         preds_aprofile = np.concatenate(preds_aprofile, axis=0).reshape(-1)
         obs_aprofile = np.concatenate(obs_aprofile, axis=0).reshape(-1)
+        bin=100
+        obs_aprofile = np.array([np.mean(obs_aprofile[i:i+bin]) for i in range(0, len(obs_aprofile), bin)])
+        preds_aprofile = np.array([np.mean(preds_aprofile[i:i+bin]) for i in range(0, len(preds_aprofile), bin)])
         r2score_atpm, pearsonr_score_atpm, spearmanr_score_atpm = cal_score_stats(preds_atpm, obs_atpm, data_loader, args)
         r2score_aprofile, pearsonr_score_aprofile, spearmanr_score_aprofile = cal_score_stats(preds_aprofile, obs_aprofile, data_loader, args)
 
-        metric_logger.meters["r2score_atpm"].update(r2score_atpm, n=1)
-        metric_logger.meters["pearsonr_score_atpm"].update(pearsonr_score_atpm, n=1)    
-        metric_logger.meters["spearmanr_score_atpm"].update(spearmanr_score_atpm, n=1)
-        metric_logger.meters["r2score_aprofile"].update(r2score_aprofile, n=1)
-        metric_logger.meters["pearsonr_score_aprofile"].update(pearsonr_score_aprofile, n=1)
-        metric_logger.meters["spearmanr_score_aprofile"].update(spearmanr_score_aprofile, n=1)
+        metric_logger.meters["r2score"].update(r2score_atpm, n=1)
+        metric_logger.meters["pearsonr_score"].update(pearsonr_score_atpm, n=1)    
+        metric_logger.meters["spearmanr_score"].update(spearmanr_score_atpm, n=1)
+        metric_logger.meters["r2score_atac"].update(r2score_aprofile, n=1)
+        metric_logger.meters["pearsonr_score_atac"].update(pearsonr_score_aprofile, n=1)
+        metric_logger.meters["spearmanr_score_atac"].update(spearmanr_score_aprofile, n=1)
 
         if printlog:
             print(
-                "* Score@R2 {r2:.3f} Score@pearsonr {pearson:.3f} Score@spearmanr {spearman:.3f}  loss {losses.global_avg:.3f}\n Score@R2 {r2score_aprofile:.3f} Score@pearsonr {pearsonr_score_aprofile:.3f} Score@spearmanr {spearmanr_score_aprofile:.3f}  loss {losses.global_avg:.3f}".format(
+                "* Score@R2 {r2:.3f} Score@pearsonr {pearson:.3f} Score@spearmanr {spearman:.3f}  loss_atpm {loss_atpm:.3f}\n Score@R2 {r2score_aprofile:.3f} Score@pearsonr {pearsonr_score_aprofile:.3f} Score@spearmanr {spearmanr_score_aprofile:.3f}  loss_aprofile {loss_aprofile:.3f}".format(
                     r2=r2score_atpm,
                     pearson=pearsonr_score_atpm,
                     spearman=spearmanr_score_atpm,
                     r2score_aprofile=r2score_aprofile,
                     pearsonr_score_aprofile=pearsonr_score_aprofile,
                     spearmanr_score_aprofile=spearmanr_score_aprofile,
-                    losses=metric_logger.loss,
+                    loss_aprofile=loss_aprofile,
+                    loss_atpm=loss_atpm,
                 )
             )
 
