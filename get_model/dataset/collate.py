@@ -63,7 +63,7 @@ def get_rev_collate_fn(batch):
         peak_sequence[i] = peak_sequence[i].todense()
         cov = (celltype_peaks[i][:,1]-celltype_peaks[i][:,0]).sum()
         real_cov = peak_signal_track[i].sum()
-        conv = 50#int(min(500, max(100, int(cov/(real_cov+20)))))
+        conv = 20#int(min(500, max(100, int(cov/(real_cov+20)))))
         peak_signal_track[i] = np.convolve(np.array(peak_signal_track[i]).reshape(-1), np.ones(50)/50, mode='same')
         # if sample_track[i].max()>0:
         #     sample_track[i] = sample_track[i]/sample_track[i].max()

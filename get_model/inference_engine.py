@@ -181,3 +181,75 @@ class InferenceEngine:
         track_end = peak_info.iloc[peak_end].End+self.dataset.padding
 
         return track_start, track_end, tss_peak, peak_start, strand
+
+
+class VariantInferenceEngine(InferenceEngine):
+    def __init__(self, dataset, model_checkpoint, mut, with_sequence=False, device='cuda', model=None):
+        super().__init__(dataset, model_checkpoint, mut=mut, with_sequence=with_sequence, device=device, model=model)
+
+    def setup_data(self, variant_info, celltype, window_idx_offset=0):
+        data_key = self.dataset.datapool.data_keys[0]
+        dataset = self.dataset
+        self.celltype = celltype
+
+        chr_name = variant_info['Chromosome'].values[0]
+        variant_coord = variant_info['Start'].values[0]
+
+        peak_info = self.dataset.datapool._query_peaks(celltype, chr_name, variant_coord - 4000000, variant_coord + 4000000).reset_index(drop=True).reset_index()
+        self.data_key = data_key
+        self.peak_info = peak_info
+        self.chr_name = chr_name
+        self.variant_coord = variant_coord
+
+        track_start, track_end, variant_peak, peak_start, strand = self.get_peak_start_end_from_variant(variant_info, self.peak_info)
+        self.peak_start = peak_start
+        self.strand = strand
+        self.track_start = track_start
+        self.track_end = track_end
+        self.variant_peak = np.unique(variant_peak)
+
+    def get_peak_start_end_from_variant(self, variant_info, peak_info):
+        """
+        Determine the peak start and end positions for a specific variant.
+
+        Parameters:
+        - variant_info (DataFrame): Variant information DataFrame.
+        - peak_info (DataFrame): Peak information DataFrame.
+
+        Returns:
+        - tuple: The start and end indices of the peak.
+        """
+        from pyranges import PyRanges as pr
+        chr_name = variant_info['Chromosome'].values[0]
+        variant_coord = variant_info['Start'].values[0]
+
+        df = pr(peak_info.copy().reset_index()).join(pr(variant_info.copy()[['Chromosome', 'Start', 'End']]), how='left', suffix="_variant", apply_strand_suffix=False).df[['index', 'Chromosome', 'Start', 'End', 'Expression_positive', 'Expression_negative', 'aTPM', 'TSS', 'Start_variant', 'End_variant']].set_index('index')
+        variant_peak = df.query('Start_variant>=Start & End_variant<=End').index.values
+
+        if variant_peak.shape[0] == 0:
+            raise ValueError(f"Variant not found in the peak information.")
+
+        # Get the peak start and end positions based on n_peaks_upper_bound
+        peak_start, peak_end = variant_peak.min() - self.dataset.n_peaks_upper_bound // 2, variant_peak.max() + self.dataset.n_peaks_upper_bound // 2
+        variant_peak = variant_peak - peak_start
+
+        track_start = peak_info.iloc[peak_start].Start - self.dataset.padding
+        track_end = peak_info.iloc[peak_end].End + self.dataset.padding
+
+        # Assume strand is always positive for variants
+        strand = 1
+
+        return track_start, track_end, variant_peak, peak_start, strand
+
+    def run_inference_for_variant(self, offset=0):
+        """
+        Run inference for a specific variant.
+        """
+        batch = self.dataset.datapool.generate_sample(self.chr_name, self.track_start, self.track_end, self.data_key, self.celltype, mut=self.mut)
+        variant_peak = self.variant_peak - offset
+
+        # Run the model inference
+        inference_results, prepared_batch = self.run_inference_with_batch(batch)
+
+        # Handle the inference results as needed
+        return inference_results, prepared_batch, variant_peak

@@ -15,54 +15,6 @@ from get_model.model.pooling import SplitPool, ATACSplitPool, ATACSplitPoolMaxNo
 import torch
 from torch.nn import Linear
 
-class OuterProductMean(nn.Module):
-    """
-    Implements a simplified version of the OuterProductMean.
-    """
-
-    def __init__(self, c_m, c_z, c_hidden, eps=1e-3):
-        """
-        Args:
-            c_m: MSA embedding channel dimension
-            c_z: Pair embedding channel dimension
-            c_hidden: Hidden channel dimension
-        """
-        super(OuterProductMean, self).__init__()
-
-        self.eps = eps
-        self.layer_norm = nn.LayerNorm(c_m)
-        self.linear_1 = Linear(c_m, c_hidden)
-        self.linear_2 = Linear(c_m, c_hidden)
-        self.linear_out = Linear(c_hidden ** 2, c_z, init="final")
-
-    def forward(self, m: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Args:
-            m: [*, N_seq, N_res, C_m] MSA embedding
-            mask: [*, N_seq, N_res] MSA mask, if None, create a mask of ones
-        Returns:
-            [*, N_res, N_res, C_z] pair embedding update
-        """
-        if mask is None:
-            mask = m.new_ones(m.shape[:-1])
-
-        ln = self.layer_norm(m)
-        mask = mask.unsqueeze(-1)
-        a = self.linear_1(ln) * mask
-        b = self.linear_2(ln) * mask
-        a = a.transpose(-2, -3)
-        b = b.transpose(-2, -3)
-
-        # Calculate the outer product mean
-        outer = torch.einsum("...bac,...dae->...bdce", a, b)
-        outer = outer.reshape(outer.shape[:-2] + (-1,))
-        outer = self.linear_out(outer)
-
-        norm = torch.einsum("...abc,...adc->...bdc", mask, mask) + self.eps
-        outer = outer / norm
-
-        return outer
-
 class SequenceEncoder(nn.Module):
     """A sequence encoder based on Conv1D.
     Input: one-hot encoding of DNA sequences of all regions in batch (BATCH_SIZE, NUM_REGION, SEQ_LEN, 4)
@@ -192,10 +144,11 @@ class MotifScanner(nn.Module):
     """
 
     def __init__(
-        self, num_motif=637, include_reverse_complement=True, bidirectional_except_ctcf=False, learnable=False):
+        self, num_motif=637, include_reverse_complement=True, bidirectional_except_ctcf=False, motif_prior=True, learnable=False):
         super().__init__()
         self.num_motif = num_motif
         self.bidirectional_except_ctcf = bidirectional_except_ctcf
+        self.motif_prior = motif_prior
         self.learnable = learnable
         if include_reverse_complement and self.bidirectional_except_ctcf:
             self.num_motif *= 2
@@ -204,14 +157,16 @@ class MotifScanner(nn.Module):
 
         motifs = self.load_pwm_as_kernel(include_reverse_complement=include_reverse_complement)
         self.motif = nn.Sequential(
-            nn.Conv1d(4, self.num_motif, 29, padding="same", bias=False),
+            nn.Conv1d(4, self.num_motif, 29, padding="same", bias=True),
             # nn.BatchNorm1d(num_motif),
             nn.ReLU(),
         )
         assert (
             motifs.shape == self.motif[0].weight.shape
         ), f"Motif prior shape ({motifs.shape}) doesn't match model ({self.motif[0].weight.shape})."
-        self.motif[0].weight.data = motifs
+        if self.motif_prior:
+            self.motif[0].weight.data = motifs
+            self.motif[0].bias.data = torch.zeros(self.num_motif)
         if not self.learnable:
             self.motif[0].weight.requires_grad = False
 
@@ -306,7 +261,9 @@ class GETPretrainMaxNorm(nn.Module):
         self.joint_kernel_size = joint_kernel_size
         self.motif_scanner = MotifScanner(
             num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True
+            bidirectional_except_ctcf=True,
+            motif_prior=motif_prior,
+            learnable=False,
         )
         self.atac_attention = ATACSplitPoolMaxNorm(pool_method='mean',
                                             atac_kernel_num=atac_kernel_num,
@@ -444,7 +401,9 @@ class GETPretrain(nn.Module):
         self.joint_kernel_size = joint_kernel_size
         self.motif_scanner = MotifScanner(
             num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True
+            bidirectional_except_ctcf=True,
+            motif_prior=motif_prior,
+            learnable=False,
         )
         self.atac_attention = ATACSplitPool(pool_method='mean',
                                             atac_kernel_num=atac_kernel_num,
@@ -614,7 +573,9 @@ class GETFinetune(nn.Module):
         self.joint_kernel_size = joint_kernel_size
         self.motif_scanner = MotifScanner(
             num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True
+            bidirectional_except_ctcf=True,
+            motif_prior=motif_prior,
+            learnable=False,
         )
         self.atac_attention = ATACSplitPool(
             pool_method='mean',
@@ -752,7 +713,9 @@ class GETFinetuneExpATAC(nn.Module):
         self.joint_kernel_size = joint_kernel_size
         self.motif_scanner = MotifScanner(
             num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True
+            bidirectional_except_ctcf=True,
+            motif_prior=motif_prior,
+            learnable=False,
         )
         self.atac_attention = ATACSplitPool(
             pool_method='mean',
@@ -898,7 +861,9 @@ class GETFinetuneATAC(nn.Module):
         self.joint_kernel_size = joint_kernel_size
         self.motif_scanner = MotifScanner(
             num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True
+            bidirectional_except_ctcf=True,
+            motif_prior=motif_prior,
+            learnable=False,
         )
         self.atac_attention = ATACSplitPool(
             pool_method='mean',
@@ -1028,7 +993,9 @@ class GETFinetuneExpATACFromSequence(nn.Module):
         self.pos_emb_components = pos_emb_components
         self.motif_scanner = MotifScanner(
             num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True
+            bidirectional_except_ctcf=True,
+            motif_prior=motif_prior,
+            learnable=False,
         )
         self.atac_attention = SplitPool(
             pool_method='mean',
@@ -1171,7 +1138,9 @@ class GETFinetuneExpATACWithHiC(nn.Module):
         self.joint_kernel_size = joint_kernel_size
         self.motif_scanner = MotifScanner(
             num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True
+            bidirectional_except_ctcf=True,
+            motif_prior=motif_prior,
+            learnable=False,
         )
         self.atac_attention = ATACSplitPool(
             pool_method='mean',
@@ -1284,6 +1253,7 @@ class GETFinetuneChrombpNet(nn.Module):
         embed_dim=768,
         num_regions=200,
         motif_prior=True,
+        learnable_motif=False,
         num_layers=7,
         d_model=768,
         nhead=1,
@@ -1302,7 +1272,9 @@ class GETFinetuneChrombpNet(nn.Module):
         self.output_dim = output_dim
         self.motif_scanner = MotifScanner(
             num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True
+            bidirectional_except_ctcf=True,
+            motif_prior=motif_prior,
+            learnable=learnable_motif,
         )
         self.atac_attention = ConvPool(
             pool_method='mean',
@@ -1491,6 +1463,8 @@ def get_finetune_motif_chrombpnet(pretrained=False, **kwargs):
         num_motif=kwargs["num_motif"],
         motif_dim=kwargs["motif_dim"],
         embed_dim=768,
+        motif_prior=True,
+        learnable_motif=True,
     )
     if pretrained:
         checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")

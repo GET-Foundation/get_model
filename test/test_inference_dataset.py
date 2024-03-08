@@ -22,7 +22,7 @@ gencode_config = {
     "version": 40,
     "gtf_dir": "/manitou/pmg/users/xf2217/bmms/caesar/data/"
 }
-model_checkpoint = "/burg/pmg/users/xf2217/get_checkpoints/Expression_Finetune_K562_HSC.Chr4_14.conv50.atac_loss.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.20240225.99.pth"
+model_checkpoint = "/pmglocal/xf2217/Expression_Finetune_monocyte.Chr4&14.conv50.learnable_motif_prior.chrombpnet.shift10.R100L1000.augmented.20240307/checkpoint-best.pth"
 # Configuration for the dataset
 dataset_config = {
     "zarr_dirs": ["/pmglocal/xf2217/get_data/encode_hg38atac_dense.zarr"],

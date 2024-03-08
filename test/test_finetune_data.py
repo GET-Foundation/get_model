@@ -11,7 +11,7 @@ from get_model.dataset.zarr_dataset import get_padding_pos
 from get_model.engine import train_class_batch
 from get_model.dataset.collate import get_rev_collate_fn
 from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, PreloadDataPack, CelltypeDenseZarrIO, worker_init_fn_get
-from get_model.model.model import GETFinetune, GETFinetuneExpATAC, GETFinetuneExpATACFromSequence
+from get_model.model.model import GETFinetune, GETFinetuneExpATAC, GETFinetuneExpATACFromSequence, GETFinetuneChrombpNet
 #%%
 # # %%
 # cdz = CelltypeDenseZarrIO('/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr')
@@ -27,12 +27,12 @@ from get_model.model.model import GETFinetune, GETFinetuneExpATAC, GETFinetuneEx
 #     name="finetune-gbm",
 # )
 
-pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/encode_hg38atac_dense.zarr',
+pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/vijay_hematopoiesis_dense.zarr',
                             ],
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=10, insulation_subsample_ratio=0.8, n_peaks_upper_bound=100, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=400)
+                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=2, insulation_subsample_ratio=0.8, n_peaks_upper_bound=10, leave_out_celltypes='Mono.vijay_hematopoiesis.Young2_BMMC.1024', leave_out_chromosomes=['chr4','chr14'], is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=10000)
 pretrain.__len__()
 #%%
 pretrain.debug_getitem(0)
@@ -110,8 +110,20 @@ model = GETFinetuneExpATACFromSequence(
         # joint_kernel_num = 161,
         # final_bn = True,
     )
+
+model = GETFinetuneChrombpNet(
+        num_regions=100,
+        motif_prior=False,
+        embed_dim=768,
+        num_layers=7,
+        d_model=768,
+        nhead=12,
+        dropout=0.1,
+        output_dim=2,
+    
+)
 #%%
-checkpoint = torch.load('/burg/pmg/users/xf2217/get_checkpoints/fetal.from_sequence.allchr.best.pth')
+checkpoint = torch.load('/pmglocal/xf2217/Expression_Finetune_monocyte.Chr4&14.conv50.learnable_motif_prior.chrombpnet.shift10.R100L1000.augmented.20240307/checkpoint-17.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=True)
 
@@ -149,11 +161,16 @@ obs = []
 preds_atac = []
 obs_atac = []
 tss_atac = []
+preds_atpm = []
+obs_atpm = []
+preds_aprofile = []
+obs_aprofile = []
+
 confidence_scores = []
 confidence_target_scores = []
 with torch.amp.autocast('cuda', dtype=torch.bfloat16):
     for i, batch in tqdm(enumerate(data_loader_train)):
-        if i > 200:
+        if i > 10000:
             break
         sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels, hic_matrix = batch
         if min(chunk_size)<0:
@@ -168,36 +185,58 @@ with torch.amp.autocast('cuda', dtype=torch.bfloat16):
         other_labels = other_labels.to(device, non_blocking=True).bfloat16()
         # compute output
         atac_targets = other_labels[:,:,0]
-        loss, exp, exp_target, atac, atac_target, confidence, confidence_target = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
+        result = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std
         , atac_targets, labels_data,  other_labels, criterion)
+        
+        if model._get_name() =='GETFinetuneChrombpNet' or args.model=='get_finetune_motif_chrombpnet':
+            loss = result['loss'].item()
+            loss_atpm = result['loss_atpm'].item()
+            loss_aprofile = result['loss_aprofile'].item()
+            atpm = result['atpm_pred']
+            atpm_target = result['atpm_target']
+            aprofile = result['aprofile_pred']
+            aprofile_target = result['aprofile_target']
+            preds_atpm.append(atpm.float().reshape(-1).detach().cpu().numpy())
+            obs_atpm.append(atpm_target.float().reshape(-1).detach().cpu().numpy())
+            preds_aprofile.append(aprofile.float().reshape(-1).detach().cpu().numpy())
+            obs_aprofile.append(aprofile_target.float().reshape(-1).detach().cpu().numpy())
 
-        padding_mask = get_padding_pos(mask)
-        mask_for_loss = 1-padding_mask
-        padding_mask = padding_mask.to(device, non_blocking=True).bool()
-        mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
-        indices = torch.where(mask_for_loss==1)
-        # other_labels is B, R, N where [:,:, 1] is TSS indicator
-        other_labels_reshape = other_labels[indices[0], indices[1], 1].flatten()
-        preds.append(exp.reshape(-1, 2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
-        obs.append(exp_target.reshape(-1,2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
-        preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
-        obs_atac.append(atac_target.reshape(-1).detach().cpu().numpy())
-        tss_atac = other_labels[indices[0], indices[1], 0].flatten()
-        confidence_scores.append(confidence.reshape(-1).detach().cpu().numpy())
-        confidence_target_scores.append(confidence_target.reshape(-1).detach().cpu().numpy())
+        else:
+            exp = result['exp_pred']
+            exp_target = result['exp_target']
+            atac = result['atac_pred']
+            atac_target = result['atac_target']
+            loss = result['loss'].item()
+            loss_atac = result['loss_atac'].item()
+            loss_exp = result['loss_exp'].item()
+            loss_confidence = result['loss_confidence'].item()
+            padding_mask = get_padding_pos(mask)
+            mask_for_loss = 1-padding_mask
+            padding_mask = padding_mask.to(device, non_blocking=True).bool()
+            mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
+            indices = torch.where(mask_for_loss==1)
+            # other_labels is B, R, N where [:,:, 1] is TSS indicator
+            other_labels_reshape = other_labels[indices[0], indices[1], 1].flatten()
+            preds.append(exp.reshape(-1, 2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
+            obs.append(exp_target.reshape(-1,2)[other_labels_reshape==1, :].reshape(-1).detach().cpu().numpy())
+            preds_atac.append(atac.reshape(-1).detach().cpu().numpy())
+            obs_atac.append(atac_target.reshape(-1).detach().cpu().numpy())
+
+
+    if model._get_name()=='GETFinetuneChrombpNet':
+        preds_atpm = np.concatenate(preds_atpm, axis=0).reshape(-1)
+        obs_atpm = np.concatenate(obs_atpm, axis=0).reshape(-1)
+        preds_aprofile = np.concatenate(preds_aprofile, axis=0).reshape(-1)
+        obs_aprofile = np.concatenate(obs_aprofile, axis=0).reshape(-1)
+        bin=100
+        obs_aprofile = np.array([np.mean(obs_aprofile[i:i+bin]) for i in range(0, len(obs_aprofile), bin)])
+        preds_aprofile = np.array([np.mean(preds_aprofile[i:i+bin]) for i in range(0, len(preds_aprofile), bin)])
+        # r2score_atpm, pearsonr_score_atpm, spearmanr_score_atpm = cal_score_stats(preds_atpm, obs_atpm, data_loader, args)
+        # r2score_aprofile, pearsonr_score_aprofile, spearmanr_score_aprofile = cal_score_stats(preds_aprofile, obs_aprofile, data_loader, args)
 
         # preds.append(exp.reshape(-1).detach().cpu().numpy())
         # obs.append(exp_target.reshape(-1).detach().cpu().numpy())
 
-    preds = np.concatenate(preds, axis=0).reshape(-1)
-    obs = np.concatenate(obs, axis=0).reshape(-1)
-    preds_atac = np.concatenate(preds_atac, axis=0).reshape(-1)
-    obs_atac = np.concatenate(obs_atac, axis=0).reshape(-1)
-    confidence_scores = np.concatenate(confidence_scores, axis=0).reshape(-1)
-    confidence_target_scores = np.concatenate(confidence_target_scores, axis=0).reshape(-1)
-#%%
-confidence_scores = confidence_scores.reshape(-1,50).argmax(axis=1)
-confidence_target_scores = confidence_target_scores.reshape(-1)
 # %%
 import seaborn as sns
 from scipy.stats import pearsonr, spearmanr
@@ -213,8 +252,10 @@ def plot_scatter_with_limits(preds, obs, hue, xlim=None, ylim=None, figsize=(5, 
         plt.ylim(ylim)
 
     corr = pearsonr(preds, obs)[0]
+    spearman = spearmanr(preds, obs)[0]
     r2 = r2_score(obs, preds)
-    ax.text(0.2, 0.8, f'Pearson r={corr:.2f}\nR2={r2:.2f}', ha='center', va='center', transform=ax.transAxes)
+    ax.text(0.2, 0.8, f'Pearson r={corr:.2f}\nR2={r2:.2f}\nSpearman r={spearman:.2f}'
+            , ha='center', va='center', transform=ax.transAxes)
     ax.set_xlabel('Predicted')
     ax.set_ylabel('Observed')
     if title is not None:
@@ -222,9 +263,8 @@ def plot_scatter_with_limits(preds, obs, hue, xlim=None, ylim=None, figsize=(5, 
     return fig, ax
 
 #%%
-plot_scatter_with_limits(preds, obs, None, xlim=(0, 4), ylim=(0, 4), title='Expression')
+plot_scatter_with_limits(preds_atpm, obs_atpm, None, xlim=(0, 1), ylim=(0, 1), title='aTPM')
 #%%
-plot_scatter_with_limits(preds_atac, obs_atac, None, xlim=(0, 1), ylim=(0, 1), title='ATAC')
-# %%
-plot_scatter_with_limits(confidence_scores, confidence_target_scores, None, xlim=(0, 50), ylim=(0, 50), title='Confidence')
+plot_scatter_with_limits(preds_aprofile[0:10000], obs_aprofile[0:10000], None, xlim=(0, 12), ylim=(0, 12), title='aProfile')
+
 # %%
