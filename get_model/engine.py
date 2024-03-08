@@ -234,21 +234,6 @@ def train_class_batch_exp(model, peak_seq, sample_track, mask, chunk_size, n_pea
             'confidence_pred': confidence_pred, 'confidence_target': confidence_target}
 
 
-def multinomial_nll(true_counts, logits):
-    """
-    Compute the multinomial negative log-likelihood in PyTorch
-    Args:
-      true_counts (Tensor): observed count values
-      logits (Tensor): predicted logit values
-    """
-    counts_per_example = torch.sum(true_counts, dim=-1)
-    # Creating a Multinomial distribution in PyTorch
-    dist = Multinomial(total_count=counts_per_example, logits=logits)
-    # Calculating the log probability and then the negative log-likelihood
-    log_prob = dist.log_prob(true_counts)
-    nll = -torch.sum(log_prob) / true_counts.size(0)
-    return nll
-
 def train_chrombpnet(model, peak_seq, aprofile_target, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atpm_target, exp_target, other_labels, criterion, hic_matrix=None):
     device = peak_seq.device
     padding_mask = get_padding_pos(mask)
@@ -257,18 +242,17 @@ def train_chrombpnet(model, peak_seq, aprofile_target, mask, chunk_size, n_peaks
     mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
         atpm, aprofile = model(peak_seq, aprofile_target, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels, hic_matrix=hic_matrix)
-
+    
     B, R, N = atpm.shape
     atpm = atpm * mask_for_loss
     indices = torch.where(mask_for_loss==1)
     atpm = atpm[indices[0], indices[1], :].flatten()
     atpm_target = atpm_target.unsqueeze(-1) * mask_for_loss
     atpm_target = atpm_target[indices[0], indices[1], :].flatten()
-    aprofile_target = aprofile_target
     loss_atpm = criterion(atpm.float(), atpm_target.float())
     loss_aprofile = criterion(aprofile.float(), aprofile_target.float())
     
-    loss = loss_atpm + loss_aprofile 
+    loss = loss_atpm + loss_aprofile * 0.1
     # return loss, atpm, atpm_target, aprofile, aprofile_target
     return {'loss': loss, 'loss_atpm': loss_atpm, 'loss_aprofile': loss_aprofile,
             'atpm_pred': atpm, 'atpm_target': atpm_target, 
@@ -478,7 +462,7 @@ def cal_score_stats(preds, obs, data_loader, args):
         spearmanr_score = score_spearmanr(preds, obs)
         pearsonr_score = score_pearsonr(preds, obs)
 
-    return r2score, spearmanr_score, pearsonr_score
+    return r2score, pearsonr_score, spearmanr_score
 
 
 @torch.no_grad()
