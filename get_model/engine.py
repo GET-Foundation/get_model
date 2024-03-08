@@ -250,9 +250,17 @@ def train_chrombpnet(model, peak_seq, aprofile_target, mask, chunk_size, n_peaks
     atpm_target = atpm_target.unsqueeze(-1) * mask_for_loss
     atpm_target = atpm_target[indices[0], indices[1], :].flatten()
     loss_atpm = criterion(atpm.float(), atpm_target.float())
+    # if aprofile.shape[1] != aprofile_target.shape[1], crop the target
+    if aprofile.shape[1] < aprofile_target.shape[1]:
+        aprofile = aprofile.reshape(B, R, -1)
+        aprofile_target = aprofile_target.reshape(B, R, -1)
+        diff_length = aprofile_target.shape[2] - aprofile.shape[2]
+        assert diff_length % 2 == 0
+        crop_size = diff_length // 2
+        aprofile_target = aprofile_target[:,:,crop_size:crop_size+aprofile.shape[2]]
     loss_aprofile = criterion(aprofile.float(), aprofile_target.float())
     
-    loss = loss_atpm + loss_aprofile * 0.1
+    loss = loss_atpm + loss_aprofile * 0.2
     # return loss, atpm, atpm_target, aprofile, aprofile_target
     return {'loss': loss, 'loss_atpm': loss_atpm, 'loss_aprofile': loss_aprofile,
             'atpm_pred': atpm, 'atpm_target': atpm_target, 

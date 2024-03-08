@@ -27,12 +27,12 @@ from get_model.model.model import GETFinetune, GETFinetuneExpATAC, GETFinetuneEx
 #     name="finetune-gbm",
 # )
 
-pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/vijay_hematopoiesis_dense.zarr',
+pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/encode_hg38atac_dense.zarr',
                             ],
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
                            '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
-                           max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=2, insulation_subsample_ratio=0.8, n_peaks_upper_bound=10, leave_out_celltypes='Mono.vijay_hematopoiesis.Young2_BMMC.1024', leave_out_chromosomes=['chr4','chr14'], is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=10000)
+                           max_peak_length=5000, center_expand_target=2114, n_peaks_lower_bound=2, insulation_subsample_ratio=0.8, n_peaks_upper_bound=10, leave_out_celltypes='k562', leave_out_chromosomes=['chr4','chr14'], is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=10000, random_shift_peak=False)
 pretrain.__len__()
 #%%
 pretrain.debug_getitem(0)
@@ -123,7 +123,7 @@ model = GETFinetuneChrombpNet(
     
 )
 #%%
-checkpoint = torch.load('/pmglocal/xf2217/Expression_Finetune_monocyte.Chr4&14.conv50.learnable_motif_prior.chrombpnet.shift10.R100L1000.augmented.20240307/checkpoint-17.pth')
+checkpoint = torch.load('/pmglocal/xf2217/Expression_Finetune_k562.Chr4&14.conv20.chrombpnet.shift10.R100L2114.augmented.20240308/checkpoint-40.pth')
 #%%
 model.load_state_dict(checkpoint["model"], strict=True)
 
@@ -244,7 +244,7 @@ from sklearn.metrics import r2_score
 
 def plot_scatter_with_limits(preds, obs, hue, xlim=None, ylim=None, figsize=(5, 5), title=None):
     fig, ax = plt.subplots(1, 1, figsize=figsize)
-    sns.scatterplot(x=preds, y=obs, ax=ax, s=3, alpha=0.3, hue=hue)
+    sns.scatterplot(x=obs, y=preds, ax=ax, s=3, alpha=0.3, hue=hue)
     
     if xlim is not None:
         plt.xlim(xlim)
@@ -256,8 +256,9 @@ def plot_scatter_with_limits(preds, obs, hue, xlim=None, ylim=None, figsize=(5, 
     r2 = r2_score(obs, preds)
     ax.text(0.2, 0.8, f'Pearson r={corr:.2f}\nR2={r2:.2f}\nSpearman r={spearman:.2f}'
             , ha='center', va='center', transform=ax.transAxes)
-    ax.set_xlabel('Predicted')
-    ax.set_ylabel('Observed')
+    ax.set_xlabel('Observed')
+    ax.set_ylabel('Predicted')
+
     if title is not None:
         ax.set_title(title)
     return fig, ax

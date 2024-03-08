@@ -95,13 +95,17 @@ class DilatedConv1d(nn.Module):
     """
     def __init__(self, dim, kernel_size = 3, dilation = 1):
         super().__init__()
-        self.conv = nn.Conv1d(dim, dim, kernel_size, padding = 'same', dilation = dilation)
+        self.conv = nn.Conv1d(dim, dim, kernel_size, padding = 'valid', dilation = dilation)
         self.activation = nn.GELU()
-        self.batch_norm = nn.BatchNorm1d(dim)
     def forward(self, x):
-        x = self.conv(x)
-        x = self.batch_norm(x)
-        return self.activation(x) + x
+        out = self.conv(x)
+        # crop x on both side to match the length of out
+        diff_length = x.shape[-1] - out.shape[-1]
+        # Necessary for symmetric cropping
+        assert(diff_length % 2 == 0)
+        crop_size = diff_length // 2
+        x = x[..., crop_size:-crop_size]
+        return self.activation(out) + x
     
 class DilatedConv1dBlock(nn.Module):
     """A series of dilated 1D convolutions with expanding dilation by a factor of 2, starting from 4"""
@@ -205,7 +209,7 @@ class ConvPool(nn.Module):
             peak_atpm = self.atpm_header(peak_atpm)
             # reshape the tensor back
             peak_atpm = peak_atpm.reshape(batch, num_peaks, 1)
-            peak_profile = peak_profile.reshape(batch, num_peaks * peak_size)
+            peak_profile = peak_profile.reshape(batch, -1)
             peak_atpm = self.atpm_activation(peak_atpm)
             peak_profile = self.aprofile_activation(peak_profile)
             return peak_atpm, peak_profile

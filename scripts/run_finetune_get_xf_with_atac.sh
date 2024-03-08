@@ -1,7 +1,7 @@
 #!/bin/bash
 # Set the path to save checkpoints
 DATE=`date +%Y%m%d`
-OUTPUT_DIR="/pmglocal/xf2217/Expression_Finetune_k562.Chr4&14.conv50.learnable_motif_prior.chrombpnet.shift10.R100L1000.augmented.${DATE}/"
+OUTPUT_DIR="/pmglocal/xf2217/Expression_Finetune_k562.Chr4&14.conv20.chrombpnet.shift10.R100L2114.augmented.${DATE}/"
 # path to expression set
 DATA_PATH='/pmglocal/xf2217/get_data/'
 PORT=7957
@@ -21,7 +21,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=1 --rdzv-endpoint=localhost:$PORT ge
     --batch_size 128 \
     --num_workers 32 \
     --n_peaks_lower_bound 1 \
-    --n_peaks_upper_bound 1 \
+    --n_peaks_upper_bound 5 \
     --center_expand_target 2114 \
     --preload_count 200 \
     --random_shift_peak \
@@ -32,15 +32,15 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=1 --rdzv-endpoint=localhost:$PORT ge
     --lr 1e-4 \
     --opt adamw \
     --wandb_project_name "chrombpnet" \
-    --wandb_run_name "Expression_Finetune_k562.Chr4&14.conv50.atac_loss.nofreeze.nodepth.gap50.shift10.R100L1000.augmented."${DATE} \
+    --wandb_run_name "Expression_Finetune_k562.Chr4&14.conv20.atac_loss.nofreeze.nodepth.gap50.shift10.R100L1000.augmented."${DATE} \
     --eval_freq 2 \
     --dist_eval \
     --eval_tss \
-    --leave_out_celltypes "Mono" \
+    --leave_out_celltypes "k562" \
     --leave_out_chromosomes "chr4,chr14" \
     --criterion "poisson" \
     --opt_betas 0.9 0.95 \
-    --warmup_epochs 20 \
+    --warmup_epochs 1 \
     --epochs 100 \
-    --num_region_per_sample 10 \
+    --num_region_per_sample 5 \
     --output_dir ${OUTPUT_DIR}

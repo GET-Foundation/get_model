@@ -260,6 +260,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         ('Expression_Finetune_K562.Chr4&14.Eval', False): dataset_fintune_fetal_k562_eval,
         ('Expression_Finetune_monocyte.Chr4&14', True): dataset_fintune_monocyte,
         ('Expression_Finetune_monocyte.Chr4&14.Eval', False): dataset_fintune_monocyte_eval,
+        ('Expression_Finetune_k562.Chr4&14', True): dataset_fintune_k562,
+        ('Expression_Finetune_k562.Chr4&14.Eval', False): dataset_fintune_k562_eval,
     }
 
     dataset_key = (args.data_set if is_train else args.eval_data_set, is_train)

@@ -166,7 +166,6 @@ class MotifScanner(nn.Module):
         ), f"Motif prior shape ({motifs.shape}) doesn't match model ({self.motif[0].weight.shape})."
         if self.motif_prior:
             self.motif[0].weight.data = motifs
-            self.motif[0].bias.data = torch.zeros(self.num_motif)
         if not self.learnable:
             self.motif[0].weight.requires_grad = False
 
@@ -1464,7 +1463,7 @@ def get_finetune_motif_chrombpnet(pretrained=False, **kwargs):
         motif_dim=kwargs["motif_dim"],
         embed_dim=768,
         motif_prior=True,
-        learnable_motif=True,
+        learnable_motif=False,
     )
     if pretrained:
         checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
