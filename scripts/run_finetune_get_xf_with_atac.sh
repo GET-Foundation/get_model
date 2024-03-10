@@ -26,7 +26,7 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 --rdzv-endpoint=localhost:$PORT ge
     --preload_count 200 \
     --random_shift_peak 100 \
     --pin_mem \
-    --peak_name "peaks_q0.01_tissue_open_exp" \
+    --peak_name "peaks_p0.05_tissue_open" \
     --save_ckpt_freq 5 \
     --n_packs 1 \
     --lr 1e-4 \
