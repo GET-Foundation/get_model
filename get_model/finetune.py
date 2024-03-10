@@ -142,8 +142,7 @@ def get_args():
     )
     parser.add_argument(
         "--random_shift_peak",
-        action="store_true",
-        default=False,
+        default=None,
         help="Random shift peak boundary",
     )
     parser.add_argument(

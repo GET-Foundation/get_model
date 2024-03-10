@@ -173,7 +173,7 @@ class ZarrDataPool(object):
 
     def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks', insulation_subsample_ratio=0.1,
                  max_peak_length=None, center_expand_target=None, sequence_obj=None, motif_mean_std_obj=None,
-                 additional_peak_columns=None, leave_out_celltypes=None, leave_out_chromosomes=None, non_redundant='max_depth', invert_peak=False, random_shift_peak=True,
+                 additional_peak_columns=None, leave_out_celltypes=None, leave_out_chromosomes=None, non_redundant='max_depth', invert_peak=False, random_shift_peak=None,
                  filter_by_min_depth=None, is_train=True, hic_path=None):
         # logging.info('Initializing ZarrDataPool')
         if sequence_obj is None:
@@ -456,7 +456,7 @@ class ZarrDataPool(object):
             peak_sequence[start-window_start:end-window_start] = 1
         return csr_matrix(peak_sequence*sequence)
 
-    def _query_peaks(self, celltype_id, chr_name, start, end, invert=None, random_shift=False):
+    def _query_peaks(self, celltype_id, chr_name, start, end, invert=None, random_shift=None):
         """
         Query peaks data for a celltype and a window.
 
@@ -473,8 +473,8 @@ class ZarrDataPool(object):
         This method is used by PreloadDataPack to query peaks data.
         """
         df = self.peaks_dict[celltype_id]
-        if random_shift:
-            random_int = np.random.randint(-10, 10, size=df.shape[0])
+        if random_shift is not None and isinstance(random_shift, int):
+            random_int = np.random.randint(-random_shift, random_shift, size=df.shape[0])
         else:
             random_int = 0
         df['Start'] = df['Start'].values + random_int
@@ -1150,7 +1150,7 @@ def worker_init_fn_get(worker_id):
 
 class InferenceDataset(PretrainDataset):
     def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, gencode_obj, peak_name='peaks', 
-                 n_peaks_upper_bound=100, sequence_obj=None, additional_peak_columns=None, center_expand_target=1000, max_peak_length=5000, use_insulation=False, random_shift_peak=False, hic_path=None):
+                 n_peaks_upper_bound=100, sequence_obj=None, additional_peak_columns=None, center_expand_target=1000, max_peak_length=5000, use_insulation=False, random_shift_peak=None, hic_path=None):
         super().__init__(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name=peak_name, n_peaks_upper_bound=n_peaks_upper_bound, sequence_obj=sequence_obj, additional_peak_columns=additional_peak_columns, n_packs=1, max_peak_length=max_peak_length,  use_insulation=use_insulation, center_expand_target=center_expand_target, preload_count=1, insulation_subsample_ratio=1, random_shift_peak=random_shift_peak, hic_path=hic_path, dataset_size=400)
         self.gencode_obj = gencode_obj
         self.tss_chunk_idx = self._generate_tss_chunk_idx()

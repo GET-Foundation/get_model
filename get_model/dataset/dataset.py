@@ -190,6 +190,23 @@ def dataset_fintune_k562_eval(is_train, args, sequence_obj=None):
             'dataset_size': 8192,
         })
 
+def dataset_fintune_thp1(is_train, args, sequence_obj=None):
+    return build_dataset_zarr_template(
+        "Expression_Finetune_THP1.Chr4&14", False, args, sequence_obj=sequence_obj, parameter_override={
+            'zarr_dirs': [f'{args.data_path}/encode_hg38atac_dense.zarr'],
+            'leave_out_celltypes': "THP1",
+            'leave_out_chromosomes': ['chr1', 'chr2', 'chr3', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9', 'chr10', 'chr11', 'chr12', 'chr13', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chrX'],
+        })
+
+
+def dataset_fintune_thp1_eval(is_train, args, sequence_obj=None):
+    return build_dataset_zarr_template(
+        "Expression_Finetune_THP1.Chr4&14.Eval", False, args, sequence_obj=sequence_obj, parameter_override={
+            'zarr_dirs': [f'{args.data_path}/encode_hg38atac_dense.zarr'],
+            'leave_out_celltypes': "THP1",
+            'leave_out_chromosomes': ['chr4', 'chr14'],
+            'dataset_size': 8192,
+        })
 
 
 def dataset_fintune_fetal_k562(is_train, args, sequence_obj=None):
@@ -262,6 +279,8 @@ def build_dataset_zarr(is_train, args, sequence_obj=None):
         ('Expression_Finetune_monocyte.Chr4&14.Eval', False): dataset_fintune_monocyte_eval,
         ('Expression_Finetune_k562.Chr4&14', True): dataset_fintune_k562,
         ('Expression_Finetune_k562.Chr4&14.Eval', False): dataset_fintune_k562_eval,
+        ('Expression_Finetune_THP1.Chr4&14', True): dataset_fintune_thp1,
+        ('Expression_Finetune_THP1.Chr4&14.Eval', False): dataset_fintune_thp1_eval,
     }
 
     dataset_key = (args.data_set if is_train else args.eval_data_set, is_train)
