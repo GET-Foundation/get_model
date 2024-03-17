@@ -1,0 +1,11 @@
+
+# Other common configurations
+log_freq: 10
+loggers:
+  - type: local
+    local:
+      log_dir: "/pmglocal/xf2217/logs/debug"
+  - type: wandb
+    wandb:
+      project_name: "debug"
+      run_name: "debug"
