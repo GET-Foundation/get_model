@@ -7,6 +7,7 @@
 # --------------------------------------------------------'
 import logging
 import math
+import stat
 import sys
 from typing import Iterable, Optional
 
@@ -14,7 +15,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import get_model.utils as utils
-from get_model.metrics import score_pearsonr, score_r2, score_spearmanr
+from get_model.metrics import score_pearsonr, score_r2, score_spearmanr, multinomial_nll
 from timm.data import Mixup
 from timm.utils import ModelEma
 from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
@@ -24,16 +25,82 @@ import torch
 import torch.nn.functional as F
 from torch.distributions import Multinomial
 
+
+class BaseTrainer:
+    def __init__(self, model, criterion, optimizer, device):
+        self.model = model
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.device = device
+
+    def train_epoch(self, data_loader):
+        raise NotImplementedError
+
+    def validate_epoch(self, data_loader):
+        raise NotImplementedError
+
+    def train(self, train_data_loader, valid_data_loader, epochs):
+        raise NotImplementedError
+
+
+def calculate_loss_scale_and_get_grad_norm(model, optimizer, loss_scaler, max_norm, loss):
+    is_second_order = (
+            hasattr(optimizer, "is_second_order") and optimizer.is_second_order
+        )
+    grad_norm = loss_scaler(
+            loss,
+            optimizer,
+            clip_grad=max_norm,
+            parameters=model.parameters(),
+            create_graph=is_second_order,
+        )
+    loss_scale_value = loss_scaler.state_dict()["scale"]
+    return grad_norm,loss_scale_value
+
+def get_optimizer_weight_decay(optimizer):
+    weight_decay_value = None
+    for group in optimizer.param_groups:
+        if group["weight_decay"] > 0:
+            weight_decay_value = group["weight_decay"]
+    return weight_decay_value
+
+def get_optimizer_lr_range(optimizer):
+    min_lr = 10.0
+    max_lr = 0.0
+    for group in optimizer.param_groups:
+        min_lr = min(min_lr, group["lr"])
+        max_lr = max(max_lr, group["lr"])
+    return min_lr,max_lr
+
+def apply_schedule_to_optimizer(optimizer, lr_schedule_values, wd_schedule_values, it):
+    if lr_schedule_values is not None or wd_schedule_values is not None:
+        for i, param_group in enumerate(optimizer.param_groups):
+            if lr_schedule_values is not None:
+                param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
+            if wd_schedule_values is not None and param_group["weight_decay"] > 0:
+                param_group["weight_decay"] = wd_schedule_values[it]
+
+def check_loss_value(loss):
+    """Check for unusual loss values, e.g. NaN or infinity. If such values are
+    encountered, the training is stopped."""
+    loss_value = loss.item()
+    if not math.isfinite(loss_value):
+        print("Loss is {}, stopping training".format(loss_value))
+        sys.exit(1)
+    return loss_value
+
+
 def pretrain_one_epoch(
     model: torch.nn.Module,
     data_loader: Iterable,
+    loss_fn: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     epoch: int,
     loss_scaler,
     max_norm: float = 0,
     normalize_target: bool = True,
-    log_writer=None,
+    loggers=None,
     lr_scheduler=None,
     start_steps=0,
     lr_schedule_values=None,
@@ -41,145 +108,78 @@ def pretrain_one_epoch(
 ):
     model.train()
     
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter("lr", utils.SmoothedValue(window_size=1, fmt="{value:.6f}"))
-    metric_logger.add_meter(
-        "min_lr", utils.SmoothedValue(window_size=1, fmt="{value:.6f}")
-    )
-    header = "Epoch: [{}]".format(epoch)
-    print_freq = 10
-
-    loss_masked = nn.MSELoss()
-    #loss_atac = nn.PoissonNLLLoss(log_input=False, reduction="mean")
-
-    for step, batch in enumerate(
-        metric_logger.log_every(data_loader, print_freq, header)
-    ):
-        sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, _, _, _ = batch
-        if min(chunk_size)<0:
+    for step, batch in data_loader:
+        batch = model.data_prep(batch)
+        # if chunk_size contains negative values, skip this batch
+        if min(batch['chunk_size'])<0:
             continue
         # assign learning rate & weight decay for each step
         it = start_steps + step  # global training iteration
-        if lr_schedule_values is not None or wd_schedule_values is not None:
-            for i, param_group in enumerate(optimizer.param_groups):
-                if lr_schedule_values is not None:
-                    param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
-                if wd_schedule_values is not None and param_group["weight_decay"] > 0:
-                    param_group["weight_decay"] = wd_schedule_values[it]
-
-
-        sample_track = sample_track.to(device, non_blocking=True).bfloat16()
-        peak_seq = peak_seq.to(device, non_blocking=True).bfloat16()
-        # mask has 0, 1, -10000
-        mask_for_loss = get_mask_pos(mask)
-        padding_mask = get_padding_pos(mask)
-        mask_for_loss = mask_for_loss.to(device, non_blocking=True).bool()
-        padding_mask = padding_mask.to(device, non_blocking=True).bool()
-        motif_mean_std = motif_mean_std.to(device, non_blocking=True).bfloat16()
-        # chunk_size = chunk_size.to(device, non_blocking=True)
-        n_peaks = n_peaks.to(device, non_blocking=True)
+        apply_schedule_to_optimizer(optimizer, lr_schedule_values, wd_schedule_values, it)
 
 
         with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
-            output_masked, _, target = model(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
+            output = model(**batch)
+            pred, obs = model.before_loss(batch, output)
+            loss = model.loss_fn(pred, obs)
 
-            # target generation
-            with torch.no_grad():
-                unnorm_targets = target
-                if normalize_target:
-                    print('normalize target')
-                    regions_squeeze = unnorm_targets
-                    regions_norm = (
-                        regions_squeeze - regions_squeeze.mean(dim=-2, keepdim=True)
-                    ) / (
-                        regions_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt()
-                        + 1e-6
-                    )
-                    # we find that the mean is about 0.48 and standard deviation is about 0.08.
-                    regions_embed = regions_norm
-                else:
-                    regions_embed = unnorm_targets
 
-                B, _, C = regions_embed.shape
-
-            mask_for_loss = mask_for_loss.unsqueeze(-1)
-            loss_masked_value = loss_masked(input=output_masked*mask_for_loss, target=regions_embed*mask_for_loss)
-            #loss_atac_value = loss_atac(atac, labels_atac)
-            # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss
-            loss = loss_masked_value #+ loss_atac_value * 5
-
-            loss_value = loss.item()
-
-        if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            sys.exit(1)
+        loss_value = check_loss_value(loss)
         optimizer.zero_grad()
-        # this attribute is added by timm on one optimizer (adahessian)
-        is_second_order = (
-            hasattr(optimizer, "is_second_order") and optimizer.is_second_order
-        )
-        grad_norm = loss_scaler(
-            loss,
-            optimizer,
-            clip_grad=max_norm,
-            parameters=model.parameters(),
-            create_graph=is_second_order,
-        )
-        loss_scale_value = loss_scaler.state_dict()["scale"]
-
+        grad_norm, loss_scale_value = calculate_loss_scale_and_get_grad_norm(
+            model, optimizer, loss_scaler, max_norm, loss)
         torch.cuda.synchronize()
+        min_lr, max_lr = get_optimizer_lr_range(optimizer)
+        weight_decay_value = get_optimizer_weight_decay(optimizer)
 
-        metric_logger.update(loss=loss_value)
-        metric_logger.update(loss_scale=loss_scale_value)
-        min_lr = 10.0
-        max_lr = 0.0
-        for group in optimizer.param_groups:
-            min_lr = min(min_lr, group["lr"])
-            max_lr = max(max_lr, group["lr"])
-
-        metric_logger.update(lr=max_lr)
-        metric_logger.update(min_lr=min_lr)
-        weight_decay_value = None
-        for group in optimizer.param_groups:
-            if group["weight_decay"] > 0:
-                weight_decay_value = group["weight_decay"]
-        metric_logger.update(weight_decay=weight_decay_value)
-        metric_logger.update(grad_norm=grad_norm)
-
-        if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
-            log_writer.update(loss=loss_value, head="loss")
-            log_writer.update(loss_scale=loss_scale_value, head="opt")
-            log_writer.update(lr=max_lr, head="opt")
-            log_writer.update(min_lr=min_lr, head="opt")
-            log_writer.update(weight_decay=weight_decay_value, head="opt")
-            log_writer.update(grad_norm=grad_norm, head="opt")
-            log_writer.set_step()
-        elif log_writer is not None and isinstance(log_writer, utils.WandBLogger):
-            log_writer.update(data={'loss': loss_value,
-                 'loss_scale': loss_scale_value,
-                 'lr': max_lr,
-                 'min_lr': min_lr,
-                 'epoch': epoch,
-                 'weight_decay': weight_decay_value,
-                 'grad_norm': grad_norm},
-                step=it, print_freq=print_freq)
-
+        stats_dict = {
+            "loss": loss_value,
+            "loss_scale": loss_scale_value,
+            "lr": max_lr,
+            "min_lr": min_lr,
+            "weight_decay": weight_decay_value,
+            "grad_norm": grad_norm,
+            "epoch": epoch
+        }
+        if loggers is not None:
+            loggers.update(stats_dict, step=it)
+        
         torch.distributed.barrier()
         if lr_scheduler is not None:
             lr_scheduler.step_update(start_steps + step)
 
-    # torch.distributed.barrier()
-    # gather the stats from all processes
-    # metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return stats_dict
+
 
 def train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=None, args=None):
-    if model._get_name()=='GETFinetuneChrombpNet' or args.model=='get_finetune_motif_chrombpnet':
+    if 'ChrombpNet' in model._get_name()=='GETFinetuneChrombpNet' or 'chrombpnet' in args.model:
         return train_chrombpnet(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=hic_matrix)
     else:
         return train_class_batch_exp(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=hic_matrix)
 
+def train_chrombpnet(model, peak_seq, aprofile_target, loss_mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atpm_target, exp_target, other_labels, criterion, hic_matrix=None):
+    device = peak_seq.device
+    loss_mask = 1-padding_mask
+    padding_mask = padding_mask.to(device, non_blocking=True).bool()
+    loss_mask = loss_mask.to(device, non_blocking=True).unsqueeze(-1)
+    with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
+        atpm, aprofile = model(peak_seq, aprofile_target, loss_mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels, hic_matrix=hic_matrix)
+    
+    B, R, N = atpm.shape
+    aprofile, aprofile_target = crop_output(aprofile, aprofile_target, B, R)
+    loss_aprofile = multinomial_nll(aprofile_target.float(), aprofile.float())
+    
+    atpm = atpm * loss_mask
+    indices = torch.where(loss_mask==1)
+    atpm = atpm[indices[0], indices[1], :].flatten()
+    # atpm_target = torch.log10(aprofile_target.sum(2)+1).unsqueeze(-1) * mask_for_loss
+    atpm_target = atpm_target.unsqueeze(-1) * loss_mask
+    atpm_target = atpm_target[indices[0], indices[1], :].flatten()
+    loss_atpm = criterion(atpm.float(), atpm_target.float())
+    loss = loss_atpm + loss_aprofile 
+    return {'loss': loss, 'loss_atpm': loss_atpm, 'loss_aprofile': loss_aprofile,
+            'atpm_pred': atpm, 'atpm_target': atpm_target, 
+            'aprofile_pred': aprofile, 'aprofile_target': aprofile_target}
 
 def train_class_batch_exp(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atac_target, exp_target, other_labels, criterion, hic_matrix=None):
     device = peak_seq.device
@@ -233,38 +233,22 @@ def train_class_batch_exp(model, peak_seq, sample_track, mask, chunk_size, n_pea
             'atac_pred': atac, 'atac_target': atac_target, 
             'confidence_pred': confidence_pred, 'confidence_target': confidence_target}
 
-
-def train_chrombpnet(model, peak_seq, aprofile_target, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atpm_target, exp_target, other_labels, criterion, hic_matrix=None):
-    device = peak_seq.device
-    padding_mask = get_padding_pos(mask)
-    mask_for_loss = 1-padding_mask
-    padding_mask = padding_mask.to(device, non_blocking=True).bool()
-    mask_for_loss = mask_for_loss.to(device, non_blocking=True).unsqueeze(-1)
-    with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
-        atpm, aprofile = model(peak_seq, aprofile_target, mask_for_loss, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels, hic_matrix=hic_matrix)
-    
-    B, R, N = atpm.shape
-    atpm = atpm * mask_for_loss
-    indices = torch.where(mask_for_loss==1)
-    atpm = atpm[indices[0], indices[1], :].flatten()
-    atpm_target = atpm_target.unsqueeze(-1) * mask_for_loss
-    atpm_target = atpm_target[indices[0], indices[1], :].flatten()
-    loss_atpm = criterion(atpm.float(), atpm_target.float())
-    # if aprofile.shape[1] != aprofile_target.shape[1], crop the target
-    if aprofile.shape[1] < aprofile_target.shape[1]:
-        aprofile = aprofile.reshape(B, R, -1)
-        aprofile_target = aprofile_target.reshape(B, R, -1)
-        diff_length = aprofile_target.shape[2] - aprofile.shape[2]
+def crop_output(aprofile, aprofile_target, B, R, target_length=1000):
+    # crop aprofile to center 1000bp, assume the input is (B, R, L)
+    B, R, L = aprofile.shape
+    if aprofile.shape[1] != aprofile_target.shape[1]:
+        current_length = aprofile.shape[2]
+        diff_length = current_length - target_length
         assert diff_length % 2 == 0
         crop_size = diff_length // 2
-        aprofile_target = aprofile_target[:,:,crop_size:crop_size+aprofile.shape[2]]
-    loss_aprofile = criterion(aprofile.float(), aprofile_target.float())
-    
-    loss = loss_atpm + loss_aprofile * 0.2
-    # return loss, atpm, atpm_target, aprofile, aprofile_target
-    return {'loss': loss, 'loss_atpm': loss_atpm, 'loss_aprofile': loss_aprofile,
-            'atpm_pred': atpm, 'atpm_target': atpm_target, 
-            'aprofile_pred': aprofile, 'aprofile_target': aprofile_target}
+        aprofile = aprofile[:,:,crop_size:crop_size+target_length]
+        aprofile_target = aprofile_target.reshape(B, R, -1)
+        diff_length = aprofile_target.shape[2] - target_length
+        assert diff_length % 2 == 0
+        crop_size = diff_length // 2
+        aprofile_target = aprofile_target[:,:,crop_size:crop_size+target_length]
+    return aprofile, aprofile_target
+
 
 def finetune_train_one_epoch(
     model: torch.nn.Module,
@@ -278,7 +262,7 @@ def finetune_train_one_epoch(
     max_norm: float = 0,
     model_ema: Optional[ModelEma] = None,
     mixup_fn: Optional[Mixup] = None,
-    log_writer=None,
+    loggers=None,
     start_steps=None,
     lr_schedule_values=None,
     wd_schedule_values=None,
@@ -301,9 +285,7 @@ def finetune_train_one_epoch(
     else:
         optimizer.zero_grad()
 
-    for data_iter_step, batch in enumerate(
-        metric_logger.log_every(data_loader, print_freq, header)
-    ):  
+    for data_iter_step, batch in data_loader:  
         # logging.info("data_iter_step: {}".format(data_iter_step))
         # logging.info("start getting batch")
         sample_track, peak_seq, sample_metadata, celltype_peaks, sample_track_boundary, sample_peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, labels_data, other_labels, hic_matrix = batch
@@ -316,16 +298,8 @@ def finetune_train_one_epoch(
             continue
         it = start_steps + step  # global training iteration
         # Update LR & WD for the first acc
-        if (
-            lr_schedule_values is not None
-            or wd_schedule_values is not None
-            and data_iter_step % update_freq == 0
-        ):
-            for i, param_group in enumerate(optimizer.param_groups):
-                if lr_schedule_values is not None:
-                    param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
-                if wd_schedule_values is not None and param_group["weight_decay"] > 0:
-                    param_group["weight_decay"] = wd_schedule_values[it]
+        if data_iter_step % update_freq == 0:
+            apply_schedule_to_optimizer(optimizer, lr_schedule_values, wd_schedule_values, it)
 
         # logging.info("start cuda computing")
         sample_track = sample_track.to(device, non_blocking=True).bfloat16()
@@ -335,124 +309,69 @@ def finetune_train_one_epoch(
         n_peaks = n_peaks.to(device, non_blocking=True)
         labels_data = labels_data.to(device, non_blocking=True).bfloat16()
         other_labels = other_labels.to(device, non_blocking=True).bfloat16()
+        atpm = other_labels[:,:,0]
         hic_matrix = hic_matrix.to(device, non_blocking=True).bfloat16()
-        if loss_scaler is None:
-            peaks = peaks.half()
-        result = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels[:,:,0], labels_data, other_labels, criterion, hic_matrix=hic_matrix, args=args)
+        result = train_class_batch(model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, atpm, labels_data, other_labels, criterion, hic_matrix=hic_matrix, args=args)
         loss = result['loss']
-        loss_value = loss.item()
 
-        # logging.info("Got loss")
-        if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            sys.exit(1)
+        loss_value = check_loss_value(loss)
 
-        if loss_scaler is None:
-            loss /= update_freq
-            model.backward(loss)
-            model.step()
-
-            if (data_iter_step + 1) % update_freq == 0:
-                # model.zero_grad()
-                # Deepspeed will call step() & model.zero_grad() automatic
-                if model_ema is not None:
-                    model_ema.update(model)
-            grad_norm = None
-            loss_scale_value = get_loss_scale_for_deepspeed(model)
-        else:
-            # this attribute is added by timm on one optimizer (adahessian)
-            is_second_order = (
-                hasattr(optimizer, "is_second_order") and optimizer.is_second_order
-            )
-            loss /= update_freq
-            grad_norm = loss_scaler(
-                loss,
-                optimizer,
-                clip_grad=max_norm,
-                parameters=model.parameters(),
-                create_graph=is_second_order,
-                update_grad=(data_iter_step + 1) % update_freq == 0,
-            )
-            if (data_iter_step + 1) % update_freq == 0:
-                optimizer.zero_grad()
-                if model_ema is not None:
-                    model_ema.update(model)
-            loss_scale_value = loss_scaler.state_dict()["scale"]
-
+        grad_norm, loss_scale_value = update_model(model, optimizer, loss_scaler, max_norm, model_ema, update_freq, data_iter_step, loss)
 
         torch.cuda.synchronize()
 
         
         # NOTE: evaluation
         # EMA
+        test_stats_dict = None
         if (data_iter_step + 1) % update_freq == 0 and args.eval_each_step:
-            test_stats = evaluate_all(
-                data_loader_val, model, device, criterion, args, printlog=False
-            )
-        else:
-            test_stats = None
+            test_stats_dict = evaluate_all(data_loader_val, model, device, criterion, args, printlog=False)
+            
+        min_lr, max_lr = get_optimizer_lr_range(optimizer)
+        weight_decay_value = get_optimizer_weight_decay(optimizer)
 
-        metric_logger.update(loss=loss_value)
-        if test_stats is not None:
-            metric_logger.update(r2score=test_stats["r2score"])
-            metric_logger.update(pearsonr_score=test_stats["pearsonr_score"])
-            metric_logger.update(spearmanr_score=test_stats["spearmanr_score"])
-        metric_logger.update(loss_scale=loss_scale_value)
-        min_lr = 10.0
-        max_lr = 0.0
-        for group in optimizer.param_groups:
-            min_lr = min(min_lr, group["lr"])
-            max_lr = max(max_lr, group["lr"])
-
-        metric_logger.update(lr=max_lr)
-        metric_logger.update(min_lr=min_lr)
-        weight_decay_value = None
-        for group in optimizer.param_groups:
-            if group["weight_decay"] > 0:
-                weight_decay_value = group["weight_decay"]
-        metric_logger.update(weight_decay=weight_decay_value)
-        metric_logger.update(grad_norm=grad_norm)
-
-        if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
-            log_writer.update(loss=loss_value, head="loss")
-            if test_stats is not None:
-                log_writer.update(r2score=test_stats["r2score"], head="loss")
-                log_writer.update(
-                    pearsonr_score=test_stats["pearsonr_score"], head="loss"
-                )
-                log_writer.update(
-                    spearmanr_score=test_stats["spearmanr_score"], head="loss"
-                )
-            log_writer.update(loss_scale=loss_scale_value, head="opt")
-            log_writer.update(lr=max_lr, head="opt")
-            log_writer.update(min_lr=min_lr, head="opt")
-            log_writer.update(weight_decay=weight_decay_value, head="opt")
-            log_writer.update(grad_norm=grad_norm, head="opt")
-            log_writer.set_step()
-        elif log_writer is not None and isinstance(log_writer, utils.WandBLogger):
-            log_writer.update(data={
-                'training_loss': loss_value,
-                'loss_scale': loss_scale_value,
-                'lr': max_lr,
-                'min_lr': min_lr,
-                'epoch': epoch,
-                'weight_decay': weight_decay_value,
-                'grad_norm': grad_norm},
-                step=it, print_freq=print_freq)
-            if test_stats is not None:
-                log_writer.update(data={
-                    'r2score': test_stats["r2score"],
-                    'pearsonr_score': test_stats["pearsonr_score"],
-                    'spearmanr_score': test_stats["spearmanr_score"],
-                    'epoch': epoch},
-                    step=it, print_freq=print_freq)
+        stats_dict = {
+            "loss": loss_value,
+            "loss_scale": loss_scale_value,
+            "lr": max_lr,
+            "min_lr": min_lr,
+            "weight_decay": weight_decay_value,
+            "grad_norm": grad_norm,
+            "epoch": epoch
+        }
+        if loggers is not None:
+            loggers.update(stats_dict, step=it)
+        if test_stats_dict is not None:
+            loggers.update(test_stats_dict, step=it)
         
-        # print("Finished one iteration")
-
-    # gather the stats from all processes
-    #metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+def update_model(model, optimizer, loss_scaler, max_norm, model_ema, update_freq, data_iter_step, loss):
+    if loss_scaler is None:
+        loss /= update_freq
+        model.backward(loss)
+        model.step()
+        if (data_iter_step + 1) % update_freq == 0:
+                # model.zero_grad()
+                # Deepspeed will call step() & model.zero_grad() automatic
+            if model_ema is not None:
+                model_ema.update(model)
+        grad_norm, loss_scale_value = None, get_loss_scale_for_deepspeed(model)
+    else:
+        loss /= update_freq
+        grad_norm, loss_scale_value = calculate_loss_scale_and_get_grad_norm(
+                model,
+                optimizer,
+                loss_scaler,
+                max_norm,
+                loss
+            )
+        if (data_iter_step + 1) % update_freq == 0:
+            optimizer.zero_grad()
+            if model_ema is not None:
+                model_ema.update(model)
+    return grad_norm,loss_scale_value
 
 
 def cal_score_stats(preds, obs, data_loader, args):
@@ -543,6 +462,7 @@ def evaluate_pretrain(data_loader, model, device, args, epoch=0, printlog=True):
                 losses=metric_logger.loss,
             )
         )
+    
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
@@ -594,7 +514,7 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
             hic_matrix=hic_matrix,
             args=args
         )
-        if model._get_name() =='GETFinetuneChrombpNet' or args.model=='get_finetune_motif_chrombpnet':
+        if 'ChrombpNet' in model._get_name()=='GETFinetuneChrombpNet' or 'chrombpnet' in args.model:
             loss = result['loss'].item()
             loss_atpm = result['loss_atpm'].item()
             loss_aprofile = result['loss_aprofile'].item()
@@ -641,7 +561,7 @@ def evaluate_all(data_loader, model, device, criterion, args, epoch=0, printlog=
             metric_logger.update(loss_exp=loss_exp)
             metric_logger.update(loss_confidence=loss_confidence)
 
-    if model._get_name()=='GETFinetuneChrombpNet' or args.model=='get_finetune_motif_chrombpnet':
+    if 'ChrombpNet' in model._get_name()=='GETFinetuneChrombpNet' or 'chrombpnet' in args.model:
         preds_atpm = np.concatenate(preds_atpm, axis=0).reshape(-1)
         obs_atpm = np.concatenate(obs_atpm, axis=0).reshape(-1)
         preds_aprofile = np.concatenate(preds_aprofile, axis=0).reshape(-1)

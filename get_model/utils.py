@@ -13,6 +13,7 @@ import time
 import json
 from collections import defaultdict, deque
 import datetime
+from typing import OrderedDict
 import numpy as np
 from timm.utils import get_state_dict
 
@@ -120,10 +121,6 @@ class MetricLogger(object):
         for name, meter in self.meters.items():
             loss_str.append("{}: {}".format(name, str(meter)))
         return self.delimiter.join(loss_str)
-
-    def synchronize_between_processes(self):
-        for meter in self.meters.values():
-            meter.synchronize_between_processes()
 
     def add_meter(self, name, meter):
         self.meters[name] = meter
@@ -327,6 +324,63 @@ def init_distributed_mode(args):
     )
     torch.distributed.barrier()
     setup_for_distributed(args.rank == 0)
+
+def load_checkpoint(checkpoint_path, model_key=None):
+    if checkpoint_path.startswith("https"):
+        checkpoint = torch.hub.load_state_dict_from_url(
+            checkpoint_path, map_location="cpu", check_hash=True
+        )
+    else:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    print("Load ckpt from %s" % checkpoint_path)
+
+    if model_key is not None:
+        checkpoint_model = None
+        for key in model_key.split("|"):
+            if key in checkpoint:
+                checkpoint_model = checkpoint[key]
+                print("Load state_dict by model_key = %s" % key)
+                break
+        if checkpoint_model is None:
+            checkpoint_model = checkpoint
+    else:
+        checkpoint_model = checkpoint
+
+    return checkpoint_model
+
+def remove_keys(checkpoint_model, model_state_dict):
+    for k in ["head.weight", "head.bias"]:
+        if k in checkpoint_model and checkpoint_model[k].shape != model_state_dict[k].shape:
+            print(f"Removing key {k} from pretrained checkpoint")
+            del checkpoint_model[k]
+
+def rename_keys(checkpoint_model):
+    all_keys = list(checkpoint_model.keys())
+    new_dict = OrderedDict()
+    for key in all_keys:
+        if key.startswith("backbone."):
+            new_dict[key[9:]] = checkpoint_model[key]
+        else:
+            new_dict[key] = checkpoint_model[key]
+    return new_dict
+
+def freeze_layers(model, last_layer=False, freeze_atac_attention=False):
+    if last_layer:
+        for name, param in model.named_parameters():
+            if not (
+                name.startswith("blocks.11")
+                or name.startswith("head.")
+                or name.startswith("fc_norm")
+                or name.startswith("norm")
+            ):
+                print(name)
+                param.requires_grad = False
+
+    if freeze_atac_attention:
+        for name, param in model.named_parameters():
+            if "atac_attention" in name:
+                param.requires_grad = False
+                print(f"Freezed weights of {name}")
 
 
 def load_state_dict(
