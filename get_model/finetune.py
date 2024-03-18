@@ -77,6 +77,12 @@ def get_args():
     )
 
     parser.add_argument(
+        "--negative_peak_name",
+        default=None,
+        help="negative peak name to use",
+    )
+
+    parser.add_argument(
         "--preload_count",
         default=200,
         type=int,
@@ -135,9 +141,9 @@ def get_args():
         help="Filter out samples that do not meet minimum depth threshold"
     )
     parser.add_argument(
-        "--invert_peak",
-        default=None,
-        choices=['0.1', None],
+        "--negative_peak_ratio",
+        default=0,
+        type=float,
         help="Probability to generate background peaks as null samples"
     )
     parser.add_argument(
@@ -326,7 +332,9 @@ def get_args():
     parser.add_argument("--use_mean_pooling", action="store_true")
     parser.set_defaults(use_mean_pooling=True)
     parser.add_argument("--use_cls", action="store_false", dest="use_mean_pooling")
-
+    # Chrombpnet setting
+    parser.add_argument("--with_bias", action="store_true")
+    parser.add_argument("--bias_ckpt", default="", type=str)
     # Dataset parameters
     parser.add_argument(
         "--data_path",
@@ -571,9 +579,11 @@ def main(args, ds_init):
         use_mean_pooling=args.use_mean_pooling,
         setting=args.setting,
         final_bn=args.final_bn,
-
+        with_bias=args.with_bias,
+        bias_ckpt=args.bias_ckpt,
 
     )
+
 
     num_region_per_sample = args.num_region_per_sample
     print("Region size = %s" % str(num_region_per_sample))

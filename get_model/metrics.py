@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.stats import spearmanr
 from sklearn.metrics import r2_score
+import torch
 
 
 def score_r2(y_pred, y_true, flatten=True):
@@ -52,3 +53,17 @@ def score_spearmanr(y_pred, y_true, flatten=True):
     rho, pval = spearmanr(y_true, y_pred)
 
     return rho
+
+
+
+def multinomial_nll(true_counts, logits):
+    """
+    Compute the multinomial negative log-likelihood in PyTorch
+    Args:
+      true_counts (Tensor): observed count values
+      logits (Tensor): predicted logit values
+    """
+    true_counts = true_counts.reshape(-1, true_counts.size(-1))
+    logits = logits.reshape(-1, logits.size(-1))
+    nll = - torch.mean(F.log_softmax(logits, dim=-1) * true_counts)
+    return nll

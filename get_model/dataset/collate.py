@@ -2,6 +2,8 @@
 import numpy as np
 import torch
 
+from get_model.dataset.transforms import rev_comp
+
 def sparse_coo_to_tensor(coo):
     """
     Transform scipy coo matrix to pytorch sparse tensor
@@ -30,6 +32,7 @@ def sparse_batch_collate(batch: list):
     ).to_dense()
     ctcf_pos_batch = torch.FloatTensor(np.stack(ctcf_pos))
     return data_batch, targets_batch, cells_batch, ctcf_pos_batch
+
 
 
 def get_rev_collate_fn(batch):
@@ -61,10 +64,11 @@ def get_rev_collate_fn(batch):
         peak_sequence[i].resize((sample_len_max, peak_sequence[i].shape[1]))
         peak_signal_track[i] = peak_signal_track[i].todense()
         peak_sequence[i] = peak_sequence[i].todense()
+        peak_sequence[i], peak_signal_track[i] = rev_comp(peak_sequence[i], peak_signal_track[i], prob=0.5)
         cov = (celltype_peaks[i][:,1]-celltype_peaks[i][:,0]).sum()
         real_cov = peak_signal_track[i].sum()
-        conv = 20#int(min(500, max(100, int(cov/(real_cov+20)))))
-        peak_signal_track[i] = np.convolve(np.array(peak_signal_track[i]).reshape(-1), np.ones(50)/50, mode='same')
+        conv = 50#int(min(500, max(100, int(cov/(real_cov+20)))))
+        peak_signal_track[i] = np.convolve(np.array(peak_signal_track[i]).reshape(-1), np.ones(conv)/conv, mode='same')
         # if sample_track[i].max()>0:
         #     sample_track[i] = sample_track[i]/sample_track[i].max()
 
@@ -116,11 +120,14 @@ def get_rev_collate_fn(batch):
             peak_labels = peak_labels.reshape(batch_size, -1, n_peak_labels)
             other_peak_labels = peak_labels[:,:,2:]
             exp_label = peak_labels[:,:,0:2]
+        else:
+            exp_label = peak_labels
+            other_peak_labels =peak_labels
         exp_label = torch.from_numpy(exp_label) # B, R, C=2 RNA+,RNA-,ATAC
         other_peak_labels = torch.from_numpy(other_peak_labels)
     else:
-        exp_label = 0
-        peak_labels = 0
-        other_peak_labels = 0
+        exp_label = torch.FloatTensor(0)
+        peak_labels = torch.FloatTensor(0)
+        other_peak_labels = torch.FloatTensor(0)
 
     return peak_signal_track, peak_sequence, sample_metadata, celltype_peaks, peak_signal_track_boundary, peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, exp_label, other_peak_labels, hic_matrix

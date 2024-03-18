@@ -37,6 +37,7 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
             f'{codebase}/data/hg38_4DN_average_insulation.ctcf.adjecent.feather',
             f'{codebase}/data/hg38_4DN_average_insulation.ctcf.longrange.feather'],
         'peak_name': args.peak_name,
+        'negative_peak_name': args.negative_peak_name,
         'additional_peak_columns': ['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'],
         'preload_count': args.preload_count,
         'padding': 50,
@@ -49,7 +50,7 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
         'n_peaks_upper_bound': args.n_peaks_upper_bound,
         'use_insulation': args.use_insulation,
         'random_shift_peak': args.random_shift_peak,
-        'invert_peak': float(args.invert_peak) if args.invert_peak is not None else None,
+        'negative_peak_ratio': args.negative_peak_ratio,
         'peak_inactivation': args.peak_inactivation,
         'leave_out_celltypes': args.leave_out_celltypes,
         'leave_out_chromosomes': args.leave_out_chromosomes,
@@ -67,18 +68,39 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
 
     # Create dataset with updated parameters
     dataset = PretrainDataset(
-        parameters['zarr_dirs'], parameters['genome_seq_zarr'], parameters['genome_motif_zarr'], parameters['insulation_paths'],
-        peak_name=parameters['peak_name'], preload_count=parameters['preload_count'], insulation_subsample_ratio=parameters['insulation_subsample_ratio'], n_packs=parameters[
-            'n_packs'], max_peak_length=parameters['max_peak_length'], center_expand_target=parameters['center_expand_target'],
-        padding=parameters['padding'], mask_ratio=parameters['mask_ratio'],
-        n_peaks_lower_bound=parameters['n_peaks_lower_bound'], n_peaks_upper_bound=parameters[
-            'n_peaks_upper_bound'], additional_peak_columns=parameters['additional_peak_columns'],
-        n_peaks_sample_gap=parameters['n_peaks_sample_gap'], non_redundant=parameters[
-            'non_redundant'], filter_by_min_depth=parameters['filter_by_min_depth'],
-        random_shift_peak=parameters['random_shift_peak'], invert_peak=parameters[
-            'invert_peak'], peak_inactivation=parameters['peak_inactivation'],
-        use_insulation=parameters['use_insulation'], sequence_obj=sequence_obj, leave_out_celltypes=parameters['leave_out_celltypes'],
-        leave_out_chromosomes=parameters['leave_out_chromosomes'], is_train=is_train, dataset_size=parameters['dataset_size'], hic_path=parameters['hic_path']
+        is_train=is_train,
+        sequence_obj=sequence_obj,
+        zarr_dirs=parameters['zarr_dirs'],
+        genome_seq_zarr=parameters['genome_seq_zarr'],
+        genome_motif_zarr=parameters['genome_motif_zarr'],
+        use_insulation=parameters['use_insulation'],
+        insulation_paths=parameters['insulation_paths'],
+        insulation_subsample_ratio=parameters['insulation_subsample_ratio'],
+        hic_path=parameters['hic_path'],
+
+        peak_name=parameters['peak_name'],
+        additional_peak_columns=parameters['additional_peak_columns'],
+        max_peak_length=parameters['max_peak_length'],
+        center_expand_target=parameters['center_expand_target'],
+        n_peaks_lower_bound=parameters['n_peaks_lower_bound'],
+        n_peaks_upper_bound=parameters['n_peaks_upper_bound'],
+        n_peaks_sample_gap=parameters['n_peaks_sample_gap'],
+        non_redundant=parameters['non_redundant'],
+        filter_by_min_depth=parameters['filter_by_min_depth'],
+
+        preload_count=parameters['preload_count'],
+        n_packs=parameters['n_packs'],
+
+        padding=parameters['padding'],
+        mask_ratio=parameters['mask_ratio'],
+        negative_peak_name=parameters['negative_peak_name'],
+        negative_peak_ratio=parameters['negative_peak_ratio'],
+        random_shift_peak=parameters['random_shift_peak'],
+        peak_inactivation=parameters['peak_inactivation'],
+
+        leave_out_celltypes=parameters['leave_out_celltypes'],
+        leave_out_chromosomes=parameters['leave_out_chromosomes'],
+        dataset_size=parameters['dataset_size'],
     )
 
     return dataset
@@ -172,6 +194,7 @@ def dataset_fintune_monocyte_eval(is_train, args, sequence_obj=None):
             'dataset_size': 8192,
         })
 
+
 def dataset_fintune_k562(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_k562.Chr4&14", False, args, sequence_obj=sequence_obj, parameter_override={
@@ -190,10 +213,13 @@ def dataset_fintune_k562_eval(is_train, args, sequence_obj=None):
             'dataset_size': 8192,
         })
 
+
 def dataset_fintune_thp1(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_THP1.Chr4&14", False, args, sequence_obj=sequence_obj, parameter_override={
             'zarr_dirs': [f'{args.data_path}/encode_hg38atac_dense.zarr'],
+            'dataset_size': 81920*2,
+            'additional_peak_columns': ['aTPM'],
             'leave_out_celltypes': "THP1",
             'leave_out_chromosomes': ['chr1', 'chr2', 'chr3', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9', 'chr10', 'chr11', 'chr12', 'chr13', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chrX'],
         })
@@ -203,9 +229,11 @@ def dataset_fintune_thp1_eval(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_THP1.Chr4&14.Eval", False, args, sequence_obj=sequence_obj, parameter_override={
             'zarr_dirs': [f'{args.data_path}/encode_hg38atac_dense.zarr'],
+            'additional_peak_columns': ['aTPM'],
             'leave_out_celltypes': "THP1",
             'leave_out_chromosomes': ['chr4', 'chr14'],
             'dataset_size': 8192,
+            'random_shift_peak': None,
         })
 
 

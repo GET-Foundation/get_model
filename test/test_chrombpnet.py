@@ -19,8 +19,18 @@ from get_model.model.model import GETFinetune, GETFinetuneExpATAC, GETFinetuneEx
 # cdz = cdz.subset_celltypes_with_data_name()
 # #%%
 # cdz = cdz.leave_out_celltypes_with_pattern('Astrocyte')
-
-
+import h5py
+# load bias model
+h5 = h5py.File('/pmglocal/xf2217/THP_data/chrombpnet_output/models/chrombpnet.h5', 'a')
+#%%
+# h5['model_weights']['bpnet_1conv']['bpnet_1conv']['kernel:0'][:]
+# for every weights, overwrite the weights in the model to zero
+for key in h5['model_weights']:
+    for subkey in h5['model_weights'][key]:
+        print(subkey,h5['model_weights'][key][subkey]['kernel:0'][:].shape)
+        # h5['model_weights'][key][subkey]['kernel:0'][:] = 0
+        # h5['model_weights'][key][subkey]['bias:0'][:] = 0
+#%%
 # wandb.login()
 # run = wandb.init(
 #     project="get",
@@ -31,9 +41,11 @@ pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/encode_hg38atac_dense.zar
                             ],
                            '/pmglocal/xf2217/get_data/hg38.zarr', 
                            '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
-                           '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
+                           '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_p0.01_tissue_open_exp', preload_count=200, n_packs=1,
                            max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=10, insulation_subsample_ratio=0.8, n_peaks_upper_bound=100, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=400)
 pretrain.__len__()
+#%%
+pretrain.datapool._load_peaks()
 #%%
 data = pretrain.debug_getitem(0)
 #%%

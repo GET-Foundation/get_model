@@ -67,7 +67,7 @@ class ModelWrapper:
         hic_matrix = hic_matrix.to(device, non_blocking=True).float()
         
         # compute output
-        results = train_class_batch(self.model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data[:,:,0], labels_data, other_labels_data, self.loss, hic_matrix)
+        results = train_class_batch(self.model, peak_seq, sample_track, mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels_data, labels_data, other_labels_data, self.loss, hic_matrix)
 
         # other_labels_data is B, R, N where [:,:, 1] is TSS indicator
         # only append tss preds and obs
@@ -162,12 +162,16 @@ class InferenceEngine:
         """
         # Assuming PyRanges is used for managing genomic ranges
         from pyranges import PyRanges as pr
-        df = pr(peak_info.copy().reset_index()).join(pr(gene_info.copy().query('gene_name==@gene')[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates()).extend(300), suffix="_gene", how='left', apply_strand_suffix=False).df[['index', 'Chromosome', 'Start', 'End', 'Expression_positive', 'Expression_negative', 'aTPM', 'TSS', 'gene_name', 'Strand', 'chunk_idx']].set_index('index')
+        columns_to_include = ['index', 'Chromosome', 'Start', 'End',  'gene_name', 'Strand', 'chunk_idx'] 
+        if self.dataset.additional_peak_columns is not None:
+            columns_to_include += self.dataset.additional_peak_columns
+        df = pr(peak_info.copy().reset_index()).join(pr(gene_info.copy().query('gene_name==@gene')[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates()).extend(300), suffix="_gene", how='left', apply_strand_suffix=False).df[columns_to_include].set_index('index')
         gene_df = df.query('gene_name==@gene')
         strand = gene_df.Strand.replace({'+': 1, '-': -1}).values[0]
         if gene_df.shape[0] == 0:
             raise ValueError(f"Gene {gene} not found in the peak information.")
-        tss_peak = gene_df.aTPM.idxmax()
+        # tss_peak = gene_df.aTPM.idxmax()
+        tss_peak = gene_df.index.values[0]
         if track_start is None or track_end is None:
             # Get the peak start and end positions based on n_peaks_upper_bound
             peak_start, peak_end = tss_peak - self.dataset.n_peaks_upper_bound // 2, tss_peak + self.dataset.n_peaks_upper_bound // 2

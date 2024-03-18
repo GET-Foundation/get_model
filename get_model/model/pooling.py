@@ -96,7 +96,7 @@ class DilatedConv1d(nn.Module):
     def __init__(self, dim, kernel_size = 3, dilation = 1):
         super().__init__()
         self.conv = nn.Conv1d(dim, dim, kernel_size, padding = 'valid', dilation = dilation)
-        self.activation = nn.GELU()
+        self.activation = nn.ReLU()
     def forward(self, x):
         out = self.conv(x)
         # crop x on both side to match the length of out
@@ -173,10 +173,8 @@ class ConvPool(nn.Module):
         self.pool_method = pool_method
         self.motif_proj = nn.Conv1d(motif_dim, hidden_dim, 1, bias=True)
         self.dila_conv_tower = DilatedConv1dBlock(hidden_dim, depth = n_dil_layers)
-        self.aprofile_header = nn.Conv1d(hidden_dim, 1, profile_kernel_size, padding='same')
+        self.aprofile_header = nn.Conv1d(hidden_dim, 1, profile_kernel_size, padding='valid')
         self.atpm_header = nn.Linear(hidden_dim, 1)
-        self.atpm_activation = nn.Softplus()
-        self.aprofile_activation = nn.Softplus()
         
     def forward(self, x, peak_split, n_peaks, max_n_peaks):
         """
@@ -204,14 +202,14 @@ class ConvPool(nn.Module):
             # pool the tensor to get the aTPM
             peak_atpm = peak_profile.mean(2)
             # get the aprofile
-            peak_profile = self.aprofile_header(peak_profile).squeeze(1)
+            peak_profile = self.aprofile_header(peak_profile)
             # get the atpm
-            peak_atpm = self.atpm_header(peak_atpm)
+            peak_atpm = F.softplus(self.atpm_header(peak_atpm))
             # reshape the tensor back
             peak_atpm = peak_atpm.reshape(batch, num_peaks, 1)
             peak_profile = peak_profile.reshape(batch, -1)
-            peak_atpm = self.atpm_activation(peak_atpm)
-            peak_profile = self.aprofile_activation(peak_profile)
+            peak_profile = F.softplus(peak_profile)
+            
             return peak_atpm, peak_profile
         else:
             # split the tensor
@@ -241,8 +239,6 @@ class ConvPool(nn.Module):
             pool_list = [peak_atpm[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
             # pad the element in pool_list if the number of peaks is not the same
             peak_atpms = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks-n_peaks[i], 1).to(pool_list[i].device)]) for i in range(len(pool_list))])
-            peak_atpm = self.atpm_activation(peak_atpm)
-            peak_profile = self.aprofile_activation(peak_profile)
             return peak_atpms, peak_profiles
 
 class ATACSplitPool(nn.Module):
