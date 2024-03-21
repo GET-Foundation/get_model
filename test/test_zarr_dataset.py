@@ -97,15 +97,18 @@ from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
 for i, batch in tqdm(enumerate(data_loader_train)):
     if i > 100:
         break
-    sample_track, peak_seq, sample_metadata, celltype_peaks, peak_signal_track_boundary, peak_sequence_boundary, chunk_size, mask, n_peaks, max_n_peaks, total_peak_len, motif_mean_std, exp_label, other_peak_labels, hic_matrix = batch
-    if min(chunk_size)<0:
+    if min(batch['chunk_size'])<0:
         continue
-# for i in tqdm(range(100)):
-    mask_for_loss = get_mask_pos(mask).bool().cuda()
-    padding_mask = get_padding_pos(mask).bool().cuda()
-    peak_seq = peak_seq.float().cuda()
-    sample_track = sample_track.float().cuda()
-    output_masked, _, target = model.forward(peak_seq, sample_track, mask_for_loss, padding_mask, chunk_size, n_peaks.cuda(), max_n_peaks, motif_mean_std.cuda())
+
+    loss_mask = batch['loss_mask'].cuda()
+    padding_mask = batch['padding_mask'].cuda()
+    peak_seq = batch['sample_peak_sequence'].cuda()
+    sample_track = batch['sample_track'].cuda()
+    chunk_size = batch['chunk_size']
+    n_peaks = batch['n_peaks'].cuda()
+    max_n_peaks = batch['max_n_peaks']
+    motif_mean_std = batch['motif_mean_std'].cuda()
+    output_masked, _, target = model.forward(peak_seq, sample_track, loss_mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
     normalize_target = False
     with torch.no_grad():
         unnorm_targets = target
@@ -124,16 +127,13 @@ for i, batch in tqdm(enumerate(data_loader_train)):
 
         B, _, C = regions_embed.shape
 
-    mask_for_loss = mask.clone()
-
-    mask_for_loss[mask_for_loss!=1]=0
-    mask_for_loss = mask_for_loss.to('cuda', non_blocking=True).unsqueeze(-1)
-    loss_masked_value = loss_masked(input=output_masked*mask_for_loss, target=regions_embed*mask_for_loss)
+    loss_mask = loss_mask.unsqueeze(-1)
+    loss_masked_value = loss_masked(input=output_masked*loss_mask, target=regions_embed*loss_mask)
     #loss_atac_value = loss_atac(atac, labels_atac)
     # print(loss_masked_value, loss_atac_value) # masked loss is around 5 times larger than atac loss
     loss = loss_masked_value #+ loss_atac_value * 5
-    output_masked_list.append((output_masked*mask_for_loss).float().detach().cpu().numpy())
-    target_list.append((regions_embed*mask_for_loss).float().detach().cpu().numpy())
+    output_masked_list.append((output_masked*loss_mask).float().detach().cpu().numpy())
+    target_list.append((regions_embed*loss_mask).float().detach().cpu().numpy())
     loss_value = loss.item()
     loss_values.append(loss_value)
 #%%

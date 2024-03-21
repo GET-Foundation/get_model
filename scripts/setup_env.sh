@@ -27,11 +27,11 @@ mamba env create -f ${CODEBASE_DIR}/environment.yml -p ${ROOT_DIR}/mambaforge/ge
 mamba activate ${ROOT_DIR}/mambaforge/get_started
 
 # Copy data from a specified location to the project directory
-cp -r $DATA_DIR ${ROOT_DIR}/get_data
+# cp -r $DATA_DIR ${ROOT_DIR}/get_data
 
 # Navigate to the data directory and decompress all .tar files
-cd ${ROOT_DIR}/get_data
-for f in *.tar; do tar -xvf $f; done
+# cd ${ROOT_DIR}/get_data
+# for f in *.tar; do tar -xvf $f; done
 
 # Return to the codebase directory and install the package in editable mode
 cd $CODEBASE_DIR

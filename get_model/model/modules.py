@@ -77,7 +77,7 @@ class MotifScanner(nn.Module):
             self.motif[0].weight.data = motifs
         if not self.learnable:
             self.motif[0].weight.requires_grad = False
-
+    
     def load_pwm_as_kernel(
         self,
         pwm_path="https://resources.altius.org/~jvierstra/projects/motif-clustering-v2.1beta/consensus_pwms.meme",

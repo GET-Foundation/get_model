@@ -348,6 +348,7 @@ def load_checkpoint(checkpoint_path, model_key=None):
 
     return checkpoint_model
 
+
 def remove_keys(checkpoint_model, model_state_dict):
     for k in ["head.weight", "head.bias"]:
         if k in checkpoint_model and checkpoint_model[k].shape != model_state_dict[k].shape:
@@ -364,8 +365,8 @@ def rename_keys(checkpoint_model):
             new_dict[key] = checkpoint_model[key]
     return new_dict
 
-def freeze_layers(model, last_layer=False, freeze_atac_attention=False):
-    if last_layer:
+def freeze_layers(model, freeze_last_layer=False, freeze_atac_attention=False):
+    if freeze_last_layer:
         for name, param in model.named_parameters():
             if not (
                 name.startswith("blocks.11")
@@ -466,6 +467,7 @@ class NativeScalerWithGradNormCount:
         create_graph=False,
         update_grad=True,
     ):
+        print(loss)
         self._scaler.scale(loss).backward(create_graph=create_graph)
         if update_grad:
             if clip_grad is not None:

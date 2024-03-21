@@ -362,7 +362,7 @@ class ATACSplitPoolMaxNorm(nn.Module):
     splitting can be calculated by cumsum of the padded peak lengths. The output
     is a tensor of shape (batch, n_peak, dimension). 
     """
-    def __init__(self, pool_method='mean', atac_kernel_num=16, motif_dim=639, joint_kernel_num=16, atac_kernel_size=3, joint_kernel_size=3, final_bn=False, atac_input_norm=True):
+    def __init__(self, motif_dim=639, pool_method='mean', atac_kernel_num=16, joint_kernel_num=16, atac_kernel_size=3, joint_kernel_size=3, final_bn=False, atac_input_norm=True):
         super().__init__()
         self.pool_method = pool_method
         self.atac_input_norm = atac_input_norm

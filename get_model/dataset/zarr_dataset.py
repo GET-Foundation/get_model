@@ -894,10 +894,10 @@ class PreloadDataPack(object):
             inactivated_peak_idx = None
         if self.additional_peak_columns is not None:
             # assume numeric columns
-            additional_peak_columns_data = celltype_peaks[self.additional_peak_columns].to_numpy(
+            additional_peak_features = celltype_peaks[self.additional_peak_columns].to_numpy(
             ).astype(np.float32)
         else:
-            additional_peak_columns_data = None
+            additional_peak_features = None
 
         sequence = self.zarr_data_pool.sequence.get_track(
             chr_name, track_start, track_end, sparse=False)
@@ -936,12 +936,12 @@ class PreloadDataPack(object):
         # remove atac and expression from inactivated peak
         if inactivated_peak_idx is not None:
             # keep the TSS column but set aTPM and expression to 0
-            additional_peak_columns_data[inactivated_peak_idx, 0:3] = 0
+            additional_peak_features[inactivated_peak_idx, 0:3] = 0
 
         sample = {
             'sample_track': sample_track, 'sample_peak_sequence': sample_peak_sequence, 
             'celltype_peaks': celltype_peaks, 'motif_mean_std': motif_mean_std,
-            'additional_peak_columns_data': additional_peak_columns_data, 'hic_matrix': hic_matrix,
+            'additional_peak_features': additional_peak_features, 'hic_matrix': hic_matrix,
             'metadata':{
                 'celltype_id': celltype_id, 'chr_name': chr_name, 'libsize': self.zarr_data_pool.zarr_dict[data_key].libsize[celltype_id],
             'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': self.mask_ratio
@@ -1179,7 +1179,11 @@ class PretrainDataset(Dataset):
         self.avaliable_packs = list(range(n_packs))
 
     def __getitem__(self, index: int):
+        if self.preload_data_packs is None:
+            self.preload_data_packs = [PreloadDataPack(
+                preload_count=self.preload_count, zarr_data_pool=self.datapool, padding=self.padding, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation, peak_inactivation=self.peak_inactivation, mut=self.mut) for _ in range(self.n_packs)]
         return self._getitem(index)
+
 
     def _getitem(self, index: int):
         """

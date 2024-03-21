@@ -255,7 +255,7 @@ class GETTransformer(nn.Module):
         self,
         embed_dim,
         num_heads=8,
-        depth=8,
+        num_layers=8,
         mlp_ratio=4,
         qkv_bias=True,
         qk_scale=None,
@@ -271,7 +271,7 @@ class GETTransformer(nn.Module):
     ) -> None:
         super().__init__(*args, **kwargs)
         dpr = [
-            x.item() for x in torch.linspace(0, drop_path_rate, depth)
+            x.item() for x in torch.linspace(0, drop_path_rate, num_layers)
         ]  # stochastic depth decay rule
         self.blocks = nn.ModuleList(
             [
@@ -288,7 +288,7 @@ class GETTransformer(nn.Module):
                     init_values=init_values,
                     flash_attn=flash_attn,
                 )
-                for i in range(depth)
+                for i in range(num_layers)
             ]
         )
         self.norm = nn.Identity() if use_mean_pooling else norm_layer(embed_dim)
@@ -323,9 +323,9 @@ class OuterProductMean(nn.Module):
 
         self.eps = eps
         self.layer_norm = nn.LayerNorm(c_m)
-        self.linear_1 = Linear(c_m, c_hidden)
-        self.linear_2 = Linear(c_m, c_hidden)
-        self.linear_out = Linear(c_hidden ** 2, c_z, init="final")
+        self.linear_1 = nn.Linear(c_m, c_hidden)
+        self.linear_2 = nn.Linear(c_m, c_hidden)
+        self.linear_out = nn.Linear(c_hidden ** 2, c_z, init="final")
 
     def forward(self, m: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """

@@ -16,7 +16,6 @@ import torch
 import torch.nn as nn
 import get_model.utils as utils
 from get_model.metrics import score_pearsonr, score_r2, score_spearmanr, multinomial_nll
-from timm.data import Mixup
 from timm.utils import ModelEma
 from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
 
@@ -42,52 +41,6 @@ class BaseTrainer:
     def train(self, train_data_loader, valid_data_loader, epochs):
         raise NotImplementedError
 
-
-def calculate_loss_scale_and_get_grad_norm(model, optimizer, loss_scaler, max_norm, loss):
-    is_second_order = (
-            hasattr(optimizer, "is_second_order") and optimizer.is_second_order
-        )
-    grad_norm = loss_scaler(
-            loss,
-            optimizer,
-            clip_grad=max_norm,
-            parameters=model.parameters(),
-            create_graph=is_second_order,
-        )
-    loss_scale_value = loss_scaler.state_dict()["scale"]
-    return grad_norm,loss_scale_value
-
-def get_optimizer_weight_decay(optimizer):
-    weight_decay_value = None
-    for group in optimizer.param_groups:
-        if group["weight_decay"] > 0:
-            weight_decay_value = group["weight_decay"]
-    return weight_decay_value
-
-def get_optimizer_lr_range(optimizer):
-    min_lr = 10.0
-    max_lr = 0.0
-    for group in optimizer.param_groups:
-        min_lr = min(min_lr, group["lr"])
-        max_lr = max(max_lr, group["lr"])
-    return min_lr,max_lr
-
-def apply_schedule_to_optimizer(optimizer, lr_schedule_values, wd_schedule_values, it):
-    if lr_schedule_values is not None or wd_schedule_values is not None:
-        for i, param_group in enumerate(optimizer.param_groups):
-            if lr_schedule_values is not None:
-                param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
-            if wd_schedule_values is not None and param_group["weight_decay"] > 0:
-                param_group["weight_decay"] = wd_schedule_values[it]
-
-def check_loss_value(loss):
-    """Check for unusual loss values, e.g. NaN or infinity. If such values are
-    encountered, the training is stopped."""
-    loss_value = loss.item()
-    if not math.isfinite(loss_value):
-        print("Loss is {}, stopping training".format(loss_value))
-        sys.exit(1)
-    return loss_value
 
 
 def pretrain_one_epoch(
@@ -261,7 +214,6 @@ def finetune_train_one_epoch(
     loss_scaler,
     max_norm: float = 0,
     model_ema: Optional[ModelEma] = None,
-    mixup_fn: Optional[Mixup] = None,
     loggers=None,
     start_steps=None,
     lr_schedule_values=None,

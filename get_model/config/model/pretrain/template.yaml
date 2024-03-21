@@ -1,53 +1,105 @@
-# config/model/pretrain.yaml
 model:
-  num_regions: 200
-  motif_dim: 639
+  _target_: get_model.model.model_refactored.GETPretrainMaxNorm
+  num_regions: 10
+  num_motif: 637
   embed_dim: 768
   num_layers: 12
-  d_model: 768
-  nhead: 12
+  num_heads: 12
   dropout: 0.1
-  output_dim: 1
-  pos_emb_components: []
+  output_dim: 800
   flash_attn: false
-
   motif_scanner:
-    _target_: get_model.model.modules.MotifScanner
-    num_motif: 637
+    num_motif: ${model.num_motif}
     include_reverse_complement: true
     bidirectional_except_ctcf: true
     motif_prior: true
     learnable: false
-
   atac_attention:
-    _target_: get_model.model.pooling.ATACSplitPool
+    motif_dim: 639 # 637 motifs + 2 ctcf
     pool_method: 'mean'
     atac_kernel_num: 161
     atac_kernel_size: 3
     joint_kernel_num: 161
     joint_kernel_size: 3
     final_bn: false
-    atac_input_norm: true
-
   region_embed:
-    _target_: get_model.model.modules.RegionEmbed
     num_regions: ${model.num_regions}
-    in_dim: ${model.motif_dim + model.atac_attention.joint_kernel_num}
-    out_dim: ${model.embed_dim}
-
-  pos_embed:
-    _target_: get_model.model.position_encoding.PositionalEncoding
-    d_model: ${model.embed_dim}
-    max_len: ${model.num_regions}
-    dropout: ${model.dropout}
-
+    num_features: 800 # 639 + 161
+    embed_dim: ${model.embed_dim}
   encoder:
-    _target_: get_model.model.transformer.GETTransformer
-    d_model: ${model.embed_dim}
-    nhead: ${model.nhead}
+    num_heads: ${model.num_heads}
+    embed_dim: ${model.embed_dim}
     num_layers: ${model.num_layers}
     drop_path_rate: ${model.dropout}
     drop_rate: ${model.dropout}
     attn_drop_rate: ${model.dropout}
     use_mean_pooling: false
     flash_attn: ${model.flash_attn}
+
+  loss:
+    components:
+      masked: 
+        _target_: torch.nn.MSELoss
+        reduction: 'mean'
+    weights: 
+      masked: 1.0
+
+  metrics:
+    masked: ['pearson', 'spearman', 'mse']
+    
+dataset:
+  data_set: "Expression_Finetune_Fetal"
+  eval_data_set: "Expression_Finetune_Fetal.fetal_eval"
+  data_path: "/pmglocal/xf2217/get_data/"
+  batch_size: 16
+  num_workers: 16
+  n_peaks_lower_bound: 5
+  n_peaks_upper_bound: 10
+  max_peak_length: 5000
+  center_expand_target: 500
+  use_insulation: false
+  preload_count: 10
+  random_shift_peak: 10
+  pin_mem: true
+  peak_name: "peaks_q0.01_tissue_open_exp"
+  negative_peak_name: null
+  n_packs: 1
+  leave_out_celltypes: "Astrocyte"
+  leave_out_chromosomes: "chr4,chr14"
+  dataset_size: 4096
+  additional_peak_columns:  ['Expression_positive', 'Expression_negative', 'aTPM', 'TSS']
+  padding: 0
+  mask_ratio: 0.5
+  insulation_subsample_ratio: 1
+  negative_peak_ratio: 0
+  peak_inactivation: null
+  non_redundant: false
+  filter_by_min_depth: false
+  hic_path: null
+
+training:
+  num_devices: 1
+  save_ckpt_freq: 10
+  epochs: 2
+  warmup_epochs: 1
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: true
+  output_dir: "/pmglocal/xf2217/output"
+
+optimizer:
+  lr: 0.001
+  min_lr: 0.0001
+  weight_decay: 0.05
+  opt: 'adamw'
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.95]
+
+wandb:
+  project_name: "pretrain"
+  run_name: "experiment_1"
+
+finetune:  
+  checkpoint: null
+  model_prefix: "model."
+  patterns_to_freeze: ["motif_scanner"]

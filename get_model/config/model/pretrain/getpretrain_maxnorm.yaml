@@ -3,5 +3,5 @@ defaults:
   - template
 
 model:
-  _target_: get_model.model.GETPretrainMaxNorm
+  _target_: get_model.model.model_refactored.GETPretrain
   final_bn: true

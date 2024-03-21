@@ -12,9 +12,6 @@ from get_model.dataset.zarr_dataset import \
 def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override=None, sequence_obj=None, root=None, codebase=None):
     """A template to build a dataset for training or evaluation."""
     logging.info(f'Using {dataset_name}')
-    transform = DataAugmentationForGETPeak(args)
-    print("Data Aug = %s" % str(transform))
-
     if root is None:
         root = args.data_path
 
@@ -40,12 +37,12 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
         'negative_peak_name': args.negative_peak_name,
         'additional_peak_columns': ['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'],
         'preload_count': args.preload_count,
-        'padding': 50,
-        'mask_ratio': 0.5,
+        'padding': args.padding,
+        'mask_ratio': args.mask_ratio,
         'n_packs': args.n_packs,
         'max_peak_length': args.max_peak_length,
         'center_expand_target': args.center_expand_target,
-        'insulation_subsample_ratio': 0.8,
+        'insulation_subsample_ratio': args.insulation_subsample_ratio,
         'n_peaks_lower_bound': args.n_peaks_lower_bound,
         'n_peaks_upper_bound': args.n_peaks_upper_bound,
         'use_insulation': args.use_insulation,
@@ -57,7 +54,7 @@ def build_dataset_zarr_template(dataset_name, is_train, args, parameter_override
         'n_peaks_sample_gap': args.n_peaks_upper_bound,
         'non_redundant': args.non_redundant,
         'filter_by_min_depth': args.filter_by_min_depth,
-        'dataset_size': 40_960,
+        'dataset_size': args.dataset_size,
         'hic_path': args.hic_path
     }
 
@@ -133,13 +130,16 @@ def dataset_pretrain_gbm_eval(is_train, args, sequence_obj=None):
 
 def dataset_fintune_fetal(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
-        "Expression_Finetune_Fetal", is_train, args, sequence_obj=sequence_obj, parameter_override={
+        "Expression_Finetune_Fetal", False, args, sequence_obj=sequence_obj, parameter_override={
+            'leave_out_celltypes': 'Astrocyte',
+            'dataset_size': 4096,
         })
 
 
 def dataset_fintune_fetal_eval(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
-        "Expression_Finetune_Fetal.fetal_eval", is_train, args, sequence_obj=sequence_obj, parameter_override={
+        "Expression_Finetune_Fetal.fetal_eval", False, args, sequence_obj=sequence_obj, parameter_override={
+            'leave_out_celltypes': 'Astrocyte',
             'dataset_size': 4096,
         })
 
@@ -218,7 +218,7 @@ def dataset_fintune_thp1(is_train, args, sequence_obj=None):
     return build_dataset_zarr_template(
         "Expression_Finetune_THP1.Chr4&14", False, args, sequence_obj=sequence_obj, parameter_override={
             'zarr_dirs': [f'{args.data_path}/encode_hg38atac_dense.zarr'],
-            'dataset_size': 81920*2,
+            'dataset_size': 81920,
             'additional_peak_columns': ['aTPM'],
             'leave_out_celltypes': "THP1",
             'leave_out_chromosomes': ['chr1', 'chr2', 'chr3', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9', 'chr10', 'chr11', 'chr12', 'chr13', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chrX'],
