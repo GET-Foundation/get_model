@@ -26,11 +26,11 @@ from get_model.model.modules import (BaseModule, BaseConfig, ATACSplitPool, ATAC
                                      ConvPoolConfig, MotifScanner,
                                      MotifScannerConfig, RegionEmbed,
                                      RegionEmbedConfig, SplitPool,
-                                     SplitPoolConfig)
+                                     SplitPoolConfig, ExpressionHead, ExpressionHeadConfig)
 from get_model.model.transformer import GETTransformer
 from get_model.optim import create_optimizer
 from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys
-
+import torch.nn.functional as F
 
 @dataclass
 class EncoderConfig:
@@ -42,19 +42,6 @@ class EncoderConfig:
     attn_drop_rate: float = MISSING
     use_mean_pooling: bool = False
     flash_attn: bool = MISSING
-
-@dataclass
-class GETPretrainConfig:
-    _target_: str = "get_model.model.model_refactored.GETPretrain"
-    motif_scanner: MotifScannerConfig = MISSING
-    atac_attention: ATACSplitPoolConfig = MISSING
-    region_embed: RegionEmbedConfig = MISSING
-    encoder: EncoderConfig = MISSING
-
-@dataclass
-class GETPretrainMaxNormConfig(GETPretrainConfig):
-    _target_: str = "get_model.model.model_refactored.GETPretrainMaxNorm"
-    atac_attention: ATACSplitPoolMaxNormConfig = MISSING
 
 @dataclass
 class LossConfig:
@@ -139,20 +126,22 @@ class Config:
     wandb: WandbConfig = MISSING
     finetune: FinetuneConfig = MISSING
 
-cs = ConfigStore.instance()
-cs.store(name="config", node=Config)
-cs.store(group="model", name="base_model", node=GETPretrainMaxNormConfig)
-cs.store(group="model.motif_scanner", name="base_motif_scanner", node=MotifScannerConfig)
-cs.store(group="model.atac_attention", name="base_atac_attention", node=ATACSplitPoolMaxNormConfig)
-cs.store(group="model.region_embed", name="base_region_embed", node=RegionEmbedConfig)
-cs.store(group="model.encoder", name="base_encoder", node=EncoderConfig)
-cs.store(group="loss", name="base_loss", node=LossConfig)
-cs.store(group="metrics", name="base_metrics", node=MetricsConfig)
-cs.store(group="dataset", name="base_dataset", node=DatasetConfig)
-cs.store(group="training", name="base_training", node=TrainingConfig)
-cs.store(group="training.optimizer", name="base_optimizer", node=OptimizerConfig)
-cs.store(group="wandb", name="base_wandb", node=WandbConfig)
-cs.store(group="finetune", name="base_finetune", node=FinetuneConfig)
+# cs = ConfigStore.instance()
+# cs.store(name="config", node=Config)
+# cs.store(group="model", name="base_model", node=GETPretrainMaxNormConfig)
+# cs.store(group="model.motif_scanner", name="base_motif_scanner", node=MotifScannerConfig)
+# cs.store(group="model.atac_attention", name="base_atac_attention", node=ATACSplitPoolMaxNormConfig)
+# cs.store(group="model.region_embed", name="base_region_embed", node=RegionEmbedConfig)
+# cs.store(group="model.encoder", name="base_encoder", node=EncoderConfig)
+# cs.store(group="loss", name="base_loss", node=LossConfig)
+# cs.store(group="metrics", name="base_metrics", node=MetricsConfig)
+# cs.store(group="dataset", name="base_dataset", node=DatasetConfig)
+# cs.store(group="training", name="base_training", node=TrainingConfig)
+# cs.store(group="training.optimizer", name="base_optimizer", node=OptimizerConfig)
+# cs.store(group="wandb", name="base_wandb", node=WandbConfig)
+# cs.store(group="finetune", name="base_finetune", node=FinetuneConfig)
+# cs.store(group="model", name="base_finetune_model", node=GETFinetuneConfig)
+# cs.store(group="model.head_exp", name="base_expression_head", node=ExpressionHeadConfig)
 
 class GETLoss(nn.Module):
     def __init__(self, cfg):
@@ -240,7 +229,7 @@ class BaseGETModel(BaseModule):
     def forward(self, batch):
         raise NotImplementedError
 
-    def before_loss(self, output, target):
+    def before_loss(self, output, batch):
         """Prepare the output and target for the loss function
         The goal is to construct either:
         1. pred and obs tensors, in which case a defined loss function is applied to pred and obs
@@ -290,6 +279,15 @@ class BaseGETModel(BaseModule):
         raise NotImplementedError
     
 
+@dataclass
+class GETPretrainConfig:
+    _target_: str = "get_model.model.model_refactored.GETPretrain"
+    motif_scanner: MotifScannerConfig = MISSING
+    atac_attention: ATACSplitPoolConfig = MISSING
+    region_embed: RegionEmbedConfig = MISSING
+    encoder: EncoderConfig = MISSING
+
+
 class GETPretrain(BaseGETModel):
     def __init__(self, cfg: GETPretrainConfig):
         super().__init__(GETPretrain)
@@ -330,18 +328,75 @@ class GETPretrain(BaseGETModel):
         x_masked = self.head_mask(x)
         return x_masked, x_original, loss_mask
 
-    def before_loss(self, output, target=None):
+    def before_loss(self, output, batch):
         x_masked, x_original, loss_mask = output
         pred = {'masked': x_masked * loss_mask}
         obs = {'masked': x_original * loss_mask}
         return pred, obs
     
+@dataclass
+class GETPretrainMaxNormConfig(GETPretrainConfig):
+    _target_: str = "get_model.model.model_refactored.GETPretrainMaxNorm"
+    atac_attention: ATACSplitPoolMaxNormConfig = MISSING
+
 class GETPretrainMaxNorm(GETPretrain):
     def __init__(self, cfg: GETPretrainMaxNormConfig):
         super().__init__(cfg)
         self.atac_attention = ATACSplitPoolMaxNorm(**cfg.atac_attention)
 
+@dataclass
+class GETFinetuneConfig:
+    _target_: str = "get_model.model.model_refactored.GETFinetune"
+    motif_scanner: MotifScannerConfig = MISSING
+    atac_attention: ATACSplitPoolConfig = MISSING
+    region_embed: RegionEmbedConfig = MISSING
+    encoder: EncoderConfig = MISSING
+    head_exp: ExpressionHeadConfig = MISSING
+    use_atac: bool = False
+    final_bn: bool = False
 
+
+class GETFinetune(BaseGETModel):
+    def __init__(self, cfg: GETFinetuneConfig):
+        super().__init__(GETFinetune)
+        self.motif_scanner = MotifScanner(**cfg.motif_scanner)
+        self.atac_attention = ATACSplitPool(**cfg.atac_attention)
+        self.region_embed = RegionEmbed(**cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(**cfg.head_exp, use_atac=cfg.use_atac)
+        self.final_bn = cfg.final_bn
+
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        return {
+            'peak_seq': batch['sample_peak_sequence'],
+            'atac': batch['sample_track'],
+            'padding_mask': batch['padding_mask'], 
+            'chunk_size': batch['chunk_size'],
+            'n_peaks': batch['n_peaks'],
+            'max_n_peaks': batch['max_n_peaks'],
+            'motif_mean_std': batch['motif_mean_std'],
+            'exp_target': batch['exp_target']
+        }
+
+    def forward(self, peak_seq, atac, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+        x = self.motif_scanner(peak_seq, motif_mean_std)
+        x_original = self.atac_attention(x, atac, chunk_size, n_peaks, max_n_peaks)
+        x = self.region_embed(x_original)
+
+        for pos_emb_component in self.pos_embed:
+            x = pos_emb_component(x)
+
+        x, _ = self.encoder(x, mask=padding_mask)
+        exp = F.softplus(self.head_exp(x)) 
+        return exp
+
+    def before_loss(self, output, batch):
+        pred = {'exp': output}
+        obs = {'exp': batch['exp_target']}
+        return pred, obs
+    
 class LitModel(L.LightningModule):
     def __init__(self, cfg: DictConfig):
         super().__init__()
@@ -376,7 +431,7 @@ class LitModel(L.LightningModule):
     def _shared_step(self, batch, batch_idx, stage='train'):
         batch = self.model.get_input(batch)
         output = self(batch)
-        pred, obs = self.model.before_loss(output)
+        pred, obs = self.model.before_loss(output, batch)
         loss = self.loss(pred, obs)
         # if loss is a dict, rename the keys with the stage prefix
         if isinstance(loss, dict):
