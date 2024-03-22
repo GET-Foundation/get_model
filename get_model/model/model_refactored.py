@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from unittest.mock import Base
+from get_model.model.model import GETFinetuneChrombpNetBias
 
 import hydra
 import lightning as L
@@ -142,6 +143,7 @@ class Config:
 # cs.store(group="finetune", name="base_finetune", node=FinetuneConfig)
 # cs.store(group="model", name="base_finetune_model", node=GETFinetuneConfig)
 # cs.store(group="model.head_exp", name="base_expression_head", node=ExpressionHeadConfig)
+# cs.store(group="model", name="base_finetune_chrombpnet_bias_model", node=GETFinetuneChrombpNetBiasConfig)
 
 class GETLoss(nn.Module):
     def __init__(self, cfg):
@@ -396,7 +398,60 @@ class GETFinetune(BaseGETModel):
         pred = {'exp': output}
         obs = {'exp': batch['exp_target']}
         return pred, obs
-    
+
+
+
+@dataclass
+class GETFinetuneMaxNormConfig(GETFinetuneConfig):
+    _target_: str = "get_model.model.model_refactored.GETFinetuneMaxNorm"
+    atac_attention: ATACSplitPoolMaxNormConfig = MISSING
+
+
+class GETFinetuneMaxNorm(GETFinetune):
+    def __init__(self, cfg: GETFinetuneMaxNormConfig):
+        super().__init__(cfg)
+        self.atac_attention = ATACSplitPoolMaxNorm(**cfg.atac_attention)
+
+
+@dataclass
+class GETFinetuneChrombpNetBiasConfig:
+    _target_: str = "get_model.model.model_refactored.GETFinetuneChrombpNetBias"
+    motif_scanner: MotifScannerConfig = MISSING
+    atac_attention: ConvPoolConfig = MISSING
+
+
+class GETFinetuneChrombpNetBias(BaseGETModel):
+    def __init__(self, cfg: GETFinetuneChrombpNetBiasConfig):
+        super().__init__(GETFinetuneChrombpNetBias)
+        self.motif_scanner = MotifScanner(**cfg.motif_scanner)
+        self.atac_attention = ConvPool(**cfg.atac_attention)
+
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        return {
+            'peak_seq': batch['sample_peak_sequence'],
+            'atac': batch['sample_track'],
+            'padding_mask': batch['padding_mask'],
+            'chunk_size': batch['chunk_size'],
+            'n_peaks': batch['n_peaks'],
+            'max_n_peaks': batch['max_n_peaks'],
+            'motif_mean_std': batch['motif_mean_std'],
+            'other_labels': batch.get('other_labels', None),
+        }
+
+    def forward(self, peak_seq, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+        x = self.motif_scanner(peak_seq, motif_mean_std)
+        atpm, aprofile = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+        return atpm, aprofile
+
+    def before_loss(self, output, batch):
+        pred = {'atpm': output[0], 'atac_profile': output[1]}
+        obs = {'atpm': batch['atpm'], 'atac_profile': batch['atac_profile']}
+        return pred, obs
+
+
+
 class LitModel(L.LightningModule):
     def __init__(self, cfg: DictConfig):
         super().__init__()
