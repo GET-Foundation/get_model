@@ -1,12 +1,10 @@
 from dataclasses import dataclass, field
-from unittest.mock import Base
-from get_model.model.model import GETFinetuneChrombpNetBias
 
 import hydra
 import lightning as L
-from matplotlib.pyplot import cla
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.data
 import torchmetrics
 from caesar.io.zarr_io import DenseZarrIO
@@ -21,17 +19,18 @@ from torch.nn.init import trunc_normal_
 
 from get_model.dataset.collate import get_rev_collate_fn
 from get_model.dataset.dataset import build_dataset_zarr
-from get_model.model.modules import (BaseModule, BaseConfig, ATACSplitPool, ATACSplitPoolConfig,
+from get_model.model.modules import (ATACSplitPool, ATACSplitPoolConfig,
                                      ATACSplitPoolMaxNorm,
-                                     ATACSplitPoolMaxNormConfig, ConvPool,
-                                     ConvPoolConfig, MotifScanner,
-                                     MotifScannerConfig, RegionEmbed,
-                                     RegionEmbedConfig, SplitPool,
-                                     SplitPoolConfig, ExpressionHead, ExpressionHeadConfig)
+                                     ATACSplitPoolMaxNormConfig, BaseConfig,
+                                     BaseModule, ConvPool, ConvPoolConfig,
+                                     ExpressionHead, ExpressionHeadConfig,
+                                     MotifScanner, MotifScannerConfig,
+                                     RegionEmbed, RegionEmbedConfig, SplitPool,
+                                     SplitPoolConfig)
 from get_model.model.transformer import GETTransformer
 from get_model.optim import create_optimizer
 from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys
-import torch.nn.functional as F
+
 
 @dataclass
 class EncoderConfig:
@@ -117,15 +116,6 @@ class FinetuneConfig:
     patterns_to_freeze: list = field(default_factory=lambda: [
                                     "motif_scanner"])
 
-@dataclass
-class Config:
-    model: GETPretrainMaxNormConfig = MISSING
-    loss: LossConfig = MISSING
-    metrics: MetricsConfig = MISSING
-    dataset: DatasetConfig = MISSING
-    training: TrainingConfig = MISSING
-    wandb: WandbConfig = MISSING
-    finetune: FinetuneConfig = MISSING
 
 # cs = ConfigStore.instance()
 # cs.store(name="config", node=Config)
@@ -283,7 +273,7 @@ class BaseGETModel(BaseModule):
 
 @dataclass
 class GETPretrainConfig:
-    _target_: str = "get_model.model.model_refactored.GETPretrain"
+    #_target_: str = "get_model.model.model_refactored.GETPretrain"
     motif_scanner: MotifScannerConfig = MISSING
     atac_attention: ATACSplitPoolConfig = MISSING
     region_embed: RegionEmbedConfig = MISSING
@@ -292,7 +282,7 @@ class GETPretrainConfig:
 
 class GETPretrain(BaseGETModel):
     def __init__(self, cfg: GETPretrainConfig):
-        super().__init__(GETPretrain)
+        super().__init__(cfg)
         self.motif_scanner = MotifScanner(**cfg.motif_scanner)
         self.atac_attention = ATACSplitPool(**cfg.atac_attention)
         self.split_pool = SplitPool()
@@ -336,9 +326,21 @@ class GETPretrain(BaseGETModel):
         obs = {'masked': x_original * loss_mask}
         return pred, obs
     
+    def generate_dummy_data(self):
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (16, 1000, 4)),
+            'sample_track': torch.randn(16, 1000, 1),
+            'loss_mask': torch.randint(0, 2, (16, 1000, 1)),
+            'padding_mask': torch.randint(0, 2, (16, 1000, 1)),
+            'chunk_size': torch.randint(0, 1000, (16,)),
+            'n_peaks': torch.randint(0, 1000, (16,)),
+            'max_n_peaks': torch.randint(0, 1000, (16,)),
+            'motif_mean_std': torch.randn(16, 4, 2)
+        }
+
 @dataclass
 class GETPretrainMaxNormConfig(GETPretrainConfig):
-    _target_: str = "get_model.model.model_refactored.GETPretrainMaxNorm"
+    #_target_: str = "get_model.model.model_refactored.GETPretrainMaxNorm"
     atac_attention: ATACSplitPoolMaxNormConfig = MISSING
 
 class GETPretrainMaxNorm(GETPretrain):
@@ -348,7 +350,7 @@ class GETPretrainMaxNorm(GETPretrain):
 
 @dataclass
 class GETFinetuneConfig:
-    _target_: str = "get_model.model.model_refactored.GETFinetune"
+    #_target_: str = "get_model.model.model_refactored.GETFinetune"
     motif_scanner: MotifScannerConfig = MISSING
     atac_attention: ATACSplitPoolConfig = MISSING
     region_embed: RegionEmbedConfig = MISSING
@@ -379,7 +381,7 @@ class GETFinetune(BaseGETModel):
             'n_peaks': batch['n_peaks'],
             'max_n_peaks': batch['max_n_peaks'],
             'motif_mean_std': batch['motif_mean_std'],
-            'exp_target': batch['exp_target']
+            'exp#_target': batch['exp#_target']
         }
 
     def forward(self, peak_seq, atac, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
@@ -396,14 +398,14 @@ class GETFinetune(BaseGETModel):
 
     def before_loss(self, output, batch):
         pred = {'exp': output}
-        obs = {'exp': batch['exp_target']}
+        obs = {'exp': batch['exp#_target']}
         return pred, obs
 
 
 
 @dataclass
 class GETFinetuneMaxNormConfig(GETFinetuneConfig):
-    _target_: str = "get_model.model.model_refactored.GETFinetuneMaxNorm"
+    #_target_: str = "get_model.model.model_refactored.GETFinetuneMaxNorm"
     atac_attention: ATACSplitPoolMaxNormConfig = MISSING
 
 
@@ -415,7 +417,7 @@ class GETFinetuneMaxNorm(GETFinetune):
 
 @dataclass
 class GETFinetuneChrombpNetBiasConfig:
-    _target_: str = "get_model.model.model_refactored.GETFinetuneChrombpNetBias"
+    #_target_: str = "get_model.model.model_refactored.GETFinetuneChrombpNetBias"
     motif_scanner: MotifScannerConfig = MISSING
     atac_attention: ConvPoolConfig = MISSING
 
@@ -591,9 +593,19 @@ class GETDataModule(L.LightningDataModule):
             collate_fn=get_rev_collate_fn,
         )
 
+@dataclass
+class Config:
+    model: GETPretrainMaxNormConfig = MISSING
+    loss: LossConfig = MISSING
+    metrics: MetricsConfig = MISSING
+    dataset: DatasetConfig = MISSING
+    training: TrainingConfig = MISSING
+    wandb: WandbConfig = MISSING
+    finetune: FinetuneConfig = MISSING
+
 
 @hydra.main(config_path="../config/model/pretrain", config_name="template", version_base="1.3")
-def main(cfg: Config):
+def main(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
     model = LitModel(cfg)
     trainer = L.Trainer(

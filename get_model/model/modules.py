@@ -21,7 +21,7 @@ class BaseConfig:
     Args:
         freezed (bool|str): Whether to freeze the parameters. If True, all parameters are freezed.
             If a string, only parameters with the string in their name are freezed. Defaults to False."""
-    _target_: str = "get_model.model.modules.BaseConfig"
+    #_target_: str = "get_model.model.modules.BaseConfig"
     freezed: bool | str = False
 
 
@@ -70,9 +70,9 @@ class RegionEmbedConfig(BaseConfig):
     Args:
         num_features (int): Number of features.
         embed_dim (int): Dimension of the embedding."""
-    _target_: str = "get_model.model.modules.RegionEmbedConfig"
-    num_features: int
-    embed_dim: int
+    #_target_: str = "get_model.smodel.modules.RegionEmbedConfig"
+    num_features: int = 800
+    embed_dim: int = 768
 
 
 class RegionEmbed(BaseModule):
@@ -101,7 +101,7 @@ class MotifScannerConfig(BaseConfig):
         bidirectional_except_ctcf (bool): Whether to include reverse complement motifs for all motifs except CTCF.
         motif_prior (bool): Whether to use motif prior.
         learnable (bool): Whether to make the motif scanner learnable."""
-    _target_: str = "get_model.model.modules.MotifScannerConfig"
+    #_target_: str = "get_model.model.modules.MotifScannerConfig"
     num_motif: int = 637
     include_reverse_complement: bool = True
     bidirectional_except_ctcf: bool = False
@@ -201,9 +201,8 @@ class ExpressionHeadConfig(BaseConfig):
     Args:
         embed_dim (int): Dimension of the embedding.
         output_dim (int): Dimension of the output."""
-    _target_: str = "get_model.model.modules.ExpressionHeadConfig"
-    embed_dim: int
-    output_dim: int
+    embed_dim: int = 768
+    output_dim: int = 2
     use_atac: bool = False
 
 
@@ -233,10 +232,10 @@ class ATACHeadConfig(BaseConfig):
         hidden_dim (int): Dimension of the hidden layer.
         output_dim (int): Dimension of the output.
         drop (float): Dropout rate. Defaults to 0.1."""
-    _target_: str = "get_model.model.modules.ATACHeadConfig"
-    embed_dim: int
-    hidden_dim: int
-    output_dim: int
+    #_target_: str = "get_model.model.modules.ATACHeadConfig"
+    embed_dim: int = 768
+    hidden_dim: int = 256
+    output_dim: int = 1
     drop: float = 0.1
 
 
@@ -285,7 +284,7 @@ class SplitPoolConfig(BaseConfig):
     Args:
         pool_method (str): The method to pool the tensor. Defaults to 'mean'.
     """
-    _target_: str = "get_model.model.modules.SplitPoolConfig"
+    #_target_: str = "get_model.model.modules.SplitPoolConfig"
     pool_method: str = 'mean'
 
 
@@ -377,7 +376,7 @@ def exponential_linspace_int(start, end, num, divisible_by = 1):
 @dataclass
 class ResidualConfig(BaseConfig):
     """Configuration class for the Residual module."""
-    _target_: str = "get_model.model.modules.ResidualConfig"
+    #_target_: str = "get_model.model.modules.ResidualConfig"
     pass
 
 
@@ -411,8 +410,8 @@ class DilatedConv1dConfig(BaseConfig):
         kernel_size (int): Size of the convolutional kernel. Defaults to 3.
         dilation (int): Dilation factor for the convolution. Defaults to 1.
     """
-    _target_: str = "get_model.model.modules.DilatedConv1dConfig"
-    dim: int
+    #_target_: str = "get_model.model.modules.DilatedConv1dConfig"
+    dim: int = 64
     kernel_size: int = 3
     dilation: int = 1
 
@@ -455,8 +454,8 @@ class DilatedConv1dBlockConfig(BaseConfig):
         depth (int): Number of dilated convolution layers. Defaults to 3.
         kernel_size (int): Size of the convolutional kernel. Defaults to 3.
     """
-    _target_: str = "get_model.model.modules.DilatedConv1dBlockConfig"
-    dim: int
+    #_target_: str = "get_model.model.modules.DilatedConv1dBlockConfig"
+    dim: int = 64
     depth: int = 3
     kernel_size: int = 3
 
@@ -500,10 +499,10 @@ class ConvPoolConfig(BaseConfig):
         profile_kernel_size (int): Kernel size for the aprofile header. Defaults to 75.
         pool_method (str): Method to pool the tensor. Defaults to 'mean'.
     """
-    _target_: str = "get_model.model.modules.ConvPoolConfig"
+    #_target_: str = "get_model.model.modules.ConvPoolConfig"
     pool_method: str = 'mean'
-    motif_dim: int
-    hidden_dim: int
+    motif_dim: int = 639
+    hidden_dim: int = 256
     n_dil_layers: int = 7
     profile_kernel_size: int = 75
 
@@ -604,7 +603,7 @@ class ATACSplitPoolConfig(BaseConfig):
         final_bn (bool): Whether to apply batch normalization at the end. Defaults to False.
         binary_atac (bool): Whether to binarize the ATAC signal. Defaults to False.
     """
-    _target_: str = "get_model.model.modules.ATACSplitPoolConfig"
+    #_target_: str = "get_model.model.modules.ATACSplitPoolConfig"
     pool_method: str = 'mean'
     motif_dim: int = 639
     atac_kernel_num: int = 161
@@ -742,8 +741,8 @@ class ATACSplitPool(BaseModule):
 
 @dataclass
 class ATACSplitPoolMaxNormConfig(ATACSplitPoolConfig):
-    _target_: str = "get_model.model.modules.ATACSplitPoolMaxNormConfig"
-    
+    #_target_: str = "get_model.model.modules.ATACSplitPoolMaxNormConfig"
+    pass
 class ATACSplitPoolMaxNorm(ATACSplitPool):
     """
     Receive a tensor of shape (batch, length, dimension) and split along length
