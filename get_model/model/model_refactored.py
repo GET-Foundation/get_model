@@ -1,27 +1,158 @@
+from dataclasses import dataclass, field
+from unittest.mock import Base
+
 import hydra
+import lightning as L
+from matplotlib.pyplot import cla
 import torch
 import torch.nn as nn
 import torch.utils.data
 import torchmetrics
 from caesar.io.zarr_io import DenseZarrIO
+from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
-import lightning as L
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
 from lightning.pytorch.utilities import grad_norm
-from omegaconf import DictConfig
+from omegaconf import MISSING, DictConfig
 from torch.nn.init import trunc_normal_
 
 from get_model.dataset.collate import get_rev_collate_fn
 from get_model.dataset.dataset import build_dataset_zarr
-from get_model.model.modules import ATACAttention, MotifScanner, RegionEmbed
-from get_model.model.pooling import (ATACSplitPool, ATACSplitPoolMaxNorm,
-                                     ConvPool, SplitPool)
+from get_model.model.modules import (BaseModule, BaseConfig, ATACSplitPool, ATACSplitPoolConfig,
+                                     ATACSplitPoolMaxNorm,
+                                     ATACSplitPoolMaxNormConfig, ConvPool,
+                                     ConvPoolConfig, MotifScanner,
+                                     MotifScannerConfig, RegionEmbed,
+                                     RegionEmbedConfig, SplitPool,
+                                     SplitPoolConfig)
 from get_model.model.transformer import GETTransformer
 from get_model.optim import create_optimizer
 from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys
 
+
+@dataclass
+class EncoderConfig:
+    num_heads: int = MISSING
+    embed_dim: int = MISSING
+    num_layers: int = MISSING
+    drop_path_rate: float = MISSING
+    drop_rate: float = MISSING
+    attn_drop_rate: float = MISSING
+    use_mean_pooling: bool = False
+    flash_attn: bool = MISSING
+
+@dataclass
+class GETPretrainConfig:
+    _target_: str = "get_model.model.model_refactored.GETPretrain"
+    motif_scanner: MotifScannerConfig = MISSING
+    atac_attention: ATACSplitPoolConfig = MISSING
+    region_embed: RegionEmbedConfig = MISSING
+    encoder: EncoderConfig = MISSING
+
+@dataclass
+class GETPretrainMaxNormConfig(GETPretrainConfig):
+    _target_: str = "get_model.model.model_refactored.GETPretrainMaxNorm"
+    atac_attention: ATACSplitPoolMaxNormConfig = MISSING
+
+@dataclass
+class LossConfig:
+    components: dict = MISSING
+    weights: dict = MISSING
+
+@dataclass
+class MetricsConfig:
+    masked = MISSING
+
+@dataclass
+class DatasetConfig:
+    data_set: str = "Expression_Finetune_Fetal"
+    eval_data_set: str = "Expression_Finetune_Fetal.fetal_eval"
+    data_path: str = "/pmglocal/xf2217/get_data/"
+    batch_size: int = 16
+    num_workers: int = 16
+    n_peaks_lower_bound: int = 5
+    n_peaks_upper_bound: int = 10
+    max_peak_length: int = 5000
+    center_expand_target: int = 500
+    use_insulation: bool = False
+    preload_count: int = 10
+    random_shift_peak: int = 10
+    pin_mem: bool = True
+    peak_name: str = "peaks_q0.01_tissue_open_exp"
+    negative_peak_name: str|None = None
+    n_packs: int = 1
+    leave_out_celltypes: str = "Astrocyte"
+    leave_out_chromosomes: str = "chr4,chr14"
+    dataset_size: int = 4096
+    additional_peak_columns: list = field(default_factory=lambda: ['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'])
+    padding: int = 0
+    mask_ratio: float = 0.5
+    insulation_subsample_ratio: int = 1
+    negative_peak_ratio: int = 0
+    peak_inactivation: str|None = None
+    non_redundant: bool = False
+    filter_by_min_depth: bool = False
+    hic_path: str|None = None
+
+@dataclass
+class OptimizerConfig:
+    lr: float = 0.001
+    min_lr: float = 0.0001
+    weight_decay: float = 0.05
+    opt: str = 'adamw'
+    opt_eps: float = 1e-8
+    opt_betas: list = field(default_factory=lambda: [0.9, 0.95])
+
+@dataclass
+class TrainingConfig:
+    num_devices: int = 1
+    save_ckpt_freq: int = 10
+    epochs: int = 100
+    warmup_epochs: int = 5
+    accumulate_grad_batches: int = 1
+    clip_grad: float|None = None
+    use_fp16: bool = True
+    output_dir: str = "/pmglocal/xf2217/output"
+    optimizer: OptimizerConfig = MISSING
+
+@dataclass
+class WandbConfig:
+    project_name: str = "pretrain"
+    run_name: str = "experiment_1"
+
+@dataclass
+class FinetuneConfig:
+    checkpoint: str|None = None
+    model_prefix: str = "model."
+    patterns_to_freeze: list = field(default_factory=lambda: [
+                                    "motif_scanner"])
+
+@dataclass
+class Config:
+    model: GETPretrainMaxNormConfig = MISSING
+    loss: LossConfig = MISSING
+    metrics: MetricsConfig = MISSING
+    dataset: DatasetConfig = MISSING
+    training: TrainingConfig = MISSING
+    wandb: WandbConfig = MISSING
+    finetune: FinetuneConfig = MISSING
+
+cs = ConfigStore.instance()
+cs.store(name="config", node=Config)
+cs.store(group="model", name="base_model", node=GETPretrainMaxNormConfig)
+cs.store(group="model.motif_scanner", name="base_motif_scanner", node=MotifScannerConfig)
+cs.store(group="model.atac_attention", name="base_atac_attention", node=ATACSplitPoolMaxNormConfig)
+cs.store(group="model.region_embed", name="base_region_embed", node=RegionEmbedConfig)
+cs.store(group="model.encoder", name="base_encoder", node=EncoderConfig)
+cs.store(group="loss", name="base_loss", node=LossConfig)
+cs.store(group="metrics", name="base_metrics", node=MetricsConfig)
+cs.store(group="dataset", name="base_dataset", node=DatasetConfig)
+cs.store(group="training", name="base_training", node=TrainingConfig)
+cs.store(group="training.optimizer", name="base_optimizer", node=OptimizerConfig)
+cs.store(group="wandb", name="base_wandb", node=WandbConfig)
+cs.store(group="finetune", name="base_finetune", node=FinetuneConfig)
 
 class GETLoss(nn.Module):
     def __init__(self, cfg):
@@ -88,8 +219,8 @@ class RegressionMetrics(nn.Module):
         return result
 
 
-class BaseGETModel(nn.Module):
-    def __init__(self, cfg):
+class BaseGETModel(BaseModule):
+    def __init__(self, cfg: BaseConfig):
         super(BaseGETModel, self).__init__()
         self.cfg = cfg
 
@@ -154,35 +285,24 @@ class BaseGETModel(nn.Module):
                 param.requires_grad = False
                 print(f"Freezed weights of {name}")
 
+    def generate_dummy_data(self):
+        """Return a dummy input for the model"""
+        raise NotImplementedError
+    
 
-class GETPretrainMaxNorm(BaseGETModel):
-    def __init__(self,
-                 motif_scanner,
-                 atac_attention,
-                 region_embed,
-                 encoder,
-                 loss,
-                 metrics,
-                 num_regions=200,
-                 num_motif=637,
-                 embed_dim=768,
-                 num_layers=12,
-                 num_heads=12,
-                 dropout=0.1,
-                 output_dim=639,
-                 flash_attn=False
-                 ):
-        super().__init__(GETPretrainMaxNorm)
-        self.motif_scanner = MotifScanner(**motif_scanner)
-        self.atac_attention = ATACSplitPoolMaxNorm(**atac_attention)
+class GETPretrain(BaseGETModel):
+    def __init__(self, cfg: GETPretrainConfig):
+        super().__init__(GETPretrain)
+        self.motif_scanner = MotifScanner(**cfg.motif_scanner)
+        self.atac_attention = ATACSplitPool(**cfg.atac_attention)
         self.split_pool = SplitPool()
-        self.region_embed = RegionEmbed(**region_embed)
-        self.encoder = GETTransformer(**encoder)
-        self.head_mask = nn.Linear(embed_dim, output_dim)
-        self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        trunc_normal_(self.mask_token, std=0.02)
-        self.loss = GETLoss(loss)
-        self.metrics = RegressionMetrics(metrics)
+        self.region_embed = RegionEmbed(**cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_mask = nn.Linear(**cfg.head_mask)
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, cfg.mask_token.embed_dim))
+        trunc_normal_(self.mask_token, std=cfg.mask_token.std)
+        self.loss = GETLoss(cfg.loss)
+        self.metrics = RegressionMetrics(cfg.metrics)
 
         self.apply(self._init_weights)
 
@@ -215,6 +335,11 @@ class GETPretrainMaxNorm(BaseGETModel):
         pred = {'masked': x_masked * loss_mask}
         obs = {'masked': x_original * loss_mask}
         return pred, obs
+    
+class GETPretrainMaxNorm(GETPretrain):
+    def __init__(self, cfg: GETPretrainMaxNormConfig):
+        super().__init__(cfg)
+        self.atac_attention = ATACSplitPoolMaxNorm(**cfg.atac_attention)
 
 
 class LitModel(L.LightningModule):
@@ -358,7 +483,7 @@ class GETDataModule(L.LightningDataModule):
 
 
 @hydra.main(config_path="../config/model/pretrain", config_name="template", version_base="1.3")
-def main(cfg: DictConfig):
+def main(cfg: Config):
     torch.set_float32_matmul_precision('medium')
     model = LitModel(cfg)
     trainer = L.Trainer(

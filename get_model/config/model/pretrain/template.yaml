@@ -1,52 +1,57 @@
 model:
   _target_: get_model.model.model_refactored.GETPretrainMaxNorm
-  num_regions: 10
-  num_motif: 637
-  embed_dim: 768
-  num_layers: 12
-  num_heads: 12
-  dropout: 0.1
-  output_dim: 800
-  flash_attn: false
-  motif_scanner:
-    num_motif: ${model.num_motif}
-    include_reverse_complement: true
-    bidirectional_except_ctcf: true
-    motif_prior: true
-    learnable: false
-  atac_attention:
-    motif_dim: 639 # 637 motifs + 2 ctcf
-    pool_method: 'mean'
-    atac_kernel_num: 161
-    atac_kernel_size: 3
-    joint_kernel_num: 161
-    joint_kernel_size: 3
-    final_bn: false
-  region_embed:
-    num_regions: ${model.num_regions}
-    num_features: 800 # 639 + 161
-    embed_dim: ${model.embed_dim}
-  encoder:
-    num_heads: ${model.num_heads}
-    embed_dim: ${model.embed_dim}
-    num_layers: ${model.num_layers}
-    drop_path_rate: ${model.dropout}
-    drop_rate: ${model.dropout}
-    attn_drop_rate: ${model.dropout}
-    use_mean_pooling: false
-    flash_attn: ${model.flash_attn}
-
-  loss:
-    components:
-      masked: 
-        _target_: torch.nn.MSELoss
-        reduction: 'mean'
-    weights: 
-      masked: 1.0
-
-  metrics:
-    masked: ['pearson', 'spearman', 'mse']
-    
+  cfg:
+    num_regions: 10
+    num_motif: 637
+    embed_dim: 768
+    num_layers: 12
+    num_heads: 12
+    dropout: 0.1
+    output_dim: 800
+    flash_attn: false
+    motif_scanner:
+      num_motif: ${model.cfg.num_motif}
+      include_reverse_complement: true
+      bidirectional_except_ctcf: true
+      motif_prior: true
+      learnable: false
+    atac_attention:
+      motif_dim: 639 # 637 motifs + 2 ctcf
+      pool_method: 'mean'
+      atac_kernel_num: 161
+      atac_kernel_size: 3
+      joint_kernel_num: 161
+      joint_kernel_size: 3
+      final_bn: false
+    region_embed:
+      num_regions: ${model.cfg.num_regions}
+      num_features: 800 # 639 + 161
+      embed_dim: ${model.cfg.embed_dim}
+    encoder:
+      num_heads: ${model.cfg.num_heads}
+      embed_dim: ${model.cfg.embed_dim}
+      num_layers: ${model.cfg.num_layers}
+      drop_path_rate: ${model.cfg.dropout}
+      drop_rate: ${model.cfg.dropout}
+      attn_drop_rate: ${model.cfg.dropout}
+      use_mean_pooling: false
+      flash_attn: ${model.cfg.flash_attn}
+    head_mask:
+      in_features: ${model.cfg.embed_dim}
+      out_features: ${model.cfg.output_dim}
+    mask_token:
+      embed_dim: ${model.cfg.embed_dim}
+      std: 0.02
+    loss:
+      components:
+        masked: 
+          _target_: torch.nn.MSELoss
+          reduction: 'mean'
+      weights: 
+        masked: 1.0
+    metrics:
+      masked: ['pearson', 'spearman', 'mse']
+      
 dataset:
   data_set: "Expression_Finetune_Fetal"
   eval_data_set: "Expression_Finetune_Fetal.fetal_eval"
