@@ -9,6 +9,7 @@ model:
     dropout: 0.1
     output_dim: 800
     flash_attn: false
+    pool_method: 'mean'
     motif_scanner:
       num_motif: ${model.cfg.num_motif}
       include_reverse_complement: true
@@ -22,6 +23,7 @@ model:
       atac_kernel_size: 3
       joint_kernel_num: 161
       joint_kernel_size: 3
+      binary_atac: false
       final_bn: false
     region_embed:
       num_regions: ${model.cfg.num_regions}

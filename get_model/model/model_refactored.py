@@ -202,7 +202,7 @@ class RegressionMetrics(nn.Module):
 
 class BaseGETModel(BaseModule):
     def __init__(self, cfg: BaseConfig):
-        super(BaseGETModel, self).__init__()
+        super(BaseGETModel, self).__init__(cfg)
         self.cfg = cfg
 
     def _init_weights(self, m):
@@ -283,10 +283,10 @@ class GETPretrainConfig:
 class GETPretrain(BaseGETModel):
     def __init__(self, cfg: GETPretrainConfig):
         super().__init__(cfg)
-        self.motif_scanner = MotifScanner(**cfg.motif_scanner)
-        self.atac_attention = ATACSplitPool(**cfg.atac_attention)
-        self.split_pool = SplitPool()
-        self.region_embed = RegionEmbed(**cfg.region_embed)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        self.atac_attention = ATACSplitPool(cfg.atac_attention)
+        self.split_pool = SplitPool(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
         self.encoder = GETTransformer(**cfg.encoder)
         self.head_mask = nn.Linear(**cfg.head_mask)
         self.mask_token = nn.Parameter(torch.zeros(1, 1, cfg.mask_token.embed_dim))
@@ -308,13 +308,13 @@ class GETPretrain(BaseGETModel):
 
     def forward(self, sample_peak_sequence, sample_track, loss_mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
         x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
-        x_region = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
+        # x_region = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
         x_original = self.atac_attention(
-            x, x_region, sample_track, chunk_size, n_peaks, max_n_peaks)
+            x, sample_track, chunk_size, n_peaks, max_n_peaks)
         x = self.region_embed(x_original)
         B, N, C = x_original.shape
         mask_token = self.mask_token.expand(B, N, -1)
-        w = loss_mask.type_as(mask_token)
+        w = loss_mask.type_as(mask_token).unsqueeze(-1)
         x = x * (1 - w) + mask_token * w
         x, _ = self.encoder(x, mask=padding_mask)
         x_masked = self.head_mask(x)
@@ -327,15 +327,16 @@ class GETPretrain(BaseGETModel):
         return pred, obs
     
     def generate_dummy_data(self):
+        B, R, L = 16, 10, 2000
         return {
-            'sample_peak_sequence': torch.randint(0, 4, (16, 1000, 4)),
-            'sample_track': torch.randn(16, 1000, 1),
-            'loss_mask': torch.randint(0, 2, (16, 1000, 1)),
-            'padding_mask': torch.randint(0, 2, (16, 1000, 1)),
-            'chunk_size': torch.randint(0, 1000, (16,)),
-            'n_peaks': torch.randint(0, 1000, (16,)),
-            'max_n_peaks': torch.randint(0, 1000, (16,)),
-            'motif_mean_std': torch.randn(16, 4, 2)
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'sample_track': torch.randn(B, R*L).float().abs(),
+            'loss_mask': torch.randint(0, 2, (16, R)).bool(),
+            'padding_mask': torch.randint(0, 2, (16, R)).bool(),
+            'chunk_size':  torch.Tensor(([L]*R + [0]) * B).int().tolist(),
+            'n_peaks': (torch.zeros(B,) + R).int(),
+            'max_n_peaks': R,
+            'motif_mean_std': torch.randn(B, 2,639).abs().float()
         }
 
 @dataclass
@@ -346,7 +347,7 @@ class GETPretrainMaxNormConfig(GETPretrainConfig):
 class GETPretrainMaxNorm(GETPretrain):
     def __init__(self, cfg: GETPretrainMaxNormConfig):
         super().__init__(cfg)
-        self.atac_attention = ATACSplitPoolMaxNorm(**cfg.atac_attention)
+        self.atac_attention = ATACSplitPoolMaxNorm(cfg.atac_attention)
 
 @dataclass
 class GETFinetuneConfig:
@@ -363,11 +364,11 @@ class GETFinetuneConfig:
 class GETFinetune(BaseGETModel):
     def __init__(self, cfg: GETFinetuneConfig):
         super().__init__(GETFinetune)
-        self.motif_scanner = MotifScanner(**cfg.motif_scanner)
-        self.atac_attention = ATACSplitPool(**cfg.atac_attention)
-        self.region_embed = RegionEmbed(**cfg.region_embed)
-        self.encoder = GETTransformer(**cfg.encoder)
-        self.head_exp = ExpressionHead(**cfg.head_exp, use_atac=cfg.use_atac)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        self.atac_attention = ATACSplitPool(cfg.atac_attention)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp, use_atac=cfg.use_atac)
         self.final_bn = cfg.final_bn
 
         self.apply(self._init_weights)
@@ -412,7 +413,7 @@ class GETFinetuneMaxNormConfig(GETFinetuneConfig):
 class GETFinetuneMaxNorm(GETFinetune):
     def __init__(self, cfg: GETFinetuneMaxNormConfig):
         super().__init__(cfg)
-        self.atac_attention = ATACSplitPoolMaxNorm(**cfg.atac_attention)
+        self.atac_attention = ATACSplitPoolMaxNorm(cfg.atac_attention)
 
 
 @dataclass
@@ -425,8 +426,8 @@ class GETFinetuneChrombpNetBiasConfig:
 class GETFinetuneChrombpNetBias(BaseGETModel):
     def __init__(self, cfg: GETFinetuneChrombpNetBiasConfig):
         super().__init__(GETFinetuneChrombpNetBias)
-        self.motif_scanner = MotifScanner(**cfg.motif_scanner)
-        self.atac_attention = ConvPool(**cfg.atac_attention)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        self.atac_attention = ConvPool(cfg.atac_attention)
 
         self.apply(self._init_weights)
 
@@ -483,7 +484,7 @@ class LitModel(L.LightningModule):
         return model
 
     def forward(self, batch):
-        return self.model(**batch)
+        return self.model(batch)
 
     def _shared_step(self, batch, batch_idx, stage='train'):
         batch = self.model.get_input(batch)
@@ -595,7 +596,7 @@ class GETDataModule(L.LightningDataModule):
 
 @dataclass
 class Config:
-    model: GETPretrainMaxNormConfig = MISSING
+    model: BaseConfig = MISSING
     loss: LossConfig = MISSING
     metrics: MetricsConfig = MISSING
     dataset: DatasetConfig = MISSING

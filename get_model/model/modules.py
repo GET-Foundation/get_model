@@ -49,7 +49,7 @@ class BaseModule(nn.Module):
     def test(self):
         """Test the forward function with dummy data."""
         x = self.generate_dummy_data()
-        return self(x)
+        return self(**x)
 
     def freeze_parameters(self):
         """Freeze module parameters based on the configuration."""
@@ -124,7 +124,7 @@ class MotifScanner(BaseModule):
     """
 
     def __init__(self, cfg: MotifScannerConfig):
-        super().__init__()
+        super().__init__(cfg)
         self.num_kernel = cfg.num_motif
         self.bidirectional_except_ctcf = cfg.bidirectional_except_ctcf
         self.motif_prior = cfg.motif_prior
