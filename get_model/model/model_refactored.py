@@ -31,7 +31,6 @@ from get_model.model.transformer import GETTransformer
 from get_model.optim import create_optimizer
 from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys
 
-
 @dataclass
 class EncoderConfig:
     num_heads: int = MISSING
@@ -179,6 +178,8 @@ class RegressionMetrics(nn.Module):
             return torchmetrics.SpearmanCorrCoef()
         elif metric_name == 'mse':
             return torchmetrics.MeanSquaredError()
+        elif metric_name == 'r2':
+            return torchmetrics.R2Score()
         else:
             raise ValueError(f"Unsupported metric: {metric_name}")
 
@@ -273,7 +274,7 @@ class BaseGETModel(BaseModule):
 
 @dataclass
 class GETPretrainConfig:
-    #_target_: str = "get_model.model.model_refactored.GETPretrain"
+    _target_: str = "get_model.model.model_refactored.GETPretrain"
     motif_scanner: MotifScannerConfig = MISSING
     atac_attention: ATACSplitPoolConfig = MISSING
     region_embed: RegionEmbedConfig = MISSING
@@ -285,7 +286,6 @@ class GETPretrain(BaseGETModel):
         super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
         self.atac_attention = ATACSplitPool(cfg.atac_attention)
-        self.split_pool = SplitPool(cfg)
         self.region_embed = RegionEmbed(cfg.region_embed)
         self.encoder = GETTransformer(**cfg.encoder)
         self.head_mask = nn.Linear(**cfg.head_mask)
@@ -327,21 +327,23 @@ class GETPretrain(BaseGETModel):
         return pred, obs
     
     def generate_dummy_data(self):
-        B, R, L = 16, 10, 2000
+        B, R, L = 2, 10, 200
         return {
             'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
             'sample_track': torch.randn(B, R*L).float().abs(),
-            'loss_mask': torch.randint(0, 2, (16, R)).bool(),
-            'padding_mask': torch.randint(0, 2, (16, R)).bool(),
+            'loss_mask': torch.randint(0, 2, (B, R)).bool(),
+            'padding_mask': torch.randint(0, 2, (B, R)).bool(),
             'chunk_size':  torch.Tensor(([L]*R + [0]) * B).int().tolist(),
             'n_peaks': (torch.zeros(B,) + R).int(),
             'max_n_peaks': R,
             'motif_mean_std': torch.randn(B, 2,639).abs().float()
         }
 
+
+
 @dataclass
 class GETPretrainMaxNormConfig(GETPretrainConfig):
-    #_target_: str = "get_model.model.model_refactored.GETPretrainMaxNorm"
+    _target_: str = "get_model.model.model_refactored.GETPretrainMaxNorm"
     atac_attention: ATACSplitPoolMaxNormConfig = MISSING
 
 class GETPretrainMaxNorm(GETPretrain):
@@ -351,7 +353,7 @@ class GETPretrainMaxNorm(GETPretrain):
 
 @dataclass
 class GETFinetuneConfig:
-    #_target_: str = "get_model.model.model_refactored.GETFinetune"
+    _target_: str = "get_model.model.model_refactored.GETFinetune"
     motif_scanner: MotifScannerConfig = MISSING
     atac_attention: ATACSplitPoolConfig = MISSING
     region_embed: RegionEmbedConfig = MISSING
@@ -363,35 +365,31 @@ class GETFinetuneConfig:
 
 class GETFinetune(BaseGETModel):
     def __init__(self, cfg: GETFinetuneConfig):
-        super().__init__(GETFinetune)
+        super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
         self.atac_attention = ATACSplitPool(cfg.atac_attention)
         self.region_embed = RegionEmbed(cfg.region_embed)
-        self.encoder = GETTransformer(cfg.encoder)
-        self.head_exp = ExpressionHead(cfg.head_exp, use_atac=cfg.use_atac)
-        self.final_bn = cfg.final_bn
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
 
         self.apply(self._init_weights)
 
     def get_input(self, batch):
         return {
-            'peak_seq': batch['sample_peak_sequence'],
-            'atac': batch['sample_track'],
+            'sample_peak_sequence': batch['sample_peak_sequence'],
+            'sample_track': batch['sample_track'],
             'padding_mask': batch['padding_mask'], 
             'chunk_size': batch['chunk_size'],
             'n_peaks': batch['n_peaks'],
             'max_n_peaks': batch['max_n_peaks'],
             'motif_mean_std': batch['motif_mean_std'],
-            'exp#_target': batch['exp#_target']
+            'exp_target': batch['exp_target']
         }
 
-    def forward(self, peak_seq, atac, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
-        x = self.motif_scanner(peak_seq, motif_mean_std)
-        x_original = self.atac_attention(x, atac, chunk_size, n_peaks, max_n_peaks)
+    def forward(self, sample_peak_sequence, sample_track, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+        x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
+        x_original = self.atac_attention(x, sample_track, chunk_size, n_peaks, max_n_peaks)
         x = self.region_embed(x_original)
-
-        for pos_emb_component in self.pos_embed:
-            x = pos_emb_component(x)
 
         x, _ = self.encoder(x, mask=padding_mask)
         exp = F.softplus(self.head_exp(x)) 
@@ -399,14 +397,26 @@ class GETFinetune(BaseGETModel):
 
     def before_loss(self, output, batch):
         pred = {'exp': output}
-        obs = {'exp': batch['exp#_target']}
+        obs = {'exp': batch['exp_target']}
         return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, L = 2, 10, 200
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'sample_track': torch.randn(B, R*L).float().abs(),
+            'padding_mask': torch.randint(0, 2, (B, R)).bool(),
+            'chunk_size':  torch.Tensor(([L]*R + [0]) * B).int().tolist(),
+            'n_peaks': (torch.zeros(B,) + R).int(),
+            'max_n_peaks': R,
+            'motif_mean_std': torch.randn(B, 2,639).abs().float(),
+        }
 
 
 
 @dataclass
 class GETFinetuneMaxNormConfig(GETFinetuneConfig):
-    #_target_: str = "get_model.model.model_refactored.GETFinetuneMaxNorm"
+    _target_: str = "get_model.model.model_refactored.GETFinetuneMaxNorm"
     atac_attention: ATACSplitPoolMaxNormConfig = MISSING
 
 
@@ -418,14 +428,14 @@ class GETFinetuneMaxNorm(GETFinetune):
 
 @dataclass
 class GETFinetuneChrombpNetBiasConfig:
-    #_target_: str = "get_model.model.model_refactored.GETFinetuneChrombpNetBias"
+    _target_: str = "get_model.model.model_refactored.GETFinetuneChrombpNetBias"
     motif_scanner: MotifScannerConfig = MISSING
     atac_attention: ConvPoolConfig = MISSING
 
 
 class GETFinetuneChrombpNetBias(BaseGETModel):
     def __init__(self, cfg: GETFinetuneChrombpNetBiasConfig):
-        super().__init__(GETFinetuneChrombpNetBias)
+        super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
         self.atac_attention = ConvPool(cfg.atac_attention)
 

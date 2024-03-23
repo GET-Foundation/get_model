@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETPretrainMaxNorm
+  _target_: get_model.model.model_refactored.GETFinetune
   cfg:
     num_regions: 10
     num_motif: 637
@@ -7,7 +7,7 @@ model:
     num_layers: 12
     num_heads: 12
     dropout: 0.1
-    output_dim: 800
+    output_dim: 2
     flash_attn: false
     pool_method: 'mean'
     motif_scanner:
@@ -38,9 +38,11 @@ model:
       attn_drop_rate: ${model.cfg.dropout}
       use_mean_pooling: false
       flash_attn: ${model.cfg.flash_attn}
-    head_mask:
-      in_features: ${model.cfg.embed_dim}
-      out_features: ${model.cfg.output_dim}
+    head_exp:
+      embed_dim: ${model.cfg.embed_dim}
+      output_dim: ${model.cfg.output_dim}
+      use_atac: false
+
     mask_token:
       embed_dim: ${model.cfg.embed_dim}
       std: 0.02
@@ -52,7 +54,7 @@ model:
       weights: 
         masked: 1.0
     metrics:
-      masked: ['pearson', 'mse', 'r2']
+      masked: ['pearson', 'spearman', 'mse']
       
 dataset:
   data_set: "Expression_Finetune_Fetal"

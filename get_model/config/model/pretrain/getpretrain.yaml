@@ -1,8 +1,0 @@
-# getpretrain.yaml
-defaults:
-  - template
-
-model:
-  _target_: get_model.model.GETPretrain
-  atac_attention:
-    _target_: get_model.model.pooling.ATACSplitPool

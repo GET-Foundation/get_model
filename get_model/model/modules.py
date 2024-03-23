@@ -14,6 +14,12 @@ from torch import nn
 from get_model.model.motif import parse_meme_file
 
 
+def dict_to_device(dict, device):
+    for key, value in dict.items():
+        if isinstance(value, torch.Tensor):
+            dict[key] = value.to(device)
+    return dict
+
 @dataclass
 class BaseConfig:
     """Dummy configuration class with arbitrary generated values.
@@ -21,7 +27,7 @@ class BaseConfig:
     Args:
         freezed (bool|str): Whether to freeze the parameters. If True, all parameters are freezed.
             If a string, only parameters with the string in their name are freezed. Defaults to False."""
-    #_target_: str = "get_model.model.modules.BaseConfig"
+    _target_: str = "get_model.model.modules.BaseConfig"
     freezed: bool | str = False
 
 
@@ -46,9 +52,11 @@ class BaseModule(nn.Module):
         raise NotImplementedError(
             "Forward function must be implemented in subclasses.")
 
-    def test(self):
+    def test(self, device='cpu'):
         """Test the forward function with dummy data."""
         x = self.generate_dummy_data()
+        self.to(device)
+        x = dict_to_device(x, device)
         return self(**x)
 
     def freeze_parameters(self):
@@ -70,7 +78,7 @@ class RegionEmbedConfig(BaseConfig):
     Args:
         num_features (int): Number of features.
         embed_dim (int): Dimension of the embedding."""
-    #_target_: str = "get_model.smodel.modules.RegionEmbedConfig"
+    _target_: str = "get_model.smodel.modules.RegionEmbedConfig"
     num_features: int = 800
     embed_dim: int = 768
 
@@ -101,7 +109,7 @@ class MotifScannerConfig(BaseConfig):
         bidirectional_except_ctcf (bool): Whether to include reverse complement motifs for all motifs except CTCF.
         motif_prior (bool): Whether to use motif prior.
         learnable (bool): Whether to make the motif scanner learnable."""
-    #_target_: str = "get_model.model.modules.MotifScannerConfig"
+    _target_: str = "get_model.model.modules.MotifScannerConfig"
     num_motif: int = 637
     include_reverse_complement: bool = True
     bidirectional_except_ctcf: bool = False
@@ -210,7 +218,7 @@ class ExpressionHead(BaseModule):
     """Expression head"""
 
     def __init__(self, cfg: ExpressionHeadConfig):
-        super().__init__()
+        super().__init__(cfg)
         self.use_atac = cfg.use_atac
         if self.use_atac:
             self.head = nn.Linear(cfg.embed_dim + 1, cfg.output_dim)
@@ -232,7 +240,7 @@ class ATACHeadConfig(BaseConfig):
         hidden_dim (int): Dimension of the hidden layer.
         output_dim (int): Dimension of the output.
         drop (float): Dropout rate. Defaults to 0.1."""
-    #_target_: str = "get_model.model.modules.ATACHeadConfig"
+    _target_: str = "get_model.model.modules.ATACHeadConfig"
     embed_dim: int = 768
     hidden_dim: int = 256
     output_dim: int = 1
@@ -243,7 +251,7 @@ class ATACHead(BaseModule):
     """ATAC head"""
 
     def __init__(self, cfg: ATACHeadConfig):
-        super().__init__()
+        super().__init__(cfg)
         self.fc1 = nn.Linear(cfg.embed_dim, cfg.hidden_dim)
         self.fc2 = nn.Linear(cfg.hidden_dim, cfg.output_dim)
         self.act = nn.GELU()
@@ -284,7 +292,7 @@ class SplitPoolConfig(BaseConfig):
     Args:
         pool_method (str): The method to pool the tensor. Defaults to 'mean'.
     """
-    #_target_: str = "get_model.model.modules.SplitPoolConfig"
+    _target_: str = "get_model.model.modules.SplitPoolConfig"
     pool_method: str = 'mean'
 
 
@@ -376,7 +384,7 @@ def exponential_linspace_int(start, end, num, divisible_by = 1):
 @dataclass
 class ResidualConfig(BaseConfig):
     """Configuration class for the Residual module."""
-    #_target_: str = "get_model.model.modules.ResidualConfig"
+    _target_: str = "get_model.model.modules.ResidualConfig"
     pass
 
 
@@ -410,7 +418,7 @@ class DilatedConv1dConfig(BaseConfig):
         kernel_size (int): Size of the convolutional kernel. Defaults to 3.
         dilation (int): Dilation factor for the convolution. Defaults to 1.
     """
-    #_target_: str = "get_model.model.modules.DilatedConv1dConfig"
+    _target_: str = "get_model.model.modules.DilatedConv1dConfig"
     dim: int = 64
     kernel_size: int = 3
     dilation: int = 1
@@ -454,7 +462,7 @@ class DilatedConv1dBlockConfig(BaseConfig):
         depth (int): Number of dilated convolution layers. Defaults to 3.
         kernel_size (int): Size of the convolutional kernel. Defaults to 3.
     """
-    #_target_: str = "get_model.model.modules.DilatedConv1dBlockConfig"
+    _target_: str = "get_model.model.modules.DilatedConv1dBlockConfig"
     dim: int = 64
     depth: int = 3
     kernel_size: int = 3
@@ -499,7 +507,7 @@ class ConvPoolConfig(BaseConfig):
         profile_kernel_size (int): Kernel size for the aprofile header. Defaults to 75.
         pool_method (str): Method to pool the tensor. Defaults to 'mean'.
     """
-    #_target_: str = "get_model.model.modules.ConvPoolConfig"
+    _target_: str = "get_model.model.modules.ConvPoolConfig"
     pool_method: str = 'mean'
     motif_dim: int = 639
     hidden_dim: int = 256
@@ -603,7 +611,7 @@ class ATACSplitPoolConfig(BaseConfig):
         final_bn (bool): Whether to apply batch normalization at the end. Defaults to False.
         binary_atac (bool): Whether to binarize the ATAC signal. Defaults to False.
     """
-    #_target_: str = "get_model.model.modules.ATACSplitPoolConfig"
+    _target_: str = "get_model.model.modules.ATACSplitPoolConfig"
     pool_method: str = 'mean'
     motif_dim: int = 639
     atac_kernel_num: int = 161
@@ -741,7 +749,7 @@ class ATACSplitPool(BaseModule):
 
 @dataclass
 class ATACSplitPoolMaxNormConfig(ATACSplitPoolConfig):
-    #_target_: str = "get_model.model.modules.ATACSplitPoolMaxNormConfig"
+    _target_: str = "get_model.model.modules.ATACSplitPoolMaxNormConfig"
     pass
 class ATACSplitPoolMaxNorm(ATACSplitPool):
     """
