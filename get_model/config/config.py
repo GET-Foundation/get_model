@@ -1,48 +1,84 @@
-import os
+from dataclasses import dataclass, field
 
-import yaml
-from pkg_resources import resource_filename
+from omegaconf import MISSING
 
 
-class Config:
-    def __init__(self, config_name):
-        config_file = self._get_config_file_path(config_name)
-        with open(config_file, 'r') as file:
-            self.config = yaml.safe_load(file)
-            # set all config keys as attributes
-            for key, value in self.config.items():
-                setattr(self, key, value)
+@dataclass
+class LossConfig:
+    components: dict = MISSING
+    weights: dict = MISSING
 
-    def get(self, key):
-        return self.config.get(key)
 
-    @staticmethod
-    def _get_config_file_path(config_name):
-        """
-        Get the full path of the config file
+@dataclass
+class MetricsConfig:
+    masked = MISSING
 
-        Parameters
-        ----------
-        config_name : str
-            Name of the config file
 
-        Returns
-        -------
-        str
-            Full path of the config file
-        """
-        config_path = 'config'
-        config_file = f"{config_name}.yaml"
-        full_path = resource_filename(
-            'caesar', os.path.join(config_path, config_file))
+@dataclass
+class DatasetConfig:
+    data_set: str = "Expression_Finetune_Fetal"
+    eval_data_set: str = "Expression_Finetune_Fetal.fetal_eval"
+    data_path: str = "/pmglocal/xf2217/get_data/"
+    batch_size: int = 16
+    num_workers: int = 16
+    n_peaks_lower_bound: int = 5
+    n_peaks_upper_bound: int = 10
+    max_peak_length: int = 5000
+    center_expand_target: int = 500
+    use_insulation: bool = False
+    preload_count: int = 10
+    random_shift_peak: int = 10
+    pin_mem: bool = True
+    peak_name: str = "peaks_q0.01_tissue_open_exp"
+    negative_peak_name: str | None = None
+    n_packs: int = 1
+    leave_out_celltypes: str = "Astrocyte"
+    leave_out_chromosomes: str = "chr4,chr14"
+    dataset_size: int = 4096
+    additional_peak_columns: list = field(default_factory=lambda: [
+                                          'Expression_positive', 'Expression_negative', 'aTPM', 'TSS'])
+    padding: int = 0
+    mask_ratio: float = 0.5
+    insulation_subsample_ratio: int = 1
+    negative_peak_ratio: int = 0
+    peak_inactivation: str | None = None
+    non_redundant: bool = False
+    filter_by_min_depth: bool = False
+    hic_path: str | None = None
 
-        if not os.path.exists(full_path):
-            raise FileNotFoundError(
-                f"Config file {config_file} not found in {config_path}")
 
-        return full_path
+@dataclass
+class OptimizerConfig:
+    lr: float = 0.001
+    min_lr: float = 0.0001
+    weight_decay: float = 0.05
+    opt: str = 'adamw'
+    opt_eps: float = 1e-8
+    opt_betas: list = field(default_factory=lambda: [0.9, 0.95])
 
-    def update_from_args(self, args):
-        for key, value in vars(args).items():
-            if value is not None:
-                setattr(self, key, value)
+
+@dataclass
+class TrainingConfig:
+    num_devices: int = 1
+    save_ckpt_freq: int = 10
+    epochs: int = 100
+    warmup_epochs: int = 5
+    accumulate_grad_batches: int = 1
+    clip_grad: float | None = None
+    use_fp16: bool = True
+    output_dir: str = "/pmglocal/xf2217/output"
+    optimizer: OptimizerConfig = MISSING
+
+
+@dataclass
+class WandbConfig:
+    project_name: str = "pretrain"
+    run_name: str = "experiment_1"
+
+
+@dataclass
+class FinetuneConfig:
+    checkpoint: str | None = None
+    model_prefix: str = "model."
+    patterns_to_freeze: list = field(default_factory=lambda: [
+        "motif_scanner"])
