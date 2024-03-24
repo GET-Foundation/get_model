@@ -213,7 +213,7 @@ class GETPretrain(BaseGETModel):
         x = self.region_embed(x_original)
         B, N, C = x_original.shape
         mask_token = self.mask_token.expand(B, N, -1)
-        w = loss_mask.type_as(mask_token).unsqueeze(-1)
+        w = loss_mask.type_as(mask_token)
         x = x * (1 - w) + mask_token * w
         x, _ = self.encoder(x, mask=padding_mask)
         x_masked = self.head_mask(x)
@@ -230,7 +230,7 @@ class GETPretrain(BaseGETModel):
         return {
             'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
             'sample_track': torch.randn(B, R*L).float().abs(),
-            'loss_mask': torch.randint(0, 2, (B, R)).bool(),
+            'loss_mask': torch.randint(0, 2, (B, R)).bool().unsqueeze(-1),
             'padding_mask': torch.randint(0, 2, (B, R)).bool(),
             'chunk_size':  torch.Tensor(([L]*R + [0]) * B).int().tolist(),
             'n_peaks': (torch.zeros(B,) + R).int(),

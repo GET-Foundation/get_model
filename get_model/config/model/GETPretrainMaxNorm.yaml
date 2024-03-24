@@ -1,5 +1,5 @@
 defaults:
-  - template
+  - GETPretrain
   - _self_
 
 model:

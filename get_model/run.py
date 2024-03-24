@@ -17,9 +17,11 @@ from omegaconf import MISSING, DictConfig
 from get_model.config.config import (DatasetConfig, FinetuneConfig, LossConfig,
                                      MetricsConfig, TrainingConfig, OptimizerConfig,
                                      WandbConfig)
+
 from get_model.dataset.collate import get_rev_collate_fn
 from get_model.dataset.dataset import build_dataset_zarr
-from get_model.model.modules import BaseConfig
+from get_model.model.modules import *
+from get_model.model.model_refactored import *
 from get_model.optim import create_optimizer
 from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys
 
@@ -43,9 +45,6 @@ cs.store(group="training", name="base_training", node=TrainingConfig)
 cs.store(group="training.optimizer", name="base_optimizer", node=OptimizerConfig)
 cs.store(group="wandb", name="base_wandb", node=WandbConfig)
 cs.store(group="finetune", name="base_finetune", node=FinetuneConfig)
-# cs.store(group="model", name="base_finetune_model", node=GETFinetuneConfig)
-# cs.store(group="model.head_exp", name="base_expression_head", node=ExpressionHeadConfig)
-# cs.store(group="model", name="base_finetune_chrombpnet_bias_model", node=GETFinetuneChrombpNetBiasConfig)
 
 
 class LitModel(L.LightningModule):
@@ -77,7 +76,7 @@ class LitModel(L.LightningModule):
         return model
 
     def forward(self, batch):
-        return self.model(batch)
+        return self.model(**batch)
 
     def _shared_step(self, batch, batch_idx, stage='train'):
         batch = self.model.get_input(batch)
@@ -186,14 +185,12 @@ class GETDataModule(L.LightningDataModule):
             drop_last=True,
             collate_fn=get_rev_collate_fn,
         )
+    
+# cs.store(group="model", name="base_finetune_model", node=GETFinetuneConfig)
+# cs.store(group="model.head_exp", name="base_expression_head", node=ExpressionHeadConfig)
+# cs.store(group="model", name="base_finetune_chrombpnet_bias_model", node=GETFinetuneChrombpNetBiasConfig)
 
-# cs.store(group="model", name="base_model", node=GETPretrainMaxNormConfig)
-# cs.store(group="model.motif_scanner", name="base_motif_scanner", node=MotifScannerConfig)
-# cs.store(group="model.atac_attention", name="base_atac_attention", node=ATACSplitPoolMaxNormConfig)
-# cs.store(group="model.region_embed", name="base_region_embed", node=RegionEmbedConfig)
-# cs.store(group="model.encoder", name="base_encoder", node=EncoderConfig)
-
-def run(cfg: DictConfig, cs: ConfigStore = cs):
+def run(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
     model = LitModel(cfg)
     trainer = L.Trainer(
@@ -217,23 +214,29 @@ def run(cfg: DictConfig, cs: ConfigStore = cs):
 
     trainer.fit(model)
 
-@hydra.main(config_path="../config/model/pretrain", config_name="GETPretrain", version_base="1.3")
+@hydra.main(config_path="config/model/pretrain", config_name="GETPretrain", version_base="1.3")
 def get_pretrain(cfg: DictConfig):
+
     run(cfg)
 
-@hydra.main(config_path="../config/model/pretrain", config_name="GETPretrainMaxNorm", version_base="1.3")
+@hydra.main(config_path="config", config_name="pretrain_pc", version_base="1.3")
 def get_pretrain_maxnorm(cfg: DictConfig):
+    cs.store(group="model", name="base_model", node=GETPretrainMaxNormConfig)
+    cs.store(group="model.motif_scanner", name="base_motif_scanner", node=MotifScannerConfig)
+    cs.store(group="model.atac_attention", name="base_atac_attention", node=ATACSplitPoolMaxNormConfig)
+    cs.store(group="model.region_embed", name="base_region_embed", node=RegionEmbedConfig)
+    cs.store(group="model.encoder", name="base_encoder", node=EncoderConfig)
     run(cfg)
 
-@hydra.main(config_path="../config/model/finetune", config_name="GETFinetune", version_base="1.3")
+@hydra.main(config_path="config/model/finetune", config_name="GETFinetune", version_base="1.3")
 def get_finetune(cfg: DictConfig):
     run(cfg)
 
-@hydra.main(config_path="../config/model/finetune", config_name="GETFinetuneMaxNorm", version_base="1.3")
+@hydra.main(config_path="config/model/finetune", config_name="GETFinetuneMaxNorm", version_base="1.3")
 def get_finetune_maxnorm(cfg: DictConfig):
     run(cfg)
 
-@hydra.main(config_path="../config/model/finetune", config_name="GETFinetuneChrombpNetBias", version_base="1.3")
+@hydra.main(config_path="config/model/finetune", config_name="GETFinetuneChrombpNetBias", version_base="1.3")
 def get_finetune_chrombpnet_bias(cfg: DictConfig):
     run(cfg)
 
@@ -241,4 +244,4 @@ def get_finetune_chrombpnet_bias(cfg: DictConfig):
 
 
 if __name__ == "__main__":
-    get_pretrain()
+    get_pretrain_maxnorm()

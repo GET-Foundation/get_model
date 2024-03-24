@@ -1,5 +1,5 @@
 defaults:
-  - template
+  - GETFinetune
   - _self_
 
 model:
