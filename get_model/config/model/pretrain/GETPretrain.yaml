@@ -1,6 +1,7 @@
 # getpretrain.yaml
 defaults:
   - template
+  - _self_
 
 model:
   _target_: get_model.model.model_refactored.GETPretrain

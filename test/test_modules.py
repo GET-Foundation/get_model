@@ -30,7 +30,7 @@ def test_GETPretrainMaxNorm():
 def test_GETFinetune():
     clear_hydra()  # Clear Hydra's global state before initialization
     with initialize(config_path="../get_model/config/model/finetune", version_base='1.3'):
-        cfg = compose(config_name="template")
+        cfg = compose(config_name="GETFinetune")
 
         model = instantiate(cfg.model)
         assert model.test() is not None, "Model test method should return a non-None result"
