@@ -16,7 +16,7 @@ from get_model.model.modules import (ATACSplitPool, ATACSplitPoolConfig,
                                      ExpressionHead, ExpressionHeadConfig,
                                      MotifScanner, MotifScannerConfig,
                                      RegionEmbed, RegionEmbedConfig, SplitPool,
-                                     SplitPoolConfig)
+                                     SplitPoolConfig, dict_to_device)
 from get_model.model.transformer import GETTransformer
 
 
@@ -343,8 +343,8 @@ class GETChrombpNetBias(BaseGETModel):
 
     def get_input(self, batch):
         return {
-            'peak_seq': batch['sample_peak_sequence'],
-            'atac': batch['sample_track'],
+            'sample_peak_sequence': batch['sample_peak_sequence'],
+            'sample_track': batch['sample_track'],
             'padding_mask': batch['padding_mask'],
             'chunk_size': batch['chunk_size'],
             'n_peaks': batch['n_peaks'],
@@ -352,16 +352,78 @@ class GETChrombpNetBias(BaseGETModel):
             'motif_mean_std': batch['motif_mean_std'],
             'other_labels': batch.get('other_labels', None),
         }
+    
+    def crop_output(aprofile, aprofile_target, B, R, target_length=1000):
+        # crop aprofile to center 1000bp, assume the input is (B, R, L)
+        B, R, L = aprofile.shape
+        if aprofile.shape[1] != aprofile_target.shape[1]:
+            current_length = aprofile.shape[2]
+            diff_length = current_length - target_length
+            assert diff_length % 2 == 0
+            crop_size = diff_length // 2
+            aprofile = aprofile[:,:,crop_size:crop_size+target_length]
+            aprofile_target = aprofile_target.reshape(B, R, -1)
+            diff_length = aprofile_target.shape[2] - target_length
+            assert diff_length % 2 == 0
+            crop_size = diff_length // 2
+            aprofile_target = aprofile_target[:,:,crop_size:crop_size+target_length]
+        return aprofile, aprofile_target
 
-    def forward(self, peak_seq, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
-        x = self.motif_scanner(peak_seq, motif_mean_std)
+    def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+        x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
         atpm, aprofile = self.atac_attention(
             x, chunk_size, n_peaks, max_n_peaks)
-        return atpm, aprofile
+        return {'atpm': atpm, 'aprofile': aprofile}
 
     def before_loss(self, output, batch):
-        pred = {'atpm': output[0], 'atac_profile': output[1]}
-        obs = {'atpm': batch['atpm'], 'atac_profile': batch['atac_profile']}
+        pred = output
+        B, R, N = pred['atpm'].shape
+        obs = {'atpm': batch['other_labels'][:, :, 0], 'atac_profile': batch['sample_track']}
+        pred['aprofile'], obs['aprofile'] = self.crop_output(pred['aprofile'], obs['atac_profile'], B, R)
         return pred, obs
+    
+    def generate_dummy_data(self):
+        B, R, L = 2, 1, 2000
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'chunk_size':  torch.Tensor(([L]*R + [0]) * B).int().tolist(),
+            'n_peaks': (torch.zeros(B,) + R).int(),
+            'max_n_peaks': R,
+            'motif_mean_std': torch.randn(B, 2, 639).abs().float(),
+        }
 
 
+@dataclass
+class GETChrombpNetConfig(GETChrombpNetBiasConfig):
+    _target_: str = "get_model.model.model_refactored.GETChrombpNet"
+    motif_scanner: MotifScannerConfig = MISSING
+    atac_attention: ConvPoolConfig = MISSING
+    with_bias: bool = False
+    bias_model: GETChrombpNetBiasConfig = MISSING
+    bias_ckpt: str = None
+
+class GETChrombpNet(GETChrombpNetBias):
+    def __init__(self, cfg: GETChrombpNetConfig):
+        super().__init__(cfg)
+        self.with_bias = cfg.with_bias
+        self.bias_model = cfg.bias_model
+        if cfg.bias_ckpt is not None:
+            checkpoint = torch.load(cfg.bias_ckpt, map_location="cpu")
+            self.bias_model.load_state_dict(checkpoint["model"])
+            for param in self.bias_model.parameters():
+                param.requires_grad = False
+
+        self.apply(self._init_weights)
+
+    def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+        x = self.motif_scanner(sample_peak_sequence)
+        atpm, aprofile = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+        if self.with_bias:
+            bias_atpm, bias_aprofile = self.bias_model(sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
+            atpm = torch.logsumexp(torch.stack([atpm, bias_atpm], dim=0), dim=0)
+            diff_length = aprofile.shape[1] - bias_aprofile.shape[1]
+            crop_length = diff_length // 2
+            bias_aprofile = F.pad(bias_aprofile, (crop_length, diff_length - crop_length), "constant", 0)
+            aprofile = aprofile + bias_aprofile
+        return atpm, aprofile
+    

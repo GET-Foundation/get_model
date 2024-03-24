@@ -1,14 +1,12 @@
 import math
 import os
 from dataclasses import dataclass
-from token import AT
 from typing import List, Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops.layers.torch import Rearrange
 from torch import nn
 
 from get_model.model.motif import parse_meme_file
@@ -463,8 +461,8 @@ class DilatedConv1dBlockConfig(BaseConfig):
         kernel_size (int): Size of the convolutional kernel. Defaults to 3.
     """
     _target_: str = "get_model.model.modules.DilatedConv1dBlockConfig"
-    dim: int = 64
-    depth: int = 3
+    hidden_dim: int = 64
+    depth: int = 7
     kernel_size: int = 3
 
 
@@ -476,7 +474,7 @@ class DilatedConv1dBlock(BaseModule):
         self.layers = nn.ModuleList([])
         for i in range(cfg.depth):
             dilation = 2 ** (i + 1)
-            self.layers.append(DilatedConv1d(DilatedConv1dConfig(cfg.dim, cfg.kernel_size, dilation)))
+            self.layers.append(DilatedConv1d(DilatedConv1dConfig(dim=cfg.hidden_dim, kernel_size=cfg.kernel_size, dilation=dilation)))
 
     def forward(self, x):
         """
@@ -529,7 +527,7 @@ class ConvPool(BaseModule):
         super().__init__(cfg)
         self.pool_method = cfg.pool_method
         self.motif_proj = nn.Conv1d(cfg.motif_dim, cfg.hidden_dim, 1, bias=True)
-        self.dila_conv_tower = DilatedConv1dBlock(DilatedConv1dBlockConfig(dim=cfg.hidden_dim, depth=cfg.n_dil_layers))
+        self.dila_conv_tower = DilatedConv1dBlock(DilatedConv1dBlockConfig(hidden_dim=cfg.hidden_dim, depth=cfg.n_dil_layers))
         self.aprofile_header = nn.Conv1d(cfg.hidden_dim, 1, cfg.profile_kernel_size, padding='valid')
         self.atpm_header = nn.Linear(cfg.hidden_dim, 1)
 

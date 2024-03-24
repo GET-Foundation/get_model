@@ -2,8 +2,6 @@ import logging
 import os
 import os.path
 
-from get_model.dataset.augmentation import (DataAugmentationForGETPeak,
-                                            DataAugmentationForGETPeakFinetune)
 from get_model.dataset.zarr_dataset import DenseZarrIO
 from get_model.dataset.zarr_dataset import \
     PretrainDataset
