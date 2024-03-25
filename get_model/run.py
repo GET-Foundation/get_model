@@ -86,7 +86,7 @@ class LitModel(L.LightningModule):
     def configure_optimizers(self):
         optimizer = create_optimizer(self.cfg.optimizer, self.model)
         num_training_steps_per_epoch = (
-            self.cfg.dataset.dataset_size // self.cfg.dataset.batch_size // self.cfg.training.num_devices
+            self.cfg.dataset.dataset_size // self.cfg.dataset.batch_size // self.cfg.machine.num_devices
         )
         schedule = cosine_scheduler(
             base_value=self.cfg.optimizer.lr,
