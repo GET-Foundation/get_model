@@ -16,7 +16,8 @@ n_packs: 1
 leave_out_celltypes: "k562"
 leave_out_chromosomes: "chr4,chr14"
 
-additional_peak_columns: ['Expression_positive', 'Expression_negative', 'aTPM', 'TSS']
+additional_peak_columns:
+  ["Expression_positive", "Expression_negative", "aTPM", "TSS"]
 padding: 0
 mask_ratio: 0.5
 insulation_subsample_ratio: 1

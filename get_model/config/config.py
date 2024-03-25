@@ -9,16 +9,22 @@ from get_model.model.model_refactored import BaseGETModelConfig, GETChrombpNetBi
 
 T = TypeVar("T")
 
+
 def default_cfg():
     return field(default_factory=T)
 
+
 def get_target_from_class_name(class_name: str) -> str:
-    return f"get_model.model.model_refactored.{class_name}" #TODO change this to the correct path
+    # TODO change this to the correct path
+    return f"get_model.model.model_refactored.{class_name}"
+
 
 @dataclass
 class ModelConfig(Generic[T]):
-    _target_: str = field(default_factory=lambda: get_target_from_class_name(T.__name__))
+    _target_: str = field(
+        default_factory=lambda: get_target_from_class_name(T.__name__))
     cfg: T = default_cfg()
+
 
 @dataclass
 class DatasetConfig:
@@ -54,7 +60,6 @@ class DatasetConfig:
     eval_dataset_size: int = 4096
 
 
-
 @dataclass
 class OptimizerConfig:
     lr: float = 0.001
@@ -88,12 +93,14 @@ class FinetuneConfig:
     patterns_to_freeze: list = field(default_factory=lambda: [
         "motif_scanner"])
 
+
 @dataclass
 class MachineConfig:
     codebase: str = MISSING
     data_path: str = MISSING
     output_dir: str = MISSING
     num_devices: int = 1
+
 
 @dataclass
 class Config:
@@ -106,7 +113,7 @@ class Config:
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
-    
+
+
 cs = ConfigStore.instance()
 cs.store(name="base_config", node=Config)
-

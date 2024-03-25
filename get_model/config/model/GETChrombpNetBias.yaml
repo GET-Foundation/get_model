@@ -15,12 +15,11 @@ model:
       profile_kernel_size: 75
     loss:
       components:
-        masked: 
+        masked:
           _target_: torch.nn.MSELoss
-          reduction: 'mean'
-      weights: 
+          reduction: "mean"
+      weights:
         masked: 1.0
     metrics:
       components:
-        masked: ['pearson', 'spearman', 'mse']
-      
+        masked: ["pearson", "spearman", "mse"]

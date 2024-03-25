@@ -31,5 +31,4 @@ dataset_configs:
     leave_out_celltypes: "k562"
     leave_out_chromosomes: "chr4,chr14"
 
-
   # Add more dataset configurations as needed

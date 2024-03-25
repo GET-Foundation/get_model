@@ -18,6 +18,7 @@ def dict_to_device(dict, device):
             dict[key] = value.to(device)
     return dict
 
+
 @dataclass
 class BaseConfig:
     """Dummy configuration class with arbitrary generated values.
@@ -95,6 +96,7 @@ class RegionEmbed(BaseModule):
 
     def generate_dummy_data(self, batch_size=1):
         return torch.rand(batch_size, 5, self.cfg.num_features)
+
 
 @dataclass
 class MotifScannerConfig(BaseConfig):
@@ -265,8 +267,6 @@ class ATACHead(BaseModule):
         return x
 
 
-
-
 def pool(x, method='mean'):
     """
     x: (L,D)
@@ -309,10 +309,10 @@ class SplitPool(BaseModule):
         super().__init__(cfg)
         self.pool_method = cfg.pool_method
 
-    def forward(self, 
-                x: torch.Tensor, 
-                chunk_size: int | List[int], 
-                n_peaks: torch.Tensor, 
+    def forward(self,
+                x: torch.Tensor,
+                chunk_size: int | List[int],
+                n_peaks: torch.Tensor,
                 max_n_peaks: int):
         """
         Args:
@@ -333,11 +333,13 @@ class SplitPool(BaseModule):
         pool_start = torch.cat([pool_left_pad, pool_idx[:-1]])
         pool_end = pool_idx - 1
 
-        pool_list = [chunk_list[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
+        pool_list = [chunk_list[pool_start[i]:pool_end[i]]
+                     for i in range(len(pool_start))]
         x = torch.stack([
             torch.cat([
                 pool_list[i],
-                torch.zeros(max_n_peaks - n_peaks[i], embed_dim).to(pool_list[i].device)
+                torch.zeros(
+                    max_n_peaks - n_peaks[i], embed_dim).to(pool_list[i].device)
             ])
             for i in range(len(pool_list))
         ])
@@ -370,14 +372,15 @@ class SplitPool(BaseModule):
         chunk_size = [peak_len] * batch_size * max_n_peaks
         x = torch.rand(batch_size, total_length, embed_dim)
         return x, chunk_size, n_peaks, max_n_peaks
-    
-    
-def exponential_linspace_int(start, end, num, divisible_by = 1):
+
+
+def exponential_linspace_int(start, end, num, divisible_by=1):
     def _round(x):
         return int(round(x / divisible_by) * divisible_by)
 
     base = math.exp(math.log(end / start) / (num - 1))
     return [_round(start * base**i) for i in range(num)]
+
 
 @dataclass
 class ResidualConfig(BaseConfig):
@@ -404,7 +407,8 @@ class Residual(BaseModule):
 
     def generate_dummy_data(self, batch_size=1):
         # Implement the dummy data generation based on the inner function
-        raise NotImplementedError("Dummy data generation for Residual module is not implemented.")
+        raise NotImplementedError(
+            "Dummy data generation for Residual module is not implemented.")
 
 
 @dataclass
@@ -427,7 +431,8 @@ class DilatedConv1d(BaseModule):
 
     def __init__(self, cfg: DilatedConv1dConfig):
         super().__init__(cfg)
-        self.conv = nn.Conv1d(cfg.dim, cfg.dim, cfg.kernel_size, padding='valid', dilation=cfg.dilation)
+        self.conv = nn.Conv1d(cfg.dim, cfg.dim, cfg.kernel_size,
+                              padding='valid', dilation=cfg.dilation)
         self.activation = nn.ReLU()
 
     def forward(self, x):
@@ -440,7 +445,7 @@ class DilatedConv1d(BaseModule):
         """
         out = self.conv(x)
         diff_length = x.shape[-1] - out.shape[-1]
-        assert(diff_length % 2 == 0)
+        assert (diff_length % 2 == 0)
         crop_size = diff_length // 2
         x = x[..., crop_size:-crop_size]
         return self.activation(out) + x
@@ -474,7 +479,8 @@ class DilatedConv1dBlock(BaseModule):
         self.layers = nn.ModuleList([])
         for i in range(cfg.depth):
             dilation = 2 ** (i + 1)
-            self.layers.append(DilatedConv1d(DilatedConv1dConfig(dim=cfg.hidden_dim, kernel_size=cfg.kernel_size, dilation=dilation)))
+            self.layers.append(DilatedConv1d(DilatedConv1dConfig(
+                dim=cfg.hidden_dim, kernel_size=cfg.kernel_size, dilation=dilation)))
 
     def forward(self, x):
         """
@@ -523,12 +529,16 @@ class ConvPool(BaseModule):
     splitting can be calculated by cumsum of the padded peak lengths. The output
     is a tensor of shape (batch, n_peak, dimension).
     """
+
     def __init__(self, cfg: ConvPoolConfig):
         super().__init__(cfg)
         self.pool_method = cfg.pool_method
-        self.motif_proj = nn.Conv1d(cfg.motif_dim, cfg.hidden_dim, 1, bias=True)
-        self.dila_conv_tower = DilatedConv1dBlock(DilatedConv1dBlockConfig(hidden_dim=cfg.hidden_dim, depth=cfg.n_dil_layers))
-        self.aprofile_header = nn.Conv1d(cfg.hidden_dim, 1, cfg.profile_kernel_size, padding='valid')
+        self.motif_proj = nn.Conv1d(
+            cfg.motif_dim, cfg.hidden_dim, 1, bias=True)
+        self.dila_conv_tower = DilatedConv1dBlock(DilatedConv1dBlockConfig(
+            hidden_dim=cfg.hidden_dim, depth=cfg.n_dil_layers))
+        self.aprofile_header = nn.Conv1d(
+            cfg.hidden_dim, 1, cfg.profile_kernel_size, padding='valid')
         self.atpm_header = nn.Linear(cfg.hidden_dim, 1)
 
     def forward(self, x, peak_split, n_peaks, max_n_peaks):
@@ -550,7 +560,8 @@ class ConvPool(BaseModule):
         if torch.all(n_peaks == max_n_peaks) and np.unique(peak_split).shape[0] == 2:
             peak_size = np.unique(peak_split).max()
             num_peaks = n_peaks[0]
-            x = x.reshape(batch * num_peaks, peak_size, motif_dim).transpose(1, 2)
+            x = x.reshape(batch * num_peaks, peak_size,
+                          motif_dim).transpose(1, 2)
             peak_profile = self.dila_conv_tower(x)
             peak_atpm = peak_profile.mean(2)
             peak_profile = self.aprofile_header(peak_profile)
@@ -560,14 +571,16 @@ class ConvPool(BaseModule):
             peak_profile = F.softplus(peak_profile)
             return peak_atpm, peak_profile
         else:
-            peak_list = torch.split(x.reshape(-1, motif_dim), peak_split, dim=0)
+            peak_list = torch.split(
+                x.reshape(-1, motif_dim), peak_split, dim=0)
             peak_atpm_list = []
             peak_profiles = []
             for peak in peak_list:
                 if peak.shape[0] == 0:
                     peak_profiles.append(torch.zeros(0).to(peak.device))
                     continue
-                peak_profile = self.dila_conv_tower(peak.unsqueeze(0).transpose(1, 2))
+                peak_profile = self.dila_conv_tower(
+                    peak.unsqueeze(0).transpose(1, 2))
                 peak_atpm = peak_profile.mean(2)
                 peak_profile = self.aprofile_header(peak_profile).squeeze(0)
                 peak_atpm_list.append(peak_atpm)
@@ -580,8 +593,10 @@ class ConvPool(BaseModule):
             pool_left_pad = torch.tensor(0).unsqueeze(0).to(pool_idx.device)
             pool_start = torch.cat([pool_left_pad, pool_idx[:-1]])
             pool_end = pool_idx - 1
-            pool_list = [peak_atpm[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
-            peak_atpms = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks - n_peaks[i], 1).to(pool_list[i].device)]) for i in range(len(pool_list))])
+            pool_list = [peak_atpm[pool_start[i]:pool_end[i]]
+                         for i in range(len(pool_start))]
+            peak_atpms = torch.stack([torch.cat([pool_list[i], torch.zeros(
+                max_n_peaks - n_peaks[i], 1).to(pool_list[i].device)]) for i in range(len(pool_list))])
             return peak_atpms, peak_profiles
 
     def generate_dummy_data(self, batch_size=1):
@@ -592,8 +607,8 @@ class ConvPool(BaseModule):
         peak_split = torch.randint(50, 100, (max_n_peaks,))
         x = torch.rand(batch_size, length, motif_dim)
         return x, peak_split, n_peaks, max_n_peaks
-    
-    
+
+
 @dataclass
 class ATACSplitPoolConfig(BaseConfig):
     """Configuration class for the ATACSplitPool module.
@@ -629,16 +644,20 @@ class ATACSplitPool(BaseModule):
     splitting can be calculated by cumsum of the padded peak lengths. The output
     is a tensor of shape (batch, n_peak, dimension).
     """
+
     def __init__(self, cfg: ATACSplitPoolConfig):
         super().__init__(cfg)
         self.pool_method = cfg.pool_method
-        self.atac_conv = nn.Conv1d(1, cfg.atac_kernel_num, cfg.atac_kernel_size, padding="same", bias=False)
+        self.atac_conv = nn.Conv1d(
+            1, cfg.atac_kernel_num, cfg.atac_kernel_size, padding="same", bias=False)
         self.atac_bn = nn.BatchNorm1d(cfg.atac_kernel_num, affine=False)
-        self.joint_conv = nn.Conv1d(cfg.motif_dim + cfg.atac_kernel_num, cfg.joint_kernel_num, cfg.joint_kernel_size, padding="same", bias=False)
+        self.joint_conv = nn.Conv1d(cfg.motif_dim + cfg.atac_kernel_num,
+                                    cfg.joint_kernel_num, cfg.joint_kernel_size, padding="same", bias=False)
         self.joint_bn = nn.BatchNorm1d(cfg.joint_kernel_num, affine=False)
         self.patch_pool = nn.MaxPool1d(25, stride=25)
         if cfg.final_bn:
-            self.final_bn = nn.BatchNorm1d(cfg.motif_dim + cfg.joint_kernel_num, affine=False)
+            self.final_bn = nn.BatchNorm1d(
+                cfg.motif_dim + cfg.joint_kernel_num, affine=False)
         self.binary_atac = cfg.binary_atac
 
     def forward(self, x, atac, peak_split, n_peaks, max_n_peaks):
@@ -659,7 +678,8 @@ class ATACSplitPool(BaseModule):
             atac = torch.log10(atac + 1)
 
         x_region = self.forward_x(x, peak_split, n_peaks, max_n_peaks)
-        joint_region = self.forward_joint(x, atac, peak_split, n_peaks, max_n_peaks)
+        joint_region = self.forward_joint(
+            x, atac, peak_split, n_peaks, max_n_peaks)
 
         joint_region = torch.log2(joint_region + 1)
         x = torch.cat([x_region, joint_region], dim=2).contiguous()
@@ -698,15 +718,19 @@ class ATACSplitPool(BaseModule):
         x_pooled = F.relu(x_pooled).transpose(1, 2)
         batch, length, embed_dim = x_pooled.shape
 
-        chunk_list = torch.split(x_pooled.reshape(-1, embed_dim), patch_peak_split, dim=0)
-        chunk_list = torch.vstack([pool(chunk, self.pool_method) for chunk in chunk_list])
+        chunk_list = torch.split(
+            x_pooled.reshape(-1, embed_dim), patch_peak_split, dim=0)
+        chunk_list = torch.vstack(
+            [pool(chunk, self.pool_method) for chunk in chunk_list])
 
         pool_idx = torch.cumsum(n_peaks + 1, 0)
         pool_left_pad = torch.tensor(0).unsqueeze(0).to(pool_idx.device)
         pool_start = torch.cat([pool_left_pad, pool_idx[:-1]])
         pool_end = pool_idx - 1
-        pool_list = [chunk_list[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
-        x_pooled = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks - n_peaks[i], embed_dim).to(pool_list[i].device)]) for i in range(len(pool_list))])
+        pool_list = [chunk_list[pool_start[i]:pool_end[i]]
+                     for i in range(len(pool_start))]
+        x_pooled = torch.stack([torch.cat([pool_list[i], torch.zeros(
+            max_n_peaks - n_peaks[i], embed_dim).to(pool_list[i].device)]) for i in range(len(pool_list))])
 
         return x_pooled
 
@@ -723,14 +747,17 @@ class ATACSplitPool(BaseModule):
         """
         batch, length, embed_dim = x.shape
         chunk_list = torch.split(x.reshape(-1, embed_dim), peak_split, dim=0)
-        chunk_list = torch.vstack([pool(chunk, self.pool_method) for chunk in chunk_list])
+        chunk_list = torch.vstack(
+            [pool(chunk, self.pool_method) for chunk in chunk_list])
 
         pool_idx = torch.cumsum(n_peaks + 1, 0)
         pool_left_pad = torch.tensor(0).unsqueeze(0).to(pool_idx.device)
         pool_start = torch.cat([pool_left_pad, pool_idx[:-1]])
         pool_end = pool_idx - 1
-        pool_list = [chunk_list[pool_start[i]:pool_end[i]] for i in range(len(pool_start))]
-        x = torch.stack([torch.cat([pool_list[i], torch.zeros(max_n_peaks - n_peaks[i], embed_dim).to(pool_list[i].device)]) for i in range(len(pool_list))])
+        pool_list = [chunk_list[pool_start[i]:pool_end[i]]
+                     for i in range(len(pool_start))]
+        x = torch.stack([torch.cat([pool_list[i], torch.zeros(
+            max_n_peaks - n_peaks[i], embed_dim).to(pool_list[i].device)]) for i in range(len(pool_list))])
 
         return x
 
@@ -744,10 +771,13 @@ class ATACSplitPool(BaseModule):
         atac = torch.rand(batch_size, length, 1)
         return x, atac, peak_split, n_peaks, max_n_peaks
 
+
 @dataclass
 class ATACSplitPoolMaxNormConfig(ATACSplitPoolConfig):
     _target_: str = "get_model.model.modules.ATACSplitPoolMaxNormConfig"
     pass
+
+
 class ATACSplitPoolMaxNorm(ATACSplitPool):
     """
     Receive a tensor of shape (batch, length, dimension) and split along length
@@ -758,10 +788,12 @@ class ATACSplitPoolMaxNorm(ATACSplitPool):
     splitting can be calculated by cumsum of the padded peak lengths. The output
     is a tensor of shape (batch, n_peak, dimension).
     """
+
     def __init__(self, cfg: ATACSplitPoolMaxNormConfig):
         super().__init__(cfg)
         self.register_buffer('running_max', torch.ones(cfg.motif_dim))
-        self.register_buffer('running_max_joint', torch.ones(cfg.joint_kernel_num))
+        self.register_buffer('running_max_joint',
+                             torch.ones(cfg.joint_kernel_num))
 
     def forward(self, x, atac, peak_split, n_peaks, max_n_peaks):
         if self.binary_atac:
@@ -770,14 +802,19 @@ class ATACSplitPoolMaxNorm(ATACSplitPool):
             atac = atac / (atac.max(1, keepdim=True)[0] + 1e-5)
 
         x_region = self.forward_x(x, peak_split, n_peaks, max_n_peaks)
-        joint_region = self.forward_joint(x, atac, peak_split, n_peaks, max_n_peaks)
+        joint_region = self.forward_joint(
+            x, atac, peak_split, n_peaks, max_n_peaks)
 
         with torch.no_grad():
-            self.running_max = torch.max(self.running_max, torch.max(x_region.view(-1, self.cfg.motif_dim), dim=0).values)
-            self.running_max_joint = torch.max(self.running_max_joint, torch.max(joint_region.view(-1, self.cfg.joint_kernel_num), dim=0).values)
+            self.running_max = torch.max(self.running_max, torch.max(
+                x_region.view(-1, self.cfg.motif_dim), dim=0).values)
+            self.running_max_joint = torch.max(self.running_max_joint, torch.max(
+                joint_region.view(-1, self.cfg.joint_kernel_num), dim=0).values)
 
-        x_region = x_region / (self.running_max.unsqueeze(0).unsqueeze(0) + 1e-5)
-        joint_region = joint_region / (self.running_max_joint.unsqueeze(0).unsqueeze(0) + 1e-5)
+        x_region = x_region / \
+            (self.running_max.unsqueeze(0).unsqueeze(0) + 1e-5)
+        joint_region = joint_region / \
+            (self.running_max_joint.unsqueeze(0).unsqueeze(0) + 1e-5)
 
         x = torch.cat([x_region, joint_region], dim=2).contiguous()
 

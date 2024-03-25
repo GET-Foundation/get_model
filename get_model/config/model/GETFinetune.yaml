@@ -9,7 +9,7 @@ model:
     dropout: 0.1
     output_dim: 2
     flash_attn: false
-    pool_method: 'mean'
+    pool_method: "mean"
     motif_scanner:
       num_motif: ${model.cfg.num_motif}
       include_reverse_complement: true
@@ -18,7 +18,7 @@ model:
       learnable: false
     atac_attention:
       motif_dim: 639 # 637 motifs + 2 ctcf
-      pool_method: 'mean'
+      pool_method: "mean"
       atac_kernel_num: 161
       atac_kernel_size: 3
       joint_kernel_num: 161
@@ -48,13 +48,12 @@ model:
       std: 0.02
     loss:
       components:
-        exp: 
+        exp:
           _target_: torch.nn.PoissonNLLLoss
-          reduction: 'mean'
+          reduction: "mean"
           log_input: False
-      weights: 
+      weights:
         exp: 1.0
     metrics:
       components:
-        exp: ['pearson', 'spearman', 'r2']
-      
+        exp: ["pearson", "spearman", "r2"]

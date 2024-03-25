@@ -4,4 +4,3 @@ defaults:
 
 model:
   _target_: get_model.model.model_refactored.GETFinetuneMaxNorm
-

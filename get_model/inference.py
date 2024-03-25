@@ -1,6 +1,7 @@
 import torch
 from get_model.model.model import get_finetune_motif
 
+
 class InferenceModel:
     def __init__(self, checkpoint_path, device='cuda'):
         """
@@ -22,8 +23,9 @@ class InferenceModel:
             new_key = new_key.replace("blocks.", "encoder.blocks.")
             new_key = new_key.replace("fc_norm.", "encoder.norm.")
             new_key = new_key.replace("head.", "head_exp.head.")
-            new_key = new_key.replace("region_embed.proj.", "region_embed.embed.")
-            
+            new_key = new_key.replace(
+                "region_embed.proj.", "region_embed.embed.")
+
             new_state_dict[new_key] = state_dict[key]
 
         # Adjust the weight dimensions if needed
@@ -38,7 +40,7 @@ class InferenceModel:
         # Instantiate the model using the factory function
         model = get_finetune_motif()
         checkpoint = torch.load(checkpoint_path, map_location='cpu')
-        
+
         # If the checkpoint is a dictionary with a 'model' key, extract the state dict
         if 'model' in checkpoint:
             state_dict = checkpoint['model']
@@ -47,10 +49,10 @@ class InferenceModel:
 
         # Rename state dict keys to match the model's keys
         state_dict = self.rename_keys(state_dict)
-        
+
         # Load the state dict into the model
         model.load_state_dict(state_dict, strict=False)
-        
+
         return model
 
     def predict(self, *input_tensors):
@@ -59,13 +61,15 @@ class InferenceModel:
         """
         with torch.no_grad():
             # Ensure that input tensors are on the correct device
-            input_tensors = [tensor.to(self.device) for tensor in input_tensors]
+            input_tensors = [tensor.to(self.device)
+                             for tensor in input_tensors]
             # Forward pass through the model
             outputs = self.model(*input_tensors)
-            
+
             # Process outputs if necessary (e.g., apply softmax)
             # For now, we will just return the raw outputs
             return outputs
+
 
 # Example usage
 if __name__ == "__main__":

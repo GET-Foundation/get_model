@@ -10,6 +10,7 @@ try:
 except ImportError:
     flash_attn_qkvpacked_func = None
 
+
 class Attention(nn.Module):
     def __init__(
         self,
@@ -70,7 +71,8 @@ class Attention(nn.Module):
 
         if attention_mask is not None:
             if attention_mask.dim() == 1:
-                attention_mask = attention_mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+                attention_mask = attention_mask.unsqueeze(
+                    0).unsqueeze(0).unsqueeze(0)
             elif attention_mask.dim() == 2:
                 attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)
             assert (
@@ -82,7 +84,8 @@ class Attention(nn.Module):
             attn = attn.masked_fill(attention_mask, attn_mask_value)
         if attention_bias is not None:
             if attention_bias.dim() == 1:
-                attention_bias = attention_bias.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+                attention_bias = attention_bias.unsqueeze(
+                    0).unsqueeze(0).unsqueeze(0)
             elif attention_bias.dim() == 2:
                 attention_bias = attention_bias.unsqueeze(1).unsqueeze(1)
             elif attention_bias.dim() == 3:
@@ -143,11 +146,12 @@ class Attention_Flash(nn.Module):
             )
         qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
         qkv = qkv.reshape(B, N, 3, self.num_heads, -1)
-        x = flash_attn_qkvpacked_func(qkv, softmax_scale=self.scale).reshape(B, N, C)
+        x = flash_attn_qkvpacked_func(
+            qkv, softmax_scale=self.scale).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x, None
-    
+
 
 class Mlp(nn.Module):
     def __init__(
@@ -216,7 +220,8 @@ class Block(nn.Module):
                 attn_head_dim=attn_head_dim,
             )
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
-        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+        self.drop_path = DropPath(
+            drop_path) if drop_path > 0.0 else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(
@@ -238,11 +243,13 @@ class Block(nn.Module):
 
     def forward(self, x, attention_mask=None, attention_bias=None):
         if self.gamma_1 is None:
-            x_attn, attn = self.attn(self.norm1(x), attention_mask=attention_mask, attention_bias=attention_bias)
+            x_attn, attn = self.attn(self.norm1(
+                x), attention_mask=attention_mask, attention_bias=attention_bias)
             x = x + self.drop_path(x_attn)
             x = x + self.drop_path(self.mlp(self.norm2(x)))
         else:
-            x_attn, attn = self.attn(self.norm1(x), attention_mask=attention_mask, attention_bias=attention_bias)
+            x_attn, attn = self.attn(self.norm1(
+                x), attention_mask=attention_mask, attention_bias=attention_bias)
             x = x + self.drop_path(self.gamma_1 * x_attn)
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
         return x, attn
@@ -304,7 +311,6 @@ class GETTransformer(nn.Module):
         if self.fc_norm is not None:
             x = self.fc_norm(x.mean(1))
         return x, attn_output
-
 
 
 class OuterProductMean(nn.Module):

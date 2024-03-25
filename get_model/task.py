@@ -4,13 +4,16 @@ class BaseTaskConfig:
     model: str = MISSING
     metadata: str = MISSING
 
+
 @dataclass
 class MutationTaskConfig(BaseTaskConfig):
     mutation_file: str = MISSING
 
+
 @dataclass
 class PeakTaskConfig(BaseTaskConfig):
     peak_file: str = MISSING
+
 
 class BaseTask:
     def __init__(self, cfg: BaseTaskConfig):
@@ -27,11 +30,11 @@ class BaseTask:
     def plot(self):
         pass
 
+
 class MutationTask(BaseTask):
     def __init__(self, cfg: MutationTaskConfig):
         super().__init__(cfg)
         self.load_mutation_file()
-        
 
     def load_mutation_file(self):
         mutations = pd.read_csv(self.mutation_file)
@@ -48,11 +51,9 @@ class MutationTask(BaseTask):
         mut_predictions = []
         for batch in self.wt_dataloader:
             wt_predictions.append(lm.model(batch))
-        
+
         for batch in self.mut_dataloader:
             mut_predictions.append(lm.model(batch))
 
     def plot(self):
         pass
-
-

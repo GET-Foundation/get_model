@@ -1,9 +1,8 @@
 defaults:
   - base_config
-  - model/GETFinetuneMaxNorm@_here_  
+  - model/GETFinetuneMaxNorm@_here_
   - dataset@dataset
   - _self_
-
 
 dataset_name: finetune_k562
 assembly: "hg38"
@@ -20,7 +19,7 @@ optimizer:
   lr: 0.0001
   min_lr: 0.0001
   weight_decay: 0.05
-  opt: 'adamw'
+  opt: "adamw"
   opt_eps: 1e-8
   opt_betas: [0.9, 0.95]
 
@@ -28,7 +27,7 @@ wandb:
   project_name: "debug_finetune"
   run_name: "experiment_1"
 
-finetune:  
+finetune:
   checkpoint: "/burg/pmg/users/xf2217/get_checkpoints/Expression_Finetune_K562_HSC.Chr4_14.conv50.atac_loss.from_pretrain_399.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.augmented.20240225.best.pth"
   model_prefix: "model."
   patterns_to_freeze: []

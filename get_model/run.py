@@ -1,9 +1,6 @@
 import logging
-import os.path
 
-import hydra
 import lightning as L
-import pandas as pd
 import torch
 import torch.utils.data
 from caesar.io.zarr_io import DenseZarrIO
@@ -21,7 +18,6 @@ from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import create_optimizer
 from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys
-
 
 
 class LitModel(L.LightningModule):
@@ -82,7 +78,7 @@ class LitModel(L.LightningModule):
     def task_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='predict')
         return pred, obs
-    
+
     def configure_optimizers(self):
         optimizer = create_optimizer(self.cfg.optimizer, self.model)
         num_training_steps_per_epoch = (
@@ -178,7 +174,6 @@ class GETDataModule(L.LightningDataModule):
 
         return dataset
 
-
     def prepare_data(self):
         pass
 
@@ -187,14 +182,19 @@ class GETDataModule(L.LightningDataModule):
             f'{self.cfg.machine.data_path}/{self.cfg.assembly}.zarr', dtype='int8')
         sequence_obj.load_to_memory_dense()
         if stage == 'fit' or stage is None:
-            self.dataset_train = self.build_dataset_zarr(sequence_obj=sequence_obj, is_train=True)
-            self.dataset_val = self.build_dataset_zarr(sequence_obj=sequence_obj, is_train=False)
+            self.dataset_train = self.build_dataset_zarr(
+                sequence_obj=sequence_obj, is_train=True)
+            self.dataset_val = self.build_dataset_zarr(
+                sequence_obj=sequence_obj, is_train=False)
         if stage == 'test' or stage is None:
-            self.dataset_test = self.build_dataset_zarr(sequence_obj=sequence_obj, is_train=False)
+            self.dataset_test = self.build_dataset_zarr(
+                sequence_obj=sequence_obj, is_train=False)
         if stage == 'predict' or stage is None:
-            self.dataset_predict = self.build_dataset_zarr(sequence_obj=sequence_obj, is_train=False)
+            self.dataset_predict = self.build_dataset_zarr(
+                sequence_obj=sequence_obj, is_train=False)
         if stage == 'validate' or stage is None:
-            self.dataset_val = self.build_dataset_zarr(sequence_obj=sequence_obj, is_train=False)
+            self.dataset_val = self.build_dataset_zarr(
+                sequence_obj=sequence_obj, is_train=False)
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
@@ -213,7 +213,7 @@ class GETDataModule(L.LightningDataModule):
             drop_last=True,
             collate_fn=get_rev_collate_fn,
         )
-    
+
     def test_dataloader(self):
         return torch.utils.data.DataLoader(
             self.dataset_test,
@@ -222,7 +222,7 @@ class GETDataModule(L.LightningDataModule):
             drop_last=True,
             collate_fn=get_rev_collate_fn,
         )
-    
+
     def predict_dataloader(self):
         return torch.utils.data.DataLoader(
             self.dataset_predict,
@@ -231,14 +231,14 @@ class GETDataModule(L.LightningDataModule):
             drop_last=True,
             collate_fn=get_rev_collate_fn,
         )
-    
+
 
 def run(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
     model = LitModel(cfg)
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="cpu",
+        accelerator="gpu",
         num_sanity_val_steps=10,
         strategy="auto",
         devices=cfg.machine.num_devices,
@@ -246,7 +246,7 @@ def run(cfg: DictConfig):
                             name=cfg.wandb.run_name)],
         callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
                    LearningRateMonitor(logging_interval='step')],
-        # plugins=[MixedPrecision(precision='16-mixed', device="cpu")],
+        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         log_every_n_steps=100,
