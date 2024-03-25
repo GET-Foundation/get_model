@@ -1,0 +1,3 @@
+data_path: "/home/xf2217/Projects/get_data/"
+codebase: "/home/xf2217/Projects/get_model/"
+output_dir: "/home/xf2217/output"

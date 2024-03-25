@@ -1,6 +1,5 @@
 data_set: "Expression_Finetune_k562.Chr4&14"
 eval_data_set: "Expression_Finetune_k562.Chr4&14.Eval"
-data_path: "/home/xf2217/Projects/get_data/"
 batch_size: 2
 num_workers: 2
 n_peaks_lower_bound: 5
@@ -16,7 +15,7 @@ negative_peak_name: null
 n_packs: 1
 leave_out_celltypes: "k562"
 leave_out_chromosomes: "chr4,chr14"
-dataset_size: 4096
+
 additional_peak_columns: ['Expression_positive', 'Expression_negative', 'aTPM', 'TSS']
 padding: 0
 mask_ratio: 0.5
@@ -26,3 +25,6 @@ peak_inactivation: null
 non_redundant: false
 filter_by_min_depth: false
 hic_path: null
+
+dataset_size: 40960
+eval_dataset_size: 2048

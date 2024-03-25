@@ -56,8 +56,8 @@ class LitModel(L.LightningModule):
         return self.model(**batch)
 
     def _shared_step(self, batch, batch_idx, stage='train'):
-        batch = self.model.get_input(batch)
-        output = self(batch)
+        input = self.model.get_input(batch)
+        output = self(input)
         pred, obs = self.model.before_loss(output, batch)
         loss = self.loss(pred, obs)
         # if loss is a dict, rename the keys with the stage prefix
@@ -103,17 +103,17 @@ class LitModel(L.LightningModule):
         )
         return [optimizer], [lr_scheduler]
 
-    def on_validation_end(self):
-        # Perform inference on the mutations
-        predictions = []
-        for batch in self.inference_dataset:
-            batch_predictions = self.model(batch)
-            predictions.append(batch_predictions)
+    # def on_validation_end(self):
+    #     # Perform inference on the mutations
+    #     predictions = []
+    #     for batch in self.inference_dataset:
+    #         batch_predictions = self.model(batch)
+    #         predictions.append(batch_predictions)
 
-        # Run evaluation tasks
-        for name, task in self.evaluation_tasks.items():
-            task.predict(predictions)
-            # log correlation
+    #     # Run evaluation tasks
+    #     for name, task in self.evaluation_tasks.items():
+    #         task.predict(predictions)
+    #         # log correlation
 
 
 class GETDataModule(L.LightningDataModule):
@@ -121,15 +121,16 @@ class GETDataModule(L.LightningDataModule):
         super().__init__()
         self.cfg = cfg
 
-    def build_dataset_zarr(self, sequence_obj) -> None:
+    def build_dataset_zarr(self, sequence_obj, is_train=True) -> None:
         config = self.cfg.dataset.dataset_configs[self.cfg.dataset_name]
-        dataset_name = config.data_set if config.is_train else config.eval_data_set
-        logging.info(f'Using {dataset_name}')
+        # merge config with self.cfg.dataset
+        config = DictConfig({**self.cfg.dataset, **config})
 
-        root = config.data_path
-        codebase = config.codebase
-        assembly = config.assembly
-
+        root = self.cfg.data_path
+        codebase = self.cfg.codebase
+        assembly = self.cfg.assembly
+        dataset_size = config.dataset_size if is_train else config.eval_dataset_size
+        zarr_dirs = [f'{root}/{zarr_dir}' for zarr_dir in config.zarr_dirs]
         if sequence_obj is None:
             sequence_obj = DenseZarrIO(f'{root}/{assembly}.zarr', dtype='int8')
             sequence_obj.load_to_memory_dense()
@@ -139,9 +140,9 @@ class GETDataModule(L.LightningDataModule):
 
         # Create dataset with configuration parameters
         dataset = PretrainDataset(
-            is_train=config.is_train,
+            is_train=is_train,
             sequence_obj=sequence_obj,
-            zarr_dirs=config.zarr_dirs,
+            zarr_dirs=zarr_dirs,
             genome_seq_zarr=f'{root}/{assembly}.zarr',
             genome_motif_zarr=f'{root}/{assembly}_motif_result.zarr',
             use_insulation=config.use_insulation,
@@ -172,7 +173,7 @@ class GETDataModule(L.LightningDataModule):
 
             leave_out_celltypes=config.leave_out_celltypes,
             leave_out_chromosomes=config.leave_out_chromosomes,
-            dataset_size=config.dataset_size,
+            dataset_size=dataset_size,
         )
 
         return dataset
@@ -183,17 +184,17 @@ class GETDataModule(L.LightningDataModule):
 
     def setup(self, stage=None):
         sequence_obj = DenseZarrIO(
-            f'{self.cfg.dataset.data_path}/{self.cfg.assembly}.zarr', dtype='int8')
+            f'{self.cfg.data_path}/{self.cfg.assembly}.zarr', dtype='int8')
         sequence_obj.load_to_memory_dense()
         if stage == 'fit' or stage is None:
-            self.dataset_train = self.build_dataset_zarr(sequence_obj=sequence_obj)
-            self.dataset_val = self.build_dataset_zarr(sequence_obj=sequence_obj)
+            self.dataset_train = self.build_dataset_zarr(sequence_obj=sequence_obj, is_train=True)
+            self.dataset_val = self.build_dataset_zarr(sequence_obj=sequence_obj, is_train=False)
         if stage == 'test' or stage is None:
-            self.dataset_test = self.build_dataset_zarr(sequence_obj=sequence_obj)
+            self.dataset_test = self.build_dataset_zarr(sequence_obj=sequence_obj, is_train=False)
         if stage == 'predict' or stage is None:
-            self.dataset_predict = self.build_dataset_zarr(sequence_obj=sequence_obj)
+            self.dataset_predict = self.build_dataset_zarr(sequence_obj=sequence_obj, is_train=False)
         if stage == 'validate' or stage is None:
-            self.dataset_val = self.build_dataset_zarr(sequence_obj=sequence_obj)
+            self.dataset_val = self.build_dataset_zarr(sequence_obj=sequence_obj, is_train=False)
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
@@ -237,7 +238,7 @@ def run(cfg: DictConfig):
     model = LitModel(cfg)
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="gpu",
+        accelerator="cpu",
         num_sanity_val_steps=10,
         strategy="auto",
         devices=cfg.training.num_devices,
@@ -245,12 +246,12 @@ def run(cfg: DictConfig):
                             name=cfg.wandb.run_name)],
         callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
                    LearningRateMonitor(logging_interval='step')],
-        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+        # plugins=[MixedPrecision(precision='16-mixed', device="cpu")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         log_every_n_steps=100,
         deterministic=True,
-        default_root_dir=cfg.training.output_dir,
+        default_root_dir=cfg.output_dir,
     )
 
     trainer.fit(model, datamodule=GETDataModule(cfg))

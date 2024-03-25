@@ -1,8 +1,8 @@
 defaults:
   - base_config
-  - model/GETPretrainMaxNorm@_here_  
+  - model/GETFinetuneMaxNorm@_here_  
   - dataset@dataset
-  - machine/pc@_here_
+  - machine/manitou@_here_
   - _self_
 
 
@@ -17,7 +17,6 @@ training:
   accumulate_grad_batches: 1
   clip_grad: null
   use_fp16: true
-  output_dir: "/home/xf2217/Projects/output"
 
 optimizer:
   lr: 0.0001
@@ -28,10 +27,10 @@ optimizer:
   opt_betas: [0.9, 0.95]
 
 wandb:
-  project_name: "pretrain"
+  project_name: "debug_finetune"
   run_name: "experiment_1"
 
 finetune:  
-  checkpoint: null
+  checkpoint: "/burg/pmg/users/xf2217/get_checkpoints/Expression_Finetune_K562_HSC.Chr4_14.conv50.atac_loss.from_pretrain_399.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.augmented.20240225.best.pth"
   model_prefix: "model."
-  patterns_to_freeze: ["motif_scanner"]
+  patterns_to_freeze: []

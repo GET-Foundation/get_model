@@ -317,7 +317,6 @@ class GETFinetune(BaseGETModel):
             'n_peaks': batch['n_peaks'],
             'max_n_peaks': batch['max_n_peaks'],
             'motif_mean_std': batch['motif_mean_std'],
-            'exp_target': batch['exp_target']
         }
 
     def forward(self, sample_peak_sequence, sample_track, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
@@ -332,7 +331,7 @@ class GETFinetune(BaseGETModel):
 
     def before_loss(self, output, batch):
         pred = {'exp': output}
-        obs = {'exp': batch['exp_target']}
+        obs = {'exp': batch['exp_label']}
         return pred, obs
 
     def generate_dummy_data(self):

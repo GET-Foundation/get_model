@@ -24,7 +24,6 @@ class ModelConfig(Generic[T]):
 class DatasetConfig:
     data_set: str = "Expression_Finetune_Fetal"
     eval_data_set: str = "Expression_Finetune_Fetal.fetal_eval"
-    data_path: str = "/pmglocal/xf2217/get_data/"
     batch_size: int = 16
     num_workers: int = 16
     n_peaks_lower_bound: int = 5
@@ -40,7 +39,6 @@ class DatasetConfig:
     n_packs: int = 1
     leave_out_celltypes: str = "Astrocyte"
     leave_out_chromosomes: str = "chr4,chr14"
-    dataset_size: int = 4096
     additional_peak_columns: list = field(default_factory=lambda: [
                                           'Expression_positive', 'Expression_negative', 'aTPM', 'TSS'])
     padding: int = 0
@@ -52,6 +50,8 @@ class DatasetConfig:
     filter_by_min_depth: bool = False
     hic_path: str | None = None
     dataset_configs: dict = MISSING
+    dataset_size: int = 40960
+    eval_dataset_size: int = 4096
 
 
 
@@ -74,7 +74,6 @@ class TrainingConfig:
     accumulate_grad_batches: int = 1
     clip_grad: float | None = None
     use_fp16: bool = True
-    output_dir: str = "/pmglocal/xf2217/output"
 
 
 @dataclass
@@ -94,7 +93,10 @@ class FinetuneConfig:
 @dataclass
 class Config:
     codebase: str = MISSING
+    data_path: str = MISSING
+    output_dir: str = MISSING
     dataset_name: str = MISSING
+    assembly: str = 'hg38'
     model: Any = MISSING
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)

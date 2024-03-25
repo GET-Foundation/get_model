@@ -48,12 +48,13 @@ model:
       std: 0.02
     loss:
       components:
-        masked: 
-          _target_: torch.nn.MSELoss
+        exp: 
+          _target_: torch.nn.PoissonNLLLoss
           reduction: 'mean'
+          log_input: False
       weights: 
-        masked: 1.0
+        exp: 1.0
     metrics:
       components:
-        masked: ['pearson', 'spearman', 'mse']
+        exp: ['pearson', 'spearman', 'r2']
       
