@@ -555,7 +555,7 @@ class ConvPool(BaseModule):
             peak_atpm = peak_profile.mean(2)
             peak_profile = self.aprofile_header(peak_profile)
             peak_atpm = F.softplus(self.atpm_header(peak_atpm))
-            peak_atpm = peak_atpm.reshape(batch, num_peaks, 1)
+            peak_atpm = peak_atpm.reshape(batch, num_peaks)
             peak_profile = peak_profile.reshape(batch, -1)
             peak_profile = F.softplus(peak_profile)
             return peak_atpm, peak_profile
@@ -565,7 +565,6 @@ class ConvPool(BaseModule):
             peak_profiles = []
             for peak in peak_list:
                 if peak.shape[0] == 0:
-                    peak_atpm_list.append(torch.zeros(self.cfg.hidden_dim).to(peak.device))
                     peak_profiles.append(torch.zeros(0).to(peak.device))
                     continue
                 peak_profile = self.dila_conv_tower(peak.unsqueeze(0).transpose(1, 2))

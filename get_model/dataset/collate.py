@@ -150,7 +150,7 @@ def get_rev_collate_fn(batch):
         'total_peak_len': total_peak_len,
         'motif_mean_std': motif_mean_std,
         'exp_label': exp_label,
-        'other_peak_labels': other_peak_labels,
+        'atpm': other_peak_labels[:,:,0],
         'hic_matrix': hic_matrix}
 
     return batch

@@ -98,8 +98,8 @@ class RegressionMetrics(nn.Module):
         result = {
             target: {
                 metric_name: metric(
-                    _pred_[target][:, 0, :].reshape(-1, 1),
-                    _obs_[target][:, 0, :].reshape(-1, 1))
+                    _pred_[target].reshape(-1, 1),
+                    _obs_[target].reshape(-1, 1))
                 for metric_name, metric in target_metrics.items()
             }
             for target, target_metrics in self.metrics.items()
@@ -375,19 +375,17 @@ class GETChrombpNetBias(BaseGETModel):
     def get_input(self, batch):
         return {
             'sample_peak_sequence': batch['sample_peak_sequence'],
-            'sample_track': batch['sample_track'],
-            'padding_mask': batch['padding_mask'],
             'chunk_size': batch['chunk_size'],
             'n_peaks': batch['n_peaks'],
             'max_n_peaks': batch['max_n_peaks'],
             'motif_mean_std': batch['motif_mean_std'],
-            'other_labels': batch.get('other_labels', None),
         }
 
-    def crop_output(aprofile, aprofile_target, B, R, target_length=1000):
+    def crop_output(self, aprofile, aprofile_target, B, R, target_length=1000):
         # crop aprofile to center 1000bp, assume the input is (B, R, L)
-        B, R, L = aprofile.shape
-        if aprofile.shape[1] != aprofile_target.shape[1]:
+        aprofile = aprofile.reshape(B, R, -1)
+        aprofile_target = aprofile_target.reshape(B, R, -1)
+        if aprofile.shape[2] != aprofile_target.shape[2]:
             current_length = aprofile.shape[2]
             diff_length = current_length - target_length
             assert diff_length % 2 == 0
@@ -409,11 +407,11 @@ class GETChrombpNetBias(BaseGETModel):
 
     def before_loss(self, output, batch):
         pred = output
-        B, R, N = pred['atpm'].shape
-        obs = {'atpm': batch['other_labels'][:, :, 0],
-               'atac_profile': batch['sample_track']}
+        B, R = pred['atpm'].shape
+        obs = {'atpm': batch['atpm'],
+               'aprofile': batch['sample_track']}
         pred['aprofile'], obs['aprofile'] = self.crop_output(
-            pred['aprofile'], obs['atac_profile'], B, R)
+            pred['aprofile'], obs['aprofile'], B, R)
         return pred, obs
 
     def generate_dummy_data(self):
@@ -463,4 +461,4 @@ class GETChrombpNet(GETChrombpNetBias):
             bias_aprofile = F.pad(
                 bias_aprofile, (crop_length, diff_length - crop_length), "constant", 0)
             aprofile = aprofile + bias_aprofile
-        return atpm, aprofile
+        return {'atpm': atpm, 'aprofile': aprofile}

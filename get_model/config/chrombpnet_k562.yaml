@@ -1,0 +1,38 @@
+defaults:
+  - base_config
+  - model/GETChrombpNet@_here_  
+  - dataset@dataset
+  - _self_
+
+
+dataset_name: finetune_k562
+assembly: "hg38"
+dataset:
+  center_expand_target: 2000
+  n_peaks_lower_bound: 0
+  n_peaks_upper_bound: 1
+  
+training:
+  save_ckpt_freq: 10
+  epochs: 2
+  warmup_epochs: 1
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: true
+
+optimizer:
+  lr: 0.0001
+  min_lr: 0.0001
+  weight_decay: 0.05
+  opt: 'adamw'
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.95]
+
+wandb:
+  project_name: "debug_finetune"
+  run_name: "experiment_1"
+
+finetune:  
+  checkpoint: null
+  model_prefix: "model."
+  patterns_to_freeze: []

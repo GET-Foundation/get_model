@@ -13,6 +13,21 @@ model:
       hidden_dim: 256
       n_dil_layers: 7
       profile_kernel_size: 75
+    loss:
+      components:
+        atpm: 
+          _target_: torch.nn.MSELoss
+          reduction: 'mean'
+        aprofile:
+          _target_: torch.nn.MSELoss
+          reduction: 'mean'
+      weights: 
+        atpm: 1.0
+        aprofile: 1.0
+    metrics:
+      components:
+        atpm: ['mse', 'pearson', 'spearman', 'r2']
+        aprofile: ['mse']
     with_bias: false
     bias_model:
       _target_: get_model.model.model_refactored.GETChrombpNetBias
@@ -29,15 +44,6 @@ model:
           hidden_dim: 256
           n_dil_layers: 7
           profile_kernel_size: 75
+        loss: ${model.cfg.loss}
+        metrics: ${model.cfg.metrics}
     bias_ckpt: null
-    loss:
-      components:
-        masked: 
-          _target_: torch.nn.MSELoss
-          reduction: 'mean'
-      weights: 
-        masked: 1.0
-    metrics:
-      components:
-        masked: ['pearson', 'spearman', 'mse']
-      
