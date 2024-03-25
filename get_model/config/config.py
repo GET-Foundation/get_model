@@ -67,7 +67,6 @@ class OptimizerConfig:
 
 @dataclass
 class TrainingConfig:
-    num_devices: int = 1
     save_ckpt_freq: int = 10
     epochs: int = 100
     warmup_epochs: int = 5
@@ -89,21 +88,25 @@ class FinetuneConfig:
     patterns_to_freeze: list = field(default_factory=lambda: [
         "motif_scanner"])
 
-
 @dataclass
-class Config:
+class MachineConfig:
     codebase: str = MISSING
     data_path: str = MISSING
     output_dir: str = MISSING
+    num_devices: int = 1
+
+@dataclass
+class Config:
     dataset_name: str = MISSING
     assembly: str = 'hg38'
     model: Any = MISSING
+    machine: MachineConfig = field(default_factory=MachineConfig)
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
-
+    
 cs = ConfigStore.instance()
 cs.store(name="base_config", node=Config)
 

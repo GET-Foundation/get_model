@@ -10,7 +10,6 @@ dataset_name: finetune_k562
 assembly: "hg38"
 
 training:
-  num_devices: 1
   save_ckpt_freq: 10
   epochs: 2
   warmup_epochs: 1

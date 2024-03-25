@@ -126,8 +126,8 @@ class GETDataModule(L.LightningDataModule):
         # merge config with self.cfg.dataset
         config = DictConfig({**self.cfg.dataset, **config})
 
-        root = self.cfg.data_path
-        codebase = self.cfg.codebase
+        root = self.cfg.machine.data_path
+        codebase = self.cfg.machine.codebase
         assembly = self.cfg.assembly
         dataset_size = config.dataset_size if is_train else config.eval_dataset_size
         zarr_dirs = [f'{root}/{zarr_dir}' for zarr_dir in config.zarr_dirs]
@@ -241,7 +241,7 @@ def run(cfg: DictConfig):
         accelerator="cpu",
         num_sanity_val_steps=10,
         strategy="auto",
-        devices=cfg.training.num_devices,
+        devices=cfg.machine.num_devices,
         logger=[WandbLogger(project=cfg.wandb.project_name,
                             name=cfg.wandb.run_name)],
         callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
@@ -251,7 +251,7 @@ def run(cfg: DictConfig):
         gradient_clip_val=cfg.training.clip_grad,
         log_every_n_steps=100,
         deterministic=True,
-        default_root_dir=cfg.output_dir,
+        default_root_dir=cfg.machine.output_dir,
     )
 
     trainer.fit(model, datamodule=GETDataModule(cfg))
