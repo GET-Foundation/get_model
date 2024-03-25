@@ -27,10 +27,10 @@ from get_model.model.model import GETFinetune, GETFinetuneExpATAC, GETFinetuneEx
 #     name="finetune-gbm",
 # )
 
-pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/encode_hg38atac_dense.zarr',
+pretrain = PretrainDataset(zarr_dirs=['/pmglocal/xf2217/get_data/encode_hg38atac_dense.zarr',
                             ],
-                           '/pmglocal/xf2217/get_data/hg38.zarr', 
-                           '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
+                           genome_seq_zarr='/pmglocal/xf2217/get_data/hg38.zarr', 
+                           genome_motif_zarr='/pmglocal/xf2217/get_data/hg38_motif_result.zarr', insulation_paths=[
                            '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=200, n_packs=1,
                            max_peak_length=5000, center_expand_target=2114, n_peaks_lower_bound=2, insulation_subsample_ratio=0.8, n_peaks_upper_bound=10, leave_out_celltypes='k562', leave_out_chromosomes=['chr4','chr14'], is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=10000, random_shift_peak=False)
 pretrain.__len__()

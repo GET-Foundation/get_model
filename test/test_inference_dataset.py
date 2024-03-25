@@ -121,8 +121,8 @@ engine = InferenceEngine(dataset, model_checkpoint, with_sequence=False)
 def infer_k562_crispr(row):
     engine.setup_data(row.measuredGeneSymbol, 'k562.encode_hg38atac.ENCFF128WZG.max', 0, track_start=row.insulation_start, track_end=row.insulation_end)
     chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std  = engine.data
-    batch_inactivated = engine.dataset.datapool.generate_sample(chr_name, start, end, engine.data_key, celltype_id, track, celltype_peaks, motif_mean_std=motif_mean_std, mut=None, peak_inactivation=pd.DataFrame(row).T)
-    batch_wt = engine.dataset.datapool.generate_sample(chr_name, start, end, engine.data_key, celltype_id, track, celltype_peaks, motif_mean_std=motif_mean_std, mut=None, peak_inactivation=None)
+    batch_inactivated = engine.dataset.datapool.generate_sample(chr_name, start, end, engine.data_key, celltype_id, track, celltype_peaks, motif_mean_std=motif_mean_std, mutations=None, peak_inactivation=pd.DataFrame(row).T)
+    batch_wt = engine.dataset.datapool.generate_sample(chr_name, start, end, engine.data_key, celltype_id, track, celltype_peaks, motif_mean_std=motif_mean_std, mutations=None, peak_inactivation=None)
     result_inactivated = engine.run_inference_with_batch(batch_inactivated)
     result_wt = engine.run_inference_with_batch(batch_wt)
     # effect_size = ((10**result_inactivated[0]['pred_exp']-1)-(10**result_wt[0]['pred_exp']-1))/(10**result_wt[0]['pred_exp']-1)

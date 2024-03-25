@@ -37,10 +37,10 @@ for key in h5['model_weights']:
 #     name="finetune-gbm",
 # )
 
-pretrain = PretrainDataset(['/pmglocal/xf2217/get_data/encode_hg38atac_dense.zarr',
+pretrain = PretrainDataset(zarr_dirs=['/pmglocal/xf2217/get_data/encode_hg38atac_dense.zarr',
                             ],
-                           '/pmglocal/xf2217/get_data/hg38.zarr', 
-                           '/pmglocal/xf2217/get_data/hg38_motif_result.zarr', [
+                           genome_seq_zarr='/pmglocal/xf2217/get_data/hg38.zarr', 
+                           genome_motif_zarr='/pmglocal/xf2217/get_data/hg38_motif_result.zarr', insulation_paths=[
                            '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_p0.01_tissue_open_exp', preload_count=200, n_packs=1,
                            max_peak_length=5000, center_expand_target=1000, n_peaks_lower_bound=10, insulation_subsample_ratio=0.8, n_peaks_upper_bound=100, leave_out_celltypes=None, leave_out_chromosomes=None, is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=400)
 pretrain.__len__()

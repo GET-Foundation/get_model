@@ -23,7 +23,6 @@ logging.basicConfig(level=logging.INFO,
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
-
 def get_padding_pos(mask):
     mask_ = mask.clone()
     mask_[mask_ != -10000] = 0
@@ -71,7 +70,6 @@ def get_sequence_with_mutations(arr, start, end, mut):
         # Update the offset for subsequent mutations
 
     return arr, arr_wt
-
 
 
 def _stack_tracks_with_padding_and_inactivation(celltype_peaks, track, padding, inactivated_peak_idx):
@@ -623,7 +621,7 @@ class ZarrDataPool(object):
         return chunk_idx
 
     def generate_sample(self, chr_name, start, end, data_key, celltype_id,
-                        mut=None, peak_inactivation=None, padding=50):
+                        mutations=None, peak_inactivation=None, padding=50):
         """
         Convenient handler for generate a single sample.
         """
@@ -653,9 +651,9 @@ class ZarrDataPool(object):
         sequence = self.sequence.get_track(
             chr_name, track_start, track_end, sparse=False)
 
-        if mut is not None:
+        if mutations is not None:
             # filter the mutation data with celltype_peaks
-            mut_peak = pr(mut.query('Chromosome==@chr_name')
+            mut_peak = pr(mutations.query('Chromosome==@chr_name')
                           ).join(pr(celltype_peaks)).df
             if mut_peak.shape[0] > 0:
                 sequence_mut, sequence = get_sequence_with_mutations(
@@ -687,16 +685,16 @@ class ZarrDataPool(object):
         if inactivated_peak_idx is not None:
             # keep the TSS column but set aTPM and expression to 0
             additional_peak_columns_data[inactivated_peak_idx, 0:3] = 0
-        
+
         sample = {
-            'sample_track': sample_track, 'sample_peak_sequence': sample_peak_sequence, 
+            'sample_track': sample_track, 'sample_peak_sequence': sample_peak_sequence,
             'celltype_peaks': celltype_peaks, 'motif_mean_std': motif_mean_std,
             'additional_peak_columns_data': additional_peak_columns_data, 'hic_matrix': hic_matrix,
-            'metadata':{
+            'metadata': {
                 'celltype_id': celltype_id, 'chr_name': chr_name, 'libsize': self.zarr_data_pool.zarr_dict[data_key].libsize[celltype_id],
-            'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': self.mask_ratio
+                'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': self.mask_ratio
             }
-            
+
         }
 
         return sample
@@ -724,7 +722,7 @@ class PreloadDataPack(object):
     """
 
     def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, padding=50, mask_ratio=0.5,
-                 n_peaks_lower_bound=5, n_peaks_upper_bound=200, n_peaks_sample_gap=50, use_insulation=True, window_index=None, peak_inactivation=None, mut=None):
+                 n_peaks_lower_bound=5, n_peaks_upper_bound=200, n_peaks_sample_gap=50, use_insulation=True, window_index=None, peak_inactivation=None, mutations=None):
         # logging.info('Initializing PreloadDataPack')
         self.preload_count = preload_count
         self.zarr_data_pool = zarr_data_pool
@@ -734,7 +732,7 @@ class PreloadDataPack(object):
         self.next_sample = 0
         self.padding = padding
         self.peak_inactivation = peak_inactivation
-        self.mut = mut
+        self.mutations = mutations
         self.mask_ratio = mask_ratio
         self.n_peaks_lower_bound = n_peaks_lower_bound
         self.n_peaks_upper_bound = n_peaks_upper_bound
@@ -791,7 +789,7 @@ class PreloadDataPack(object):
         self._calculate_window_peak_counts()
         if self.insulation_peak_counts.shape[0] == 0 and self.use_insulation:
             logging.info('No valid insulation peak count')
-            return PreloadDataPack(self.preload_count, self.zarr_data_pool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound, self.n_peaks_sample_gap, self.use_insulation, window_index, self.peak_inactivation, self.mut)
+            return PreloadDataPack(self.preload_count, self.zarr_data_pool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound, self.n_peaks_sample_gap, self.use_insulation, window_index, self.peak_inactivation, self.mutations)
 
     def get_sample_with_idx(self, idx):
         """
@@ -878,7 +876,7 @@ class PreloadDataPack(object):
         return inactivated_peak_idx
 
     def _generate_sample(self, chr_name, start, end, data_key, celltype_id, track, celltype_peaks, motif_mean_std,
-                         track_start, track_end, mut=None):
+                         track_start, track_end, mutations=None):
         """
         Generate a single sample from a window.
         """
@@ -902,9 +900,9 @@ class PreloadDataPack(object):
         sequence = self.zarr_data_pool.sequence.get_track(
             chr_name, track_start, track_end, sparse=False)
 
-        if mut is not None:
+        if mutations is not None:
             # filter the mutation data with celltype_peaks
-            mut_peak = pr(mut.query('Chromosome==@chr_name')
+            mut_peak = pr(mutations.query('Chromosome==@chr_name')
                           ).join(pr(celltype_peaks)).df
             if mut_peak.shape[0] > 0:
                 sequence_mut, sequence = get_sequence_with_mutations(
@@ -939,14 +937,14 @@ class PreloadDataPack(object):
             additional_peak_features[inactivated_peak_idx, 0:3] = 0
 
         sample = {
-            'sample_track': sample_track, 'sample_peak_sequence': sample_peak_sequence, 
+            'sample_track': sample_track, 'sample_peak_sequence': sample_peak_sequence,
             'celltype_peaks': celltype_peaks, 'motif_mean_std': motif_mean_std,
             'additional_peak_features': additional_peak_features, 'hic_matrix': hic_matrix,
-            'metadata':{
+            'metadata': {
                 'celltype_id': celltype_id, 'chr_name': chr_name, 'libsize': self.zarr_data_pool.zarr_dict[data_key].libsize[celltype_id],
-            'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': self.mask_ratio
+                'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': self.mask_ratio
             }
-            
+
         }
 
         return sample
@@ -1070,14 +1068,43 @@ class PreloadDataPack(object):
 
 
 class PretrainDataset(Dataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name='peaks',
-                 negative_peak_name=None, additional_peak_columns=None, preload_count=50, padding=50,
-                 mask_ratio=0.5, n_packs=2, max_peak_length=None, center_expand_target=None,
-                 insulation_subsample_ratio=0.1, n_peaks_lower_bound=5, n_peaks_upper_bound=200,
-                 use_insulation=True, sequence_obj=None, leave_out_celltypes=None, leave_out_chromosomes=None,
-                 n_peaks_sample_gap=50, is_train=True, non_redundant=False, filter_by_min_depth=False,
-                 dataset_size=655_360, peak_inactivation=None, mut=None, negative_peak_ratio=0,
-                 random_shift_peak=True, hic_path=None):
+    def __init__(self,
+                 is_train=True,
+                 sequence_obj=None,
+                 zarr_dirs=None,
+                 genome_seq_zarr=None,
+                 genome_motif_zarr=None,
+                 use_insulation=True,
+                 insulation_paths=[],
+                 insulation_subsample_ratio=0.1,
+                 hic_path=None,
+
+                 peak_name='peaks',
+                 additional_peak_columns=None,
+                 max_peak_length=None,
+                 center_expand_target=None,
+                 n_peaks_lower_bound=5,
+                 n_peaks_upper_bound=200,
+                 n_peaks_sample_gap=50,
+                 non_redundant=False,
+                 filter_by_min_depth=False,
+
+                 preload_count=50,
+                 n_packs=1,
+
+                 padding=50,
+                 mask_ratio=0.5,
+                 negative_peak_name=None,
+                 negative_peak_ratio=0,
+                 random_shift_peak=True,
+                 peak_inactivation=None,
+                 mutations=None,
+
+                 leave_out_celltypes=None,
+                 leave_out_chromosomes=None,
+                 dataset_size=655_36,
+
+                 ):
         super().__init__()
         """
         Pretrain dataset for GET model.
@@ -1091,36 +1118,40 @@ class PretrainDataset(Dataset):
         Peak sequence is a one-hot encoding of DNA. Other metadata about the sample is also included in the sample as a dictionary.
 
         Parameters:
-        zarr_dirs (list): A list of paths to zarr files.
-        genome_seq_zarr (str): Path to the genome sequence zarr file.
-        genome_motif_zarr (str): Path to the genome motif zarr file.
+        is_train (bool): Whether the dataset is used for training.
+        sequence_obj (DenseZarrIO): A DenseZarrIO object containing sequence data.
+        zarr_dirs (list): A list of zarr directories containing peak data.
+        genome_seq_zarr (str): The path to the zarr file containing genome sequence data.
+        genome_motif_zarr (str): The path to the zarr file containing motif mean and standard deviation data.
+        use_insulation (bool): Whether to use insulation data to select samples.
         insulation_paths (list): A list of paths to insulation data.
-        peak_name (str): The name of the peak track in the zarr files. Default is 'peaks'.
-        negative_peak_name (str): The name of the negative peak track in the zarr files. Default is None.
-        additional_peak_columns (list): Additional peak columns to include in the dataset. Default is None.
-        preload_count (int): The number of windows to preload. Default is 50.
-        padding (int): The number of nucleotides to pad around each peak. Default is 50.
-        mask_ratio (float): The ratio of nucleotides to mask in the peak sequence. Default is 0.5.
-        n_packs (int): The number of data packs to preload. Default is 2.
-        max_peak_length (int): The maximum length of peaks to include in the dataset. Default is None.
-        center_expand_target (int): The target length of peaks to center and expand. Default is None.
-        insulation_subsample_ratio (float): The ratio of insulation data to use. Default is 0.1.
-        n_peaks_lower_bound (int): The lower bound of number of peaks in a sample. Default is 5.
-        n_peaks_upper_bound (int): The upper bound of number of peaks in a sample. Default is 200.
-        use_insulation (bool): Whether to use insulation data. Default is True.
-        sequence_obj (DenseZarrIO): A DenseZarrIO object for genome sequence. Default is None.
-        leave_out_celltypes (list): A list of cell type IDs to leave out. Default is None.
-        leave_out_chromosomes (list): A list of chromosome names to leave out. Default is None.
-        n_peaks_sample_gap (int): The gap between sampled peaks. Default is 50.
-        is_train (bool): Whether to use the dataset for training. Default is True.
-        non_redundant (bool): Whether to remove redundant cell type instances. Default is False.
-        filter_by_min_depth (bool): Whether to filter out samples by minimum depth. Default is False.
-        dataset_size (int): The size of the dataset. Default is 655_360.
-        peak_inactivation (dict): Peak inactivation settings. Default is None.
-        mut (dict): Mutation settings. Default is None.
-        negative_peak_ratio (float): The ratio of negative peaks to include in the dataset. Default is 0.
-        random_shift_peak (bool): Whether to randomly shift the peaks. Default is True.
-        hic_path (str): Path to the HiC data file. Default is None.
+        insulation_subsample_ratio (float): The ratio of insulation data to subsample.
+        hic_path (str): The path to the Hi-C data.
+
+        peak_name (str): The name of the peak data.
+        additional_peak_columns (list): A list of additional peak columns to include in the sample.
+        max_peak_length (int): The maximum length of a peak.
+        center_expand_target (int): The target length to expand the center of the peak.
+        n_peaks_lower_bound (int): The lower bound of number of peaks in a sample.
+        n_peaks_upper_bound (int): The upper bound of number of peaks in a sample.
+        n_peaks_sample_gap (int): The gap between samples.
+        non_redundant (bool): Whether to remove redundant samples.
+        filter_by_min_depth (bool): Whether to filter samples by minimum depth.
+
+        preload_count (int): The number of windows to preload.
+        n_packs (int): The number of data packs to preload.
+
+        padding (int): The number of nucleotides to pad around each peak.
+        mask_ratio (float): The ratio of nucleotides to mask in the peak sequence.
+        negative_peak_name (str): The name of the negative peak data.
+        negative_peak_ratio (float): The ratio of negative peaks to sample.
+        random_shift_peak (bool): Whether to randomly shift peaks.
+        peak_inactivation (pandas.DataFrame): A pandas dataframe containing peaks to inactivate.
+        mutations (pandas.DataFrame): A pandas dataframe containing mutations to apply.
+
+        leave_out_celltypes (list): A list of cell types to leave out.
+        leave_out_chromosomes (list): A list of chromosomes to leave out.
+        dataset_size (int): The size of the dataset.
 
         Returns:
         PretrainDataset: A PretrainDataset object.
@@ -1150,14 +1181,16 @@ class PretrainDataset(Dataset):
         self.n_packs = n_packs
         self.additional_peak_columns = additional_peak_columns
         self.peak_inactivation = peak_inactivation
-        self.mut = mut
+        self.mutations = mutations
         self.hic_path = hic_path
         # ensure use_insulation is False if hic_path is not None
         if self.hic_path is not None:
-            logging.info('hic_path is not None, use_insulation is set to False')
+            logging.info(
+                'hic_path is not None, use_insulation is set to False')
             self.use_insulation = False
         if sequence_obj is None:
-            self.sequence = DenseZarrIO(genome_seq_zarr, dtype='int8', mode='r')
+            self.sequence = DenseZarrIO(
+                genome_seq_zarr, dtype='int8', mode='r')
             self.sequence.load_to_memory_dense()
         else:
             self.sequence = sequence_obj
@@ -1181,9 +1214,8 @@ class PretrainDataset(Dataset):
     def __getitem__(self, index: int):
         if self.preload_data_packs is None:
             self.preload_data_packs = [PreloadDataPack(
-                preload_count=self.preload_count, zarr_data_pool=self.datapool, padding=self.padding, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation, peak_inactivation=self.peak_inactivation, mut=self.mut) for _ in range(self.n_packs)]
+                preload_count=self.preload_count, zarr_data_pool=self.datapool, padding=self.padding, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation, peak_inactivation=self.peak_inactivation, mutations=self.mutations) for _ in range(self.n_packs)]
         return self._getitem(index)
-
 
     def _getitem(self, index: int):
         """
@@ -1214,7 +1246,7 @@ class PretrainDataset(Dataset):
         # logging.info(f'Async reloading data for slot {index}')
         # reload by reinitializing the preload data pack and put it back to the preload_data_packs
         self.preload_data_packs[slot] = PreloadDataPack(
-            preload_count=self.preload_count, zarr_data_pool=self.datapool, padding=self.padding, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation, window_index=window_index, peak_inactivation=self.peak_inactivation, mut=self.mut)
+            preload_count=self.preload_count, zarr_data_pool=self.datapool, padding=self.padding, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation, window_index=window_index, peak_inactivation=self.peak_inactivation, mutations=self.mutations)
         # self.preload_data_packs[slot].preload_data()
         # add the index back to avaliable packs
         self.avaliable_packs.append(slot)
@@ -1233,7 +1265,7 @@ def worker_init_fn_get(worker_id):
     dataset = worker_info.dataset
     if dataset.preload_data_packs is None:
         dataset.preload_data_packs = [PreloadDataPack(
-            preload_count=dataset.preload_count, zarr_data_pool=dataset.datapool, padding=dataset.padding, mask_ratio=dataset.mask_ratio, n_peaks_lower_bound=dataset.n_peaks_lower_bound, n_peaks_upper_bound=dataset.n_peaks_upper_bound, n_peaks_sample_gap=dataset.n_peaks_sample_gap, use_insulation=dataset.use_insulation, peak_inactivation=dataset.peak_inactivation, mut=dataset.mut) for _ in range(dataset.n_packs)]
+            preload_count=dataset.preload_count, zarr_data_pool=dataset.datapool, padding=dataset.padding, mask_ratio=dataset.mask_ratio, n_peaks_lower_bound=dataset.n_peaks_lower_bound, n_peaks_upper_bound=dataset.n_peaks_upper_bound, n_peaks_sample_gap=dataset.n_peaks_sample_gap, use_insulation=dataset.use_insulation, peak_inactivation=dataset.peak_inactivation, mutations=dataset.mut) for _ in range(dataset.n_packs)]
 
 
 class InferenceDataset(PretrainDataset):
