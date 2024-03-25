@@ -184,7 +184,7 @@ class GETDataModule(L.LightningDataModule):
 
     def setup(self, stage=None):
         sequence_obj = DenseZarrIO(
-            f'{self.cfg.data_path}/{self.cfg.assembly}.zarr', dtype='int8')
+            f'{self.cfg.machine.data_path}/{self.cfg.assembly}.zarr', dtype='int8')
         sequence_obj.load_to_memory_dense()
         if stage == 'fit' or stage is None:
             self.dataset_train = self.build_dataset_zarr(sequence_obj=sequence_obj, is_train=True)
