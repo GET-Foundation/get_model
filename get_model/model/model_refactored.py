@@ -30,6 +30,7 @@ class LossConfig:
 class MetricsConfig:
     components: dict = MISSING
 
+
 @dataclass
 class EncoderConfig:
     num_heads: int = MISSING
@@ -108,11 +109,13 @@ class RegressionMetrics(nn.Module):
                   for target in result for metric_name in result[target]}
         return result
 
+
 @dataclass
 class BaseGETModelConfig:
     freezed: bool | str = False
     loss: LossConfig = MISSING
     metrics: MetricsConfig = MISSING
+
 
 class BaseGETModel(BaseModule):
     def __init__(self, cfg: BaseConfig):
@@ -193,22 +196,21 @@ class GETPretrainModelConfig(BaseGETModelConfig):
     num_motif: int = 637
     embed_dim: int = 768
     num_layers: int = 12
-    num_heads: int =12
-    dropout: float =0.1
+    num_heads: int = 12
+    dropout: float = 0.1
     output_dim: int = 800
-    flash_attn: bool =False
+    flash_attn: bool = False
     pool_method: str = 'mean'
-    motif_scanner: MotifScannerConfig = field(default_factory=MotifScannerConfig)
-    atac_attention: ATACSplitPoolConfig = field(default_factory=ATACSplitPoolConfig)
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: ATACSplitPoolConfig = field(
+        default_factory=ATACSplitPoolConfig)
     region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
-    head_mask: dict = field(default_factory=lambda: {'in_features': 768, 'out_features': 800})
-    mask_token: dict = field(default_factory=lambda: {'embed_dim': 768, 'std': 0.02})
-
-@dataclass
-class GETPretrainConfig:
-    _target_: str = "get_model.model.model_refactored.GETPretrain"
-    cfg: GETPretrainModelConfig = field(default_factory=GETPretrainModelConfig)
+    head_mask: dict = field(default_factory=lambda: {
+                            'in_features': 768, 'out_features': 800})
+    mask_token: dict = field(default_factory=lambda: {
+                             'embed_dim': 768, 'std': 0.02})
 
 
 class GETPretrain(BaseGETModel):
@@ -271,12 +273,9 @@ class GETPretrain(BaseGETModel):
 
 @dataclass
 class GETPretrainMaxNormModelConfig(GETPretrainModelConfig):
-    atac_attention: ATACSplitPoolMaxNormConfig = field(default_factory=ATACSplitPoolMaxNormConfig)
+    atac_attention: ATACSplitPoolMaxNormConfig = field(
+        default_factory=ATACSplitPoolMaxNormConfig)
 
-@dataclass 
-class GETPretrainMaxNormConfig:
-    _target_: str = "get_model.model.model_refactored.GETPretrainMaxNorm"
-    cfg: GETPretrainMaxNormModelConfig = field(default_factory=GETPretrainMaxNormModelConfig)
 
 class GETPretrainMaxNorm(GETPretrain):
     def __init__(self, cfg: GETPretrainMaxNormModelConfig):
@@ -286,18 +285,17 @@ class GETPretrainMaxNorm(GETPretrain):
 
 @dataclass
 class GETFinetuneModelConfig(BaseGETModelConfig):
-    motif_scanner: MotifScannerConfig = field(default_factory=MotifScannerConfig)
-    atac_attention: ATACSplitPoolConfig = field(default_factory=ATACSplitPoolConfig)
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: ATACSplitPoolConfig = field(
+        default_factory=ATACSplitPoolConfig)
     region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
-    head_exp: ExpressionHeadConfig = field(default_factory=ExpressionHeadConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
     use_atac: bool = False
     final_bn: bool = False
 
-@dataclass
-class GETFinetuneConfig:
-    _target_: str = "get_model.model.model_refactored.GETFinetune"
-    cfg: GETFinetuneModelConfig = field(default_factory=GETFinetuneModelConfig)
 
 class GETFinetune(BaseGETModel):
     def __init__(self, cfg: GETFinetuneModelConfig):
@@ -354,10 +352,6 @@ class GETFinetune(BaseGETModel):
 class GETFinetuneMaxNormModelConfig(GETFinetuneModelConfig):
     atac_attention: ATACSplitPoolMaxNormConfig = MISSING
 
-@dataclass
-class GETFinetuneMaxNormConfig:
-    _target_: str = "get_model.model.model_refactored.GETFinetuneMaxNorm"
-    cfg: GETFinetuneMaxNormModelConfig = field(default_factory=GETFinetuneMaxNormModelConfig)
 
 class GETFinetuneMaxNorm(GETFinetune):
     def __init__(self, cfg: GETFinetuneMaxNormModelConfig):
@@ -370,10 +364,6 @@ class GETChrombpNetBiasModelConfig(BaseGETModelConfig):
     motif_scanner: MotifScannerConfig = MISSING
     atac_attention: ConvPoolConfig = MISSING
 
-@dataclass
-class GETChrombpNetBiasConfig:
-    _target_: str = "get_model.model.model_refactored.GETChrombpNetBias"
-    cfg: GETChrombpNetBiasModelConfig = field(default_factory=GETChrombpNetBiasModelConfig)
 
 class GETChrombpNetBias(BaseGETModel):
     def __init__(self, cfg: GETChrombpNetBiasModelConfig):
@@ -394,7 +384,7 @@ class GETChrombpNetBias(BaseGETModel):
             'motif_mean_std': batch['motif_mean_std'],
             'other_labels': batch.get('other_labels', None),
         }
-    
+
     def crop_output(aprofile, aprofile_target, B, R, target_length=1000):
         # crop aprofile to center 1000bp, assume the input is (B, R, L)
         B, R, L = aprofile.shape
@@ -403,12 +393,13 @@ class GETChrombpNetBias(BaseGETModel):
             diff_length = current_length - target_length
             assert diff_length % 2 == 0
             crop_size = diff_length // 2
-            aprofile = aprofile[:,:,crop_size:crop_size+target_length]
+            aprofile = aprofile[:, :, crop_size:crop_size+target_length]
             aprofile_target = aprofile_target.reshape(B, R, -1)
             diff_length = aprofile_target.shape[2] - target_length
             assert diff_length % 2 == 0
             crop_size = diff_length // 2
-            aprofile_target = aprofile_target[:,:,crop_size:crop_size+target_length]
+            aprofile_target = aprofile_target[:,
+                                              :, crop_size:crop_size+target_length]
         return aprofile, aprofile_target
 
     def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
@@ -420,10 +411,12 @@ class GETChrombpNetBias(BaseGETModel):
     def before_loss(self, output, batch):
         pred = output
         B, R, N = pred['atpm'].shape
-        obs = {'atpm': batch['other_labels'][:, :, 0], 'atac_profile': batch['sample_track']}
-        pred['aprofile'], obs['aprofile'] = self.crop_output(pred['aprofile'], obs['atac_profile'], B, R)
+        obs = {'atpm': batch['other_labels'][:, :, 0],
+               'atac_profile': batch['sample_track']}
+        pred['aprofile'], obs['aprofile'] = self.crop_output(
+            pred['aprofile'], obs['atac_profile'], B, R)
         return pred, obs
-    
+
     def generate_dummy_data(self):
         B, R, L = 2, 1, 2000
         return {
@@ -443,11 +436,7 @@ class GETChrombpNetModelConfig(GETChrombpNetBiasModelConfig):
     bias_model: GETChrombpNetBiasModelConfig = MISSING
     bias_ckpt: str = None
 
-@dataclass
-class GETChrombpNetConfig:
-    _target_: str = "get_model.model.model_refactored.GETChrombpNet"
-    cfg: GETChrombpNetModelConfig = field(default_factory=GETChrombpNetModelConfig)
-    
+
 class GETChrombpNet(GETChrombpNetBias):
     def __init__(self, cfg: GETChrombpNetModelConfig):
         super().__init__(cfg)
@@ -463,13 +452,16 @@ class GETChrombpNet(GETChrombpNetBias):
 
     def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
         x = self.motif_scanner(sample_peak_sequence)
-        atpm, aprofile = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+        atpm, aprofile = self.atac_attention(
+            x, chunk_size, n_peaks, max_n_peaks)
         if self.with_bias:
-            bias_atpm, bias_aprofile = self.bias_model(sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
-            atpm = torch.logsumexp(torch.stack([atpm, bias_atpm], dim=0), dim=0)
+            bias_atpm, bias_aprofile = self.bias_model(
+                sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
+            atpm = torch.logsumexp(torch.stack(
+                [atpm, bias_atpm], dim=0), dim=0)
             diff_length = aprofile.shape[1] - bias_aprofile.shape[1]
             crop_length = diff_length // 2
-            bias_aprofile = F.pad(bias_aprofile, (crop_length, diff_length - crop_length), "constant", 0)
+            bias_aprofile = F.pad(
+                bias_aprofile, (crop_length, diff_length - crop_length), "constant", 0)
             aprofile = aprofile + bias_aprofile
         return atpm, aprofile
-    

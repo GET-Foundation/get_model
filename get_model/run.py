@@ -3,6 +3,7 @@ import os.path
 
 import hydra
 import lightning as L
+import pandas as pd
 import torch
 import torch.utils.data
 from caesar.io.zarr_io import DenseZarrIO
@@ -78,6 +79,10 @@ class LitModel(L.LightningModule):
         self.log_dict(metrics, batch_size=self.cfg.dataset.batch_size)
         self.log("val_loss", loss, batch_size=self.cfg.dataset.batch_size)
 
+    def task_step(self, batch, batch_idx):
+        loss, pred, obs = self._shared_step(batch, batch_idx, stage='predict')
+        return pred, obs
+    
     def configure_optimizers(self):
         optimizer = create_optimizer(self.cfg.optimizer, self.model)
         num_training_steps_per_epoch = (
@@ -98,33 +103,17 @@ class LitModel(L.LightningModule):
         )
         return [optimizer], [lr_scheduler]
 
-    def train_dataloader(self):
-        sequence_obj = DenseZarrIO(
-            f'{self.cfg.dataset.data_path}/hg38.zarr', dtype='int8')
-        sequence_obj.load_to_memory_dense()
-        dataset_train = build_dataset_zarr(
-            self.cfg.dataset, sequence_obj=sequence_obj)
-        return torch.utils.data.DataLoader(
-            dataset_train,
-            batch_size=self.cfg.dataset.batch_size,
-            num_workers=self.cfg.dataset.num_workers,
-            drop_last=True,
-            collate_fn=get_rev_collate_fn,
-        )
+    def on_validation_end(self):
+        # Perform inference on the mutations
+        predictions = []
+        for batch in self.inference_dataset:
+            batch_predictions = self.model(batch)
+            predictions.append(batch_predictions)
 
-    def val_dataloader(self):
-        sequence_obj = DenseZarrIO(
-            f'{self.cfg.dataset.data_path}/hg38.zarr', dtype='int8')
-        sequence_obj.load_to_memory_dense()
-        dataset_eval = build_dataset_zarr(
-            args=self.cfg.dataset, sequence_obj=sequence_obj)
-        return torch.utils.data.DataLoader(
-            dataset_eval,
-            batch_size=self.cfg.dataset.batch_size,
-            num_workers=self.cfg.dataset.num_workers,
-            drop_last=True,
-            collate_fn=get_rev_collate_fn
-        )
+        # Run evaluation tasks
+        for name, task in self.evaluation_tasks.items():
+            task.predict(predictions)
+            # log correlation
 
 
 class GETDataModule(L.LightningDataModule):
@@ -243,72 +232,6 @@ class GETDataModule(L.LightningDataModule):
         )
     
 
-class GETVariantInferenceDataModule(L.LightningDataModule):
-    def __init__(self, cfg: DictConfig):
-        super().__init__()
-        self.cfg = cfg
-        self.dataset = None
-        self.model = None
-        self.variant_info = None
-        self.chr_name = None
-        self.variant_coord = None
-        self.peak_info = None
-        self.track_start = None
-        self.track_end = None
-        self.variant_peak = None
-
-    def setup(self, stage=None):
-        if stage == 'predict' or stage is None:
-            sequence_obj = DenseZarrIO(f'{self.cfg.dataset.data_path}/{self.cfg.assembly}.zarr', dtype='int8')
-            sequence_obj.load_to_memory_dense()
-            self.dataset = instantiate(self.cfg.dataset, sequence_obj=sequence_obj)
-            self.model = instantiate(self.cfg.model)
-
-            self.variant_info = pd.DataFrame(self.cfg.variant_info)
-            self.chr_name = self.variant_info['Chromosome'].values[0]
-            self.variant_coord = self.variant_info['Start'].values[0]
-
-            peak_info = self.dataset.datapool._query_peaks(
-                self.cfg.cell_type, self.chr_name, self.variant_coord - 4000000, self.variant_coord + 4000000
-            ).reset_index(drop=True).reset_index()
-            self.peak_info = peak_info
-
-            self.track_start, self.track_end, self.variant_peak = self.get_peak_start_end_from_variant(
-                self.variant_info, self.peak_info
-            )
-
-    def get_peak_start_end_from_variant(self, variant_info, peak_info):
-        from pyranges import PyRanges as pr
-        chr_name = variant_info['Chromosome'].values[0]
-        variant_coord = variant_info['Start'].values[0]
-
-        df = pr(peak_info.copy().reset_index()).join(
-            pr(variant_info.copy()[['Chromosome', 'Start', 'End']]),
-            how='left', suffix="_variant", apply_strand_suffix=False
-        ).df[['index', 'Chromosome', 'Start', 'End', 'Start_variant', 'End_variant']].set_index('index')
-        variant_peak = df.query('Start_variant>=Start & End_variant<=End').index.values
-
-        if variant_peak.shape[0] == 0:
-            raise ValueError(f"Variant not found in the peak information.")
-
-        peak_start = max(0, variant_peak.min() - self.dataset.n_peaks_upper_bound // 2)
-        peak_end = min(peak_info.shape[0] - 1, variant_peak.max() + self.dataset.n_peaks_upper_bound // 2)
-        variant_peak = variant_peak - peak_start
-
-        track_start = peak_info.iloc[peak_start].Start - self.dataset.padding
-        track_end = peak_info.iloc[peak_end].End + self.dataset.padding
-
-        return track_start, track_end, variant_peak
-
-    def predict_dataloader(self):
-        batch = self.dataset.datapool.generate_sample(
-            self.chr_name, self.track_start, self.track_end, self.dataset.datapool.data_keys[0],
-            self.cfg.cell_type, mut=self.cfg.mut
-        )
-        prepared_batch = get_rev_collate_fn([batch])
-        return [prepared_batch]
-
-
 def run(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
     model = LitModel(cfg)
@@ -330,4 +253,4 @@ def run(cfg: DictConfig):
         default_root_dir=cfg.training.output_dir,
     )
 
-    trainer.fit(model)
+    trainer.fit(model, datamodule=GETDataModule(cfg))

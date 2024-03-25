@@ -1,11 +1,24 @@
 from ast import Dict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Generic, TypeVar
 
+from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
 
-from get_model.model.model_refactored import BaseGETModelConfig
-from hydra.core.config_store import ConfigStore
+from get_model.model.model_refactored import BaseGETModelConfig, GETChrombpNetBiasModelConfig
+
+T = TypeVar("T")
+
+def default_cfg():
+    return field(default_factory=T)
+
+def get_target_from_class_name(class_name: str) -> str:
+    return f"get_model.model.model_refactored.{class_name}" #TODO change this to the correct path
+
+@dataclass
+class ModelConfig(Generic[T]):
+    _target_: str = field(default_factory=lambda: get_target_from_class_name(T.__name__))
+    cfg: T = default_cfg()
 
 @dataclass
 class DatasetConfig:
@@ -80,16 +93,14 @@ class FinetuneConfig:
 
 @dataclass
 class Config:
-    model: Any = MISSING
     codebase: str = MISSING
     dataset_name: str = MISSING
+    model: Any = MISSING
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
-
-
 
 cs = ConfigStore.instance()
 cs.store(name="base_config", node=Config)
