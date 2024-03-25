@@ -1,18 +1,11 @@
+from ast import Dict
 from dataclasses import dataclass, field
+from typing import Any
 
 from omegaconf import MISSING
 
-
-@dataclass
-class LossConfig:
-    components: dict = MISSING
-    weights: dict = MISSING
-
-
-@dataclass
-class MetricsConfig:
-    masked = MISSING
-
+from get_model.model.model_refactored import BaseGETModelConfig
+from hydra.core.config_store import ConfigStore
 
 @dataclass
 class DatasetConfig:
@@ -45,6 +38,8 @@ class DatasetConfig:
     non_redundant: bool = False
     filter_by_min_depth: bool = False
     hic_path: str | None = None
+    dataset_configs: dict = MISSING
+
 
 
 @dataclass
@@ -67,7 +62,6 @@ class TrainingConfig:
     clip_grad: float | None = None
     use_fp16: bool = True
     output_dir: str = "/pmglocal/xf2217/output"
-    optimizer: OptimizerConfig = MISSING
 
 
 @dataclass
@@ -82,3 +76,21 @@ class FinetuneConfig:
     model_prefix: str = "model."
     patterns_to_freeze: list = field(default_factory=lambda: [
         "motif_scanner"])
+
+
+@dataclass
+class Config:
+    model: Any = MISSING
+    codebase: str = MISSING
+    dataset_name: str = MISSING
+    dataset: DatasetConfig = field(default_factory=DatasetConfig)
+    training: TrainingConfig = field(default_factory=TrainingConfig)
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    wandb: WandbConfig = field(default_factory=WandbConfig)
+    finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
+
+
+
+cs = ConfigStore.instance()
+cs.store(name="base_config", node=Config)
+

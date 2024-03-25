@@ -76,7 +76,7 @@ class RegionEmbedConfig(BaseConfig):
     Args:
         num_features (int): Number of features.
         embed_dim (int): Dimension of the embedding."""
-    _target_: str = "get_model.smodel.modules.RegionEmbedConfig"
+    _target_: str = "get_model.model.modules.RegionEmbedConfig"
     num_features: int = 800
     embed_dim: int = 768
 
@@ -96,7 +96,7 @@ class RegionEmbed(BaseModule):
     def generate_dummy_data(self, batch_size=1):
         return torch.rand(batch_size, 5, self.cfg.num_features)
 
-
+@dataclass
 class MotifScannerConfig(BaseConfig):
     """
     Configuration class for the motif scanner module.

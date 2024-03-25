@@ -38,5 +38,6 @@ model:
       weights: 
         masked: 1.0
     metrics:
-      masked: ['pearson', 'spearman', 'mse']
+      components:
+        masked: ['pearson', 'spearman', 'mse']
       

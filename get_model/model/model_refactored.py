@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 import torch.nn as nn
@@ -21,6 +21,16 @@ from get_model.model.transformer import GETTransformer
 
 
 @dataclass
+class LossConfig:
+    components: dict = MISSING
+    weights: dict = MISSING
+
+
+@dataclass
+class MetricsConfig:
+    components: dict = MISSING
+
+@dataclass
 class EncoderConfig:
     num_heads: int = MISSING
     embed_dim: int = MISSING
@@ -33,7 +43,7 @@ class EncoderConfig:
 
 
 class GETLoss(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg: LossConfig):
         """
         Initializes the GETLoss class.
 
@@ -60,13 +70,13 @@ class GETLoss(nn.Module):
 
 
 class RegressionMetrics(nn.Module):
-    def __init__(self, _cfg_):
+    def __init__(self, _cfg_: MetricsConfig):
         super(RegressionMetrics, self).__init__()
         self.cfg = _cfg_
         self.metrics = nn.ModuleDict({
             target: nn.ModuleDict({
                 metric_name: self._get_metric(metric_name) for metric_name in metric_names
-            }) for target, metric_names in _cfg_.items()
+            }) for target, metric_names in _cfg_.components.items()
         })
 
     def _get_metric(self, metric_name):
@@ -98,11 +108,18 @@ class RegressionMetrics(nn.Module):
                   for target in result for metric_name in result[target]}
         return result
 
+@dataclass
+class BaseGETModelConfig:
+    freezed: bool | str = False
+    loss: LossConfig = MISSING
+    metrics: MetricsConfig = MISSING
 
 class BaseGETModel(BaseModule):
     def __init__(self, cfg: BaseConfig):
-        super(BaseGETModel, self).__init__(cfg)
+        super().__init__(cfg)
         self.cfg = cfg
+        self.loss = GETLoss(cfg.loss)
+        self.metrics = RegressionMetrics(cfg.metrics)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -171,16 +188,31 @@ class BaseGETModel(BaseModule):
 
 
 @dataclass
+class GETPretrainModelConfig(BaseGETModelConfig):
+    num_regions: int = 10
+    num_motif: int = 637
+    embed_dim: int = 768
+    num_layers: int = 12
+    num_heads: int =12
+    dropout: float =0.1
+    output_dim: int = 800
+    flash_attn: bool =False
+    pool_method: str = 'mean'
+    motif_scanner: MotifScannerConfig = field(default_factory=MotifScannerConfig)
+    atac_attention: ATACSplitPoolConfig = field(default_factory=ATACSplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_mask: dict = field(default_factory=lambda: {'in_features': 768, 'out_features': 800})
+    mask_token: dict = field(default_factory=lambda: {'embed_dim': 768, 'std': 0.02})
+
+@dataclass
 class GETPretrainConfig:
     _target_: str = "get_model.model.model_refactored.GETPretrain"
-    motif_scanner: MotifScannerConfig = MISSING
-    atac_attention: ATACSplitPoolConfig = MISSING
-    region_embed: RegionEmbedConfig = MISSING
-    encoder: EncoderConfig = MISSING
+    cfg: GETPretrainModelConfig = field(default_factory=GETPretrainModelConfig)
 
 
 class GETPretrain(BaseGETModel):
-    def __init__(self, cfg: GETPretrainConfig):
+    def __init__(self, cfg: GETPretrainModelConfig):
         super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
         self.atac_attention = ATACSplitPool(cfg.atac_attention)
@@ -190,8 +222,6 @@ class GETPretrain(BaseGETModel):
         self.mask_token = nn.Parameter(
             torch.zeros(1, 1, cfg.mask_token.embed_dim))
         trunc_normal_(self.mask_token, std=cfg.mask_token.std)
-        self.loss = GETLoss(cfg.loss)
-        self.metrics = RegressionMetrics(cfg.metrics)
 
         self.apply(self._init_weights)
 
@@ -240,31 +270,37 @@ class GETPretrain(BaseGETModel):
 
 
 @dataclass
-class GETPretrainMaxNormConfig(GETPretrainConfig):
-    _target_: str = "get_model.model.model_refactored.GETPretrainMaxNorm"
-    atac_attention: ATACSplitPoolMaxNormConfig = MISSING
+class GETPretrainMaxNormModelConfig(GETPretrainModelConfig):
+    atac_attention: ATACSplitPoolMaxNormConfig = field(default_factory=ATACSplitPoolMaxNormConfig)
 
+@dataclass 
+class GETPretrainMaxNormConfig:
+    _target_: str = "get_model.model.model_refactored.GETPretrainMaxNorm"
+    cfg: GETPretrainMaxNormModelConfig = field(default_factory=GETPretrainMaxNormModelConfig)
 
 class GETPretrainMaxNorm(GETPretrain):
-    def __init__(self, cfg: GETPretrainMaxNormConfig):
+    def __init__(self, cfg: GETPretrainMaxNormModelConfig):
         super().__init__(cfg)
         self.atac_attention = ATACSplitPoolMaxNorm(cfg.atac_attention)
 
 
 @dataclass
-class GETFinetuneConfig:
-    _target_: str = "get_model.model.model_refactored.GETFinetune"
-    motif_scanner: MotifScannerConfig = MISSING
-    atac_attention: ATACSplitPoolConfig = MISSING
-    region_embed: RegionEmbedConfig = MISSING
-    encoder: EncoderConfig = MISSING
-    head_exp: ExpressionHeadConfig = MISSING
+class GETFinetuneModelConfig(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = field(default_factory=MotifScannerConfig)
+    atac_attention: ATACSplitPoolConfig = field(default_factory=ATACSplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(default_factory=ExpressionHeadConfig)
     use_atac: bool = False
     final_bn: bool = False
 
+@dataclass
+class GETFinetuneConfig:
+    _target_: str = "get_model.model.model_refactored.GETFinetune"
+    cfg: GETFinetuneModelConfig = field(default_factory=GETFinetuneModelConfig)
 
 class GETFinetune(BaseGETModel):
-    def __init__(self, cfg: GETFinetuneConfig):
+    def __init__(self, cfg: GETFinetuneModelConfig):
         super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
         self.atac_attention = ATACSplitPool(cfg.atac_attention)
@@ -315,26 +351,32 @@ class GETFinetune(BaseGETModel):
 
 
 @dataclass
-class GETFinetuneMaxNormConfig(GETFinetuneConfig):
-    _target_: str = "get_model.model.model_refactored.GETFinetuneMaxNorm"
+class GETFinetuneMaxNormModelConfig(GETFinetuneModelConfig):
     atac_attention: ATACSplitPoolMaxNormConfig = MISSING
 
+@dataclass
+class GETFinetuneMaxNormConfig:
+    _target_: str = "get_model.model.model_refactored.GETFinetuneMaxNorm"
+    cfg: GETFinetuneMaxNormModelConfig = field(default_factory=GETFinetuneMaxNormModelConfig)
 
 class GETFinetuneMaxNorm(GETFinetune):
-    def __init__(self, cfg: GETFinetuneMaxNormConfig):
+    def __init__(self, cfg: GETFinetuneMaxNormModelConfig):
         super().__init__(cfg)
         self.atac_attention = ATACSplitPoolMaxNorm(cfg.atac_attention)
 
 
 @dataclass
-class GETChrombpNetBiasConfig:
-    _target_: str = "get_model.model.model_refactored.GETChrombpNetBias"
+class GETChrombpNetBiasModelConfig(BaseGETModelConfig):
     motif_scanner: MotifScannerConfig = MISSING
     atac_attention: ConvPoolConfig = MISSING
 
+@dataclass
+class GETChrombpNetBiasConfig:
+    _target_: str = "get_model.model.model_refactored.GETChrombpNetBias"
+    cfg: GETChrombpNetBiasModelConfig = field(default_factory=GETChrombpNetBiasModelConfig)
 
 class GETChrombpNetBias(BaseGETModel):
-    def __init__(self, cfg: GETChrombpNetBiasConfig):
+    def __init__(self, cfg: GETChrombpNetBiasModelConfig):
         super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
         self.atac_attention = ConvPool(cfg.atac_attention)
@@ -394,16 +436,20 @@ class GETChrombpNetBias(BaseGETModel):
 
 
 @dataclass
-class GETChrombpNetConfig(GETChrombpNetBiasConfig):
-    _target_: str = "get_model.model.model_refactored.GETChrombpNet"
+class GETChrombpNetModelConfig(GETChrombpNetBiasModelConfig):
     motif_scanner: MotifScannerConfig = MISSING
     atac_attention: ConvPoolConfig = MISSING
     with_bias: bool = False
-    bias_model: GETChrombpNetBiasConfig = MISSING
+    bias_model: GETChrombpNetBiasModelConfig = MISSING
     bias_ckpt: str = None
 
+@dataclass
+class GETChrombpNetConfig:
+    _target_: str = "get_model.model.model_refactored.GETChrombpNet"
+    cfg: GETChrombpNetModelConfig = field(default_factory=GETChrombpNetModelConfig)
+    
 class GETChrombpNet(GETChrombpNetBias):
-    def __init__(self, cfg: GETChrombpNetConfig):
+    def __init__(self, cfg: GETChrombpNetModelConfig):
         super().__init__(cfg)
         self.with_bias = cfg.with_bias
         self.bias_model = cfg.bias_model

@@ -1,12 +1,11 @@
-from dataclasses import dataclass
+import logging
+import os.path
 
 import hydra
 import lightning as L
 import torch
-import torch.nn.functional as F
 import torch.utils.data
 from caesar.io.zarr_io import DenseZarrIO
-from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
@@ -14,37 +13,14 @@ from lightning.pytorch.plugins import MixedPrecision
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import MISSING, DictConfig
 
-from get_model.config.config import (DatasetConfig, FinetuneConfig, LossConfig,
-                                     MetricsConfig, TrainingConfig, OptimizerConfig,
-                                     WandbConfig)
-
+from get_model.config.config import *
 from get_model.dataset.collate import get_rev_collate_fn
-from get_model.dataset.dataset import build_dataset_zarr
-from get_model.model.modules import *
+from get_model.dataset.zarr_dataset import DenseZarrIO, PretrainDataset
 from get_model.model.model_refactored import *
+from get_model.model.modules import *
 from get_model.optim import create_optimizer
 from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys
 
-@dataclass
-class Config:
-    model: BaseConfig = MISSING
-    loss: LossConfig = MISSING
-    metrics: MetricsConfig = MISSING
-    dataset: DatasetConfig = MISSING
-    training: TrainingConfig = MISSING
-    wandb: WandbConfig = MISSING
-    finetune: FinetuneConfig = MISSING
-
-cs = ConfigStore.instance()
-cs.store(name="config", node=Config)
-
-cs.store(group="loss", name="base_loss", node=LossConfig)
-cs.store(group="metrics", name="base_metrics", node=MetricsConfig)
-cs.store(group="dataset", name="base_dataset", node=DatasetConfig)
-cs.store(group="training", name="base_training", node=TrainingConfig)
-cs.store(group="training.optimizer", name="base_optimizer", node=OptimizerConfig)
-cs.store(group="wandb", name="base_wandb", node=WandbConfig)
-cs.store(group="finetune", name="base_finetune", node=FinetuneConfig)
 
 
 class LitModel(L.LightningModule):
@@ -127,7 +103,7 @@ class LitModel(L.LightningModule):
             f'{self.cfg.dataset.data_path}/hg38.zarr', dtype='int8')
         sequence_obj.load_to_memory_dense()
         dataset_train = build_dataset_zarr(
-            is_train=True, args=self.cfg.dataset, sequence_obj=sequence_obj)
+            self.cfg.dataset, sequence_obj=sequence_obj)
         return torch.utils.data.DataLoader(
             dataset_train,
             batch_size=self.cfg.dataset.batch_size,
@@ -141,7 +117,7 @@ class LitModel(L.LightningModule):
             f'{self.cfg.dataset.data_path}/hg38.zarr', dtype='int8')
         sequence_obj.load_to_memory_dense()
         dataset_eval = build_dataset_zarr(
-            is_train=False, args=self.cfg.dataset, sequence_obj=sequence_obj)
+            args=self.cfg.dataset, sequence_obj=sequence_obj)
         return torch.utils.data.DataLoader(
             dataset_eval,
             batch_size=self.cfg.dataset.batch_size,
@@ -156,17 +132,79 @@ class GETDataModule(L.LightningDataModule):
         super().__init__()
         self.cfg = cfg
 
+    def build_dataset_zarr(self, sequence_obj) -> None:
+        config = self.cfg.dataset.dataset_configs[self.cfg.dataset_name]
+        dataset_name = config.data_set if config.is_train else config.eval_data_set
+        logging.info(f'Using {dataset_name}')
+
+        root = config.data_path
+        codebase = config.codebase
+        assembly = config.assembly
+
+        if sequence_obj is None:
+            sequence_obj = DenseZarrIO(f'{root}/{assembly}.zarr', dtype='int8')
+            sequence_obj.load_to_memory_dense()
+        else:
+            logging.info('sequence_obj is provided')
+            sequence_obj = sequence_obj
+
+        # Create dataset with configuration parameters
+        dataset = PretrainDataset(
+            is_train=config.is_train,
+            sequence_obj=sequence_obj,
+            zarr_dirs=config.zarr_dirs,
+            genome_seq_zarr=f'{root}/{assembly}.zarr',
+            genome_motif_zarr=f'{root}/{assembly}_motif_result.zarr',
+            use_insulation=config.use_insulation,
+            insulation_paths=[
+                f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.adjecent.feather',
+                f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.longrange.feather'],
+            hic_path=config.hic_path,
+
+            peak_name=config.peak_name,
+            additional_peak_columns=config.additional_peak_columns,
+            max_peak_length=config.max_peak_length,
+            center_expand_target=config.center_expand_target,
+            n_peaks_lower_bound=config.n_peaks_lower_bound,
+            n_peaks_upper_bound=config.n_peaks_upper_bound,
+            n_peaks_sample_gap=config.n_peaks_upper_bound,
+            non_redundant=config.non_redundant,
+            filter_by_min_depth=config.filter_by_min_depth,
+
+            preload_count=config.preload_count,
+            n_packs=config.n_packs,
+
+            padding=config.padding,
+            mask_ratio=config.mask_ratio,
+            negative_peak_name=config.negative_peak_name,
+            negative_peak_ratio=config.negative_peak_ratio,
+            random_shift_peak=config.random_shift_peak,
+            peak_inactivation=config.peak_inactivation,
+
+            leave_out_celltypes=config.leave_out_celltypes,
+            leave_out_chromosomes=config.leave_out_chromosomes,
+            dataset_size=config.dataset_size,
+        )
+
+        return dataset
+
+
     def prepare_data(self):
         pass
 
     def setup(self, stage=None):
         sequence_obj = DenseZarrIO(
-            f'{self.cfg.dataset.data_path}/hg38.zarr', dtype='int8')
+            f'{self.cfg.dataset.data_path}/{self.cfg.assembly}.zarr', dtype='int8')
         sequence_obj.load_to_memory_dense()
-        self.dataset_train = build_dataset_zarr(
-            is_train=True, args=self.cfg.dataset, sequence_obj=sequence_obj)
-        self.dataset_eval = build_dataset_zarr(
-            is_train=False, args=self.cfg.dataset, sequence_obj=sequence_obj)
+        if stage == 'fit' or stage is None:
+            self.dataset_train = self.build_dataset_zarr(sequence_obj=sequence_obj)
+            self.dataset_val = self.build_dataset_zarr(sequence_obj=sequence_obj)
+        if stage == 'test' or stage is None:
+            self.dataset_test = self.build_dataset_zarr(sequence_obj=sequence_obj)
+        if stage == 'predict' or stage is None:
+            self.dataset_predict = self.build_dataset_zarr(sequence_obj=sequence_obj)
+        if stage == 'validate' or stage is None:
+            self.dataset_val = self.build_dataset_zarr(sequence_obj=sequence_obj)
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
@@ -179,16 +217,97 @@ class GETDataModule(L.LightningDataModule):
 
     def val_dataloader(self):
         return torch.utils.data.DataLoader(
-            self.dataset_eval,
+            self.dataset_val,
             batch_size=self.cfg.dataset.batch_size,
             num_workers=self.cfg.dataset.num_workers,
             drop_last=True,
             collate_fn=get_rev_collate_fn,
         )
     
-# cs.store(group="model", name="base_finetune_model", node=GETFinetuneConfig)
-# cs.store(group="model.head_exp", name="base_expression_head", node=ExpressionHeadConfig)
-# cs.store(group="model", name="base_finetune_chrombpnet_bias_model", node=GETFinetuneChrombpNetBiasConfig)
+    def test_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.dataset_test,
+            batch_size=self.cfg.dataset.batch_size,
+            num_workers=self.cfg.dataset.num_workers,
+            drop_last=True,
+            collate_fn=get_rev_collate_fn,
+        )
+    
+    def predict_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.dataset_predict,
+            batch_size=self.cfg.dataset.batch_size,
+            num_workers=self.cfg.dataset.num_workers,
+            drop_last=True,
+            collate_fn=get_rev_collate_fn,
+        )
+    
+
+class GETVariantInferenceDataModule(L.LightningDataModule):
+    def __init__(self, cfg: DictConfig):
+        super().__init__()
+        self.cfg = cfg
+        self.dataset = None
+        self.model = None
+        self.variant_info = None
+        self.chr_name = None
+        self.variant_coord = None
+        self.peak_info = None
+        self.track_start = None
+        self.track_end = None
+        self.variant_peak = None
+
+    def setup(self, stage=None):
+        if stage == 'predict' or stage is None:
+            sequence_obj = DenseZarrIO(f'{self.cfg.dataset.data_path}/{self.cfg.assembly}.zarr', dtype='int8')
+            sequence_obj.load_to_memory_dense()
+            self.dataset = instantiate(self.cfg.dataset, sequence_obj=sequence_obj)
+            self.model = instantiate(self.cfg.model)
+
+            self.variant_info = pd.DataFrame(self.cfg.variant_info)
+            self.chr_name = self.variant_info['Chromosome'].values[0]
+            self.variant_coord = self.variant_info['Start'].values[0]
+
+            peak_info = self.dataset.datapool._query_peaks(
+                self.cfg.cell_type, self.chr_name, self.variant_coord - 4000000, self.variant_coord + 4000000
+            ).reset_index(drop=True).reset_index()
+            self.peak_info = peak_info
+
+            self.track_start, self.track_end, self.variant_peak = self.get_peak_start_end_from_variant(
+                self.variant_info, self.peak_info
+            )
+
+    def get_peak_start_end_from_variant(self, variant_info, peak_info):
+        from pyranges import PyRanges as pr
+        chr_name = variant_info['Chromosome'].values[0]
+        variant_coord = variant_info['Start'].values[0]
+
+        df = pr(peak_info.copy().reset_index()).join(
+            pr(variant_info.copy()[['Chromosome', 'Start', 'End']]),
+            how='left', suffix="_variant", apply_strand_suffix=False
+        ).df[['index', 'Chromosome', 'Start', 'End', 'Start_variant', 'End_variant']].set_index('index')
+        variant_peak = df.query('Start_variant>=Start & End_variant<=End').index.values
+
+        if variant_peak.shape[0] == 0:
+            raise ValueError(f"Variant not found in the peak information.")
+
+        peak_start = max(0, variant_peak.min() - self.dataset.n_peaks_upper_bound // 2)
+        peak_end = min(peak_info.shape[0] - 1, variant_peak.max() + self.dataset.n_peaks_upper_bound // 2)
+        variant_peak = variant_peak - peak_start
+
+        track_start = peak_info.iloc[peak_start].Start - self.dataset.padding
+        track_end = peak_info.iloc[peak_end].End + self.dataset.padding
+
+        return track_start, track_end, variant_peak
+
+    def predict_dataloader(self):
+        batch = self.dataset.datapool.generate_sample(
+            self.chr_name, self.track_start, self.track_end, self.dataset.datapool.data_keys[0],
+            self.cfg.cell_type, mut=self.cfg.mut
+        )
+        prepared_batch = get_rev_collate_fn([batch])
+        return [prepared_batch]
+
 
 def run(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
@@ -198,7 +317,6 @@ def run(cfg: DictConfig):
         accelerator="gpu",
         num_sanity_val_steps=10,
         strategy="auto",
-        profiler="simple",
         devices=cfg.training.num_devices,
         logger=[WandbLogger(project=cfg.wandb.project_name,
                             name=cfg.wandb.run_name)],
@@ -213,35 +331,3 @@ def run(cfg: DictConfig):
     )
 
     trainer.fit(model)
-
-@hydra.main(config_path="config/model/pretrain", config_name="GETPretrain", version_base="1.3")
-def get_pretrain(cfg: DictConfig):
-
-    run(cfg)
-
-@hydra.main(config_path="config", config_name="pretrain_pc", version_base="1.3")
-def get_pretrain_maxnorm(cfg: DictConfig):
-    cs.store(group="model", name="base_model", node=GETPretrainMaxNormConfig)
-    cs.store(group="model.motif_scanner", name="base_motif_scanner", node=MotifScannerConfig)
-    cs.store(group="model.atac_attention", name="base_atac_attention", node=ATACSplitPoolMaxNormConfig)
-    cs.store(group="model.region_embed", name="base_region_embed", node=RegionEmbedConfig)
-    cs.store(group="model.encoder", name="base_encoder", node=EncoderConfig)
-    run(cfg)
-
-@hydra.main(config_path="config/model/finetune", config_name="GETFinetune", version_base="1.3")
-def get_finetune(cfg: DictConfig):
-    run(cfg)
-
-@hydra.main(config_path="config/model/finetune", config_name="GETFinetuneMaxNorm", version_base="1.3")
-def get_finetune_maxnorm(cfg: DictConfig):
-    run(cfg)
-
-@hydra.main(config_path="config/model/finetune", config_name="GETFinetuneChrombpNetBias", version_base="1.3")
-def get_finetune_chrombpnet_bias(cfg: DictConfig):
-    run(cfg)
-
-
-
-
-if __name__ == "__main__":
-    get_pretrain_maxnorm()

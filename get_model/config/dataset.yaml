@@ -1,0 +1,35 @@
+defaults:
+  - dataset_template
+
+dataset_configs:
+  pretrain:
+    data_set: "Pretrain"
+    eval_data_set: null
+    zarr_dirs:
+      - "${data_path}/shendure_fetal_dense.zarr"
+      - "${data_path}/encode_hg38atac_dense.zarr"
+      - "${data_path}/vijay_hematopoiesis_dense.zarr"
+      - "${data_path}/htan_gbm_dense.zarr"
+      - "${data_path}/bingren_adult_dense.zarr"
+    leave_out_celltypes: null
+    additional_peak_columns: null
+
+  pretrain_gbm_eval:
+    data_set: "Pretrain.GBM_eval"
+    eval_data_set: null
+    zarr_dirs:
+      - "${data_path}/htan_gbm_dense.zarr"
+    leave_out_celltypes: null
+    additional_peak_columns: null
+    dataset_size: 4096
+
+  finetune_k562:
+    data_set: "Expression_Finetune_k562.Chr4&14"
+    eval_data_set: "Expression_Finetune_k562.Chr4&14.Eval"
+    zarr_dirs:
+      - "${data_path}/encode_hg38atac_dense.zarr"
+    leave_out_celltypes: "k562"
+    leave_out_chromosomes: "chr4,chr14"
+    dataset_size: 8192
+
+  # Add more dataset configurations as needed
