@@ -1,3 +1,28 @@
+import logging
+
+import lightning as L
+from matplotlib import pyplot as plt
+import pandas as pd
+import torch
+import torch.utils.data
+from caesar.io.zarr_io import DenseZarrIO
+from caesar.io.gencode import Gencode
+from hydra.utils import instantiate
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.plugins import MixedPrecision
+from lightning.pytorch.utilities import grad_norm
+from omegaconf import MISSING, DictConfig
+
+from get_model.config.config import *
+from get_model.dataset.collate import get_rev_collate_fn
+from get_model.dataset.zarr_dataset import DenseZarrIO, InferenceDataset, PretrainDataset
+from get_model.model.model_refactored import *
+from get_model.model.modules import *
+from get_model.optim import create_optimizer
+from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys
+import seaborn as sns
+
 
 @dataclass
 class BaseTaskConfig:
@@ -18,6 +43,7 @@ class PeakTaskConfig(BaseTaskConfig):
 class BaseTask:
     def __init__(self, cfg: BaseTaskConfig):
         self.cfg = cfg
+        self.gencode = Gencode(cfg.assembly)
         self.load_metadata()
 
     def load_metadata(self):
@@ -37,23 +63,46 @@ class MutationTask(BaseTask):
         self.load_mutation_file()
 
     def load_mutation_file(self):
-        mutations = pd.read_csv(self.mutation_file)
+        mutations = pd.read_csv(self.cfg.mutation_file)
         self.mutations = mutations
 
-    def wt_dataloader(self):
-        pass
+    def wt_dataloader(self, lm):
+        dataset = InferenceDataset(**lm.dataset_config)
+        dataloader = torch.utils.data.DataLoader(
+            dataset, batch_size=1, collate_fn=get_rev_collate_fn)
+        return dataloader
 
-    def mut_dataloader(self):
-        pass
+    def mut_dataloader(self, lm):
+        dataset = InferenceDataset(
+            **lm.dataset_config, gencode_obj=lm.gencode, mut=self.mutations)
+        dataloader = torch.utils.data.DataLoader(
+            dataset, batch_size=1, collate_fn=get_rev_collate_fn)
+        return dataloader
 
-    def predict(self, lm: LitModel):
+    def predict(self, lm):
+        lm.model.eval()
         wt_predictions = []
         mut_predictions = []
-        for batch in self.wt_dataloader:
-            wt_predictions.append(lm.model(batch))
 
-        for batch in self.mut_dataloader:
-            mut_predictions.append(lm.model(batch))
+        for batch in self.wt_dataloader(lm):
+            with torch.no_grad():
+                wt_predictions.append(lm.model(batch))
+
+        for batch in self.mut_dataloader(lm):
+            with torch.no_grad():
+                mut_predictions.append(lm.model(batch))
+
+        self.wt_predictions = wt_predictions
+        self.mut_predictions = mut_predictions
 
     def plot(self):
-        pass
+        # Prepare data for plotting
+        plot_data = pd.DataFrame({
+            '% change to PPIF expression': self.mutations['% change to PPIF expression'],
+            'ap_fc': self.mut_predictions - self.wt_predictions
+        })
+
+        # Create plot
+        sns.scatterplot(data=plot_data.query(
+            'Screen.str.contains("Pro")'), x='% change to PPIF expression', y='ap_fc')
+        plt.savefig('mutation_impact.png')

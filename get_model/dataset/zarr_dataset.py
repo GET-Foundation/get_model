@@ -184,9 +184,8 @@ class ZarrDataPool(object):
     This class is used by PretrainDataset to load data from zarr files.
     """
 
-    def __init__(self, zarr_dirs, genome_seq_zarr, insulation_paths, peak_name='peaks',
-                 negative_peak_name=None, negative_peak_ratio=0.1, insulation_subsample_ratio=0.1,
-                 max_peak_length=None, center_expand_target=None, sequence_obj=None,
+    def __init__(self, zarr_dirs=None, genome_seq_zarr=None, sequence_obj=None, insulation_paths=None, peak_name='peaks', negative_peak_name=None, negative_peak_ratio=0.1, insulation_subsample_ratio=0.1,
+                 max_peak_length=None, center_expand_target=None,
                  motif_mean_std_obj=None, additional_peak_columns=None, leave_out_celltypes=None,
                  leave_out_chromosomes=None, non_redundant='max_depth', random_shift_peak=None,
                  filter_by_min_depth=None, is_train=True, hic_path=None):
@@ -1269,12 +1268,17 @@ def worker_init_fn_get(worker_id):
 
 
 class InferenceDataset(PretrainDataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, gencode_obj, peak_name='peaks',
-                 n_peaks_upper_bound=100, sequence_obj=None, additional_peak_columns=None, center_expand_target=1000, max_peak_length=5000, use_insulation=False, random_shift_peak=None, hic_path=None):
-        super().__init__(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name=peak_name, n_peaks_upper_bound=n_peaks_upper_bound, sequence_obj=sequence_obj, additional_peak_columns=additional_peak_columns, n_packs=1,
-                         max_peak_length=max_peak_length,  use_insulation=use_insulation, center_expand_target=center_expand_target, preload_count=1, insulation_subsample_ratio=1, random_shift_peak=random_shift_peak, hic_path=hic_path, dataset_size=400)
+    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, gencode_obj, gene_list, peak_name='peaks', n_peaks_upper_bound=100, sequence_obj=None, additional_peak_columns=None, center_expand_target=1000, max_peak_length=5000, use_insulation=False, random_shift_peak=None, hic_path=None, mut=None, peak_inactivation=None, padding=1000):
+        super().__init__(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name=peak_name, n_peaks_upper_bound=n_peaks_upper_bound,
+                         sequence_obj=sequence_obj, additional_peak_columns=additional_peak_columns, n_packs=1,
+                         max_peak_length=max_peak_length, use_insulation=use_insulation, center_expand_target=center_expand_target,
+                         preload_count=1, insulation_subsample_ratio=1, random_shift_peak=random_shift_peak, hic_path=hic_path, dataset_size=400)
         self.gencode_obj = gencode_obj
+        self.gene_list = gene_list
         self.tss_chunk_idx = self._generate_tss_chunk_idx()
+        self.mut = mut
+        self.peak_inactivation = peak_inactivation
+        self.padding = padding
 
     def _generate_tss_chunk_idx(self):
         """Determine the windows to extract for each gene"""
@@ -1282,26 +1286,20 @@ class InferenceDataset(PretrainDataset):
             self.tss_chunk_idx = pd.read_feather(
                 self.gencode_obj.feather_file.replace('.feather', '_tss_chunk_idx.feather'))
             return self.tss_chunk_idx
-        self.tss_chunk_idx = self.gencode_obj.gtf.copy()
-        for i, row in tqdm(self.gencode_obj.gtf.iterrows()):
+
+        self.tss_chunk_idx = self.gencode_obj.gtf.query(
+            'gene_name in @self.gene_list').copy()
+        for i, row in tqdm(self.tss_chunk_idx.iterrows()):
             # get window_index for each gene
             gene_chr = row.Chromosome
             gene_start = row.Start
             self.tss_chunk_idx.loc[i, 'chunk_idx'] = self.datapool._get_chunk_idx(
                 gene_chr, gene_start)
+
         # save the tss_chunk_idx as feather in the same directory as the gencode file
         self.tss_chunk_idx.to_feather(self.gencode_obj.feather_file.replace(
             '.feather', '_tss_chunk_idx.feather'))
         return self.tss_chunk_idx
-
-    def _get_window_idx_for_tss_and_celltype(self, data_key, celltype_id, tss_idx):
-        """Get window index for a gene and celltype"""
-        chunk_idx = self.tss_chunk_idx.loc[tss_idx, 'chunk_idx']
-        gene_name = self.tss_chunk_idx.loc[tss_idx, 'gene_name']
-        start = self.tss_chunk_idx.loc[tss_idx, 'Start']
-        return {'gene_name': gene_name,
-                'window_idx': np.array([self.datapool._get_window_index_from_chunk_idx(data_key, celltype_id, chunk_idx)]),
-                'Start': start}
 
     def _get_window_idx_for_gene_and_celltype(self, data_key, celltype_id, gene_name):
         """Get window index for a gene and celltype"""
@@ -1319,13 +1317,89 @@ class InferenceDataset(PretrainDataset):
         return gene_df
 
     def __len__(self):
-        return self.tss_chunk_idx['chunk_idx'].unique().shape[0] * self.datapool.n_celltypes
+        return len(self.gene_list) * self.datapool.n_celltypes
 
     def __getitem__(self, idx):
-        celltype_idx = idx // self.tss_chunk_idx['chunk_idx'].unique().shape[0]
-        chunk_idx = self.tss_chunk_idx['chunk_idx'].unique(
-        )[idx % self.tss_chunk_idx['chunk_idx'].unique().shape[0]]
+        celltype_idx = idx // len(self.gene_list)
+        gene_idx = idx % len(self.gene_list)
+        gene_name = self.gene_list[gene_idx]
         data_key, celltype_id = self.datapool._get_celltype(celltype_idx)
-        window_idx = self.datapool._get_window_index_from_chunk_idx(
-            data_key, celltype_id, chunk_idx)
-        return window_idx
+        window_idx = self._get_window_idx_for_gene_and_celltype(
+            data_key, celltype_id, gene_name)['window_idx']
+        return self.datapool.generate_sample(data_key, celltype_id, window_idx[0])
+
+    def get_gene_item(self, gene_name):
+        for celltype_idx in range(self.datapool.n_celltypes):
+            data_key, celltype_id = self.datapool._get_celltype(celltype_idx)
+            window_idx = self._get_window_idx_for_gene_and_celltype(
+                data_key, celltype_id, gene_name)['window_idx']
+            yield self.datapool.generate_sample(data_key, celltype_id, window_idx[0])
+
+    def get_item_for_gene_in_celltype(self, gene_name, celltype, track_start=None, track_end=None, offset=0, mut=None, peak_inactivation=None):
+        data_key = self.datapool.data_keys[0]
+        window_idx = self._get_window_idx_for_gene_and_celltype(
+            data_key, celltype, gene_name)['window_idx']
+        gene_info = self._get_gene_info_from_window_idx(
+            window_idx[0]).query('gene_name==@gene_name')
+        chr_name = gene_info['Chromosome'].values[0]
+        tss_coord = gene_info.Start.values[0]
+
+        peak_info = self.datapool._query_peaks(
+            celltype, chr_name, tss_coord-4000000, tss_coord+4000000).reset_index(drop=True).reset_index()
+        track_start, track_end, tss_peak, peak_start, strand = self.get_peak_start_end_from_gene_peak(
+            gene_info, peak_info, gene_name, track_start, track_end)
+
+        if mut is None:
+            mut = self.mut
+        if peak_inactivation is None:
+            peak_inactivation = self.peak_inactivation
+
+        sample = self.datapool.generate_sample(
+            chr_name, track_start, track_end, data_key, celltype, mutations=mut, peak_inactivation=peak_inactivation, padding=self.padding)
+        tss_peak = tss_peak - offset
+        mut_peak = None
+        if mut is not None:
+            mut_peak = pr(peak_info).join(
+                pr(mut)).df['index'].values - offset - peak_start
+
+        return {'sample': sample, 'tss_peak': tss_peak, 'mut_peak': mut_peak, 'strand': strand, 'gene_name': gene_name, 'celltype': celltype}
+
+    def get_peak_start_end_from_gene_peak(self, gene_info, peak_info, gene, track_start=None, track_end=None):
+        """
+        Determine the peak start and end positions for a specific gene.
+
+        Parameters:
+        - gene_info (DataFrame): Gene information DataFrame.
+        - peak_info (DataFrame): Peak information DataFrame.
+        - gene (str): The name of the gene.
+
+        Returns:
+        - tuple: The start and end indices of the peak.
+        """
+        columns_to_include = ['index', 'Chromosome', 'Start',
+                              'End',  'gene_name', 'Strand', 'chunk_idx']
+        if self.additional_peak_columns is not None:
+            columns_to_include += self.additional_peak_columns
+        df = pr(peak_info.copy().reset_index()).join(pr(gene_info.copy().query('gene_name==@gene')[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates(
+        )).extend(300), suffix="_gene", how='left', apply_strand_suffix=False).df[columns_to_include].set_index('index')
+        gene_df = df.query('gene_name==@gene')
+        strand = gene_df.Strand.replace({'+': 1, '-': -1}).values[0]
+        if gene_df.shape[0] == 0:
+            raise ValueError(f"Gene {gene} not found in the peak information.")
+        tss_peak = gene_df.index.values[0]
+        if track_start is None or track_end is None:
+            # Get the peak start and end positions based on n_peaks_upper_bound
+            peak_start, peak_end = tss_peak - self.n_peaks_upper_bound // 2, tss_peak + \
+                self.n_peaks_upper_bound // 2
+            tss_peak = tss_peak - peak_start
+        else:
+            peak_info_subset = peak_info.query(
+                'Chromosome==@chr_name').query('Start>=@track_start & End<=@track_end')
+            peak_start, peak_end = peak_info_subset.index.min(), peak_info_subset.index.max()
+            tss_peak = pr(peak_info_subset).join(
+                pr(gene_df)).df['index'].values
+            tss_peak = tss_peak - peak_start
+        track_start = peak_info.iloc[peak_start].Start-self.padding
+        track_end = peak_info.iloc[peak_end].End+self.padding
+
+        return track_start, track_end, tss_peak, peak_start, strand

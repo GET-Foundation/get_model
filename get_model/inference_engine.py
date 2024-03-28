@@ -204,6 +204,53 @@ class InferenceEngine:
         return track_start, track_end, tss_peak, peak_start, strand
 
 
+class InferenceEngine:
+    def __init__(self, dataset, model_checkpoint, with_sequence=False, device='cuda', model=None):
+        self.dataset = dataset
+        self.model_wrapper = ModelWrapper(
+            model_checkpoint, with_sequence=with_sequence, device=device, model=model)
+
+    def run_inference_with_batch(self, sample):
+        batch = [sample]
+        prepared_batch = get_rev_collate_fn(batch)
+        inference_results = self.model_wrapper.infer(prepared_batch)
+        inference_results = {
+            'pred_exp': inference_results['pred_exp'],
+            'ob_exp': inference_results['ob_exp'],
+            'pred_atac': inference_results['pred_atac'],
+            'ob_atac': inference_results['ob_atac']
+        }
+
+        prepared_batch = {
+            'sample_track': prepared_batch['sample_track'],
+            'sample_peak_sequence': prepared_batch['sample_peak_sequence'],
+            'metadata': prepared_batch['metadata'],
+            'celltype_peaks': prepared_batch['celltype_peaks'],
+            'chunk_size': prepared_batch['chunk_size'],
+            'mask': prepared_batch['mask'],
+            'n_peaks': prepared_batch['n_peaks'],
+            'max_n_peaks': prepared_batch['max_n_peaks'],
+            'total_peak_len': prepared_batch['total_peak_len'],
+            'motif_mean_std': prepared_batch['motif_mean_std'],
+            'exp_label': prepared_batch['exp_label'],
+            'atpm': prepared_batch['atpm'],
+            'hic_matrix': prepared_batch['hic_matrix']
+        }
+        return inference_results, prepared_batch
+
+    def run_inference_for_gene_and_celltype(self, gene_name, celltype, track_start=None, track_end=None, offset=0, mut=None, peak_inactivation=None):
+        item = self.dataset.get_item_for_gene_in_celltype(
+            gene_name, celltype, track_start, track_end, offset, mut, peak_inactivation)
+        sample = item['sample']
+        tss_peak = item['tss_peak']
+        mut_peak = item['mut_peak']
+
+        inference_results, prepared_batch = self.run_inference_with_batch(
+            sample)
+
+        return inference_results, prepared_batch, tss_peak, mut_peak
+
+
 class VariantInferenceEngine(InferenceEngine):
     def __init__(self, dataset, model_checkpoint, mut, with_sequence=False, device='cuda', model=None):
         super().__init__(dataset, model_checkpoint, mut=mut,
