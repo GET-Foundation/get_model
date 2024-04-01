@@ -3,4 +3,4 @@ codebase: "/burg/pmg/users/xf2217/repos/get_model/"
 output_dir: "/pmglocal/xf2217/output"
 num_devices: 1
 num_workers: 32
-batch_size: 16
+batch_size: 4

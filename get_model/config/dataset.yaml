@@ -29,7 +29,18 @@ dataset_configs:
     leave_out_chromosomes: "chr4,chr14"
     random_shift_peak: null
     peak_name: "peaks_p0.05_tissue_open_exp"
-    mutations: '/home/xf2217/Projects/get_data/prepared_data.tsv'
+    mutations: "/home/xf2217/Projects/get_data/prepared_data.tsv"
     dataset_size: 4096
 
+  finetune_thp1:
+    data_set: "Expression_Finetune_thp1.Chr4&14"
+    eval_data_set: "Expression_Finetune_thp1.Chr4&14.Eval"
+    zarr_dirs:
+      - "encode_hg38atac_dense.zarr"
+    leave_out_celltypes: "THP1"
+    leave_out_chromosomes: null
+    random_shift_peak: null
+    peak_name: "peaks_p0.05_tissue_open"
+    mutations: "/burg/pmg/users/xf2217/get_revision/PPIF/prepared_data.tsv"
+    dataset_size: 4096
   # Add more dataset configurations as needed
