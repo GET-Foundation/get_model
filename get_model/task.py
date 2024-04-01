@@ -107,18 +107,6 @@ class MutationTask(BaseTask):
         self.mut_predictions = mut_predictions
 
     def plot(self):
-<<<<<<< HEAD
-        # Prepare data for plotting
-        plot_data = pd.DataFrame({
-            '% change to PPIF expression': self.mutations['% change to PPIF expression'],
-            'ap_fc': self.mut_predictions - self.wt_predictions
-        })
-
-        # Create plot
-        sns.scatterplot(data=plot_data.query(
-            'Screen.str.contains("Pro")'), x='% change to PPIF expression', y='ap_fc')
-        plt.savefig('mutation_impact.png')
-=======
         pass
 
 
@@ -160,4 +148,3 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel):
         'ppif_r2': r2,
         'ppif_slope': slope
     }
->>>>>>> ae2ddcc690feffd6c85121730329d5aa24d9adad
