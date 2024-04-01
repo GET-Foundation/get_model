@@ -1306,9 +1306,6 @@ class InferenceDataset(PretrainDataset):
         self.gene_list = gene_list if gene_list is not None else self.gencode_obj.gtf['gene_name'].unique(
         )
         self.tss_chunk_idx = self._generate_tss_chunk_idx()
-        self.mut = mut
-        self.peak_inactivation = peak_inactivation
-        self.padding = padding
 
     def _generate_tss_chunk_idx(self):
         """Determine the windows to extract for each gene"""
@@ -1531,6 +1528,9 @@ class PerturbationInferenceDataset(Dataset):
         self.gencode_obj = inference_dataset.gencode_obj
         self.mode = mode
         self.calculate_mutation_per_gene()
+        print(f"n_celltype: {self.inference_dataset.datapool.n_celltypes}")
+        print(f"n_gene: {len(self.gene_list)}")
+        print(f"n_perturbation: {len(self.perturbations)}")
 
     def calculate_mutation_per_gene(self):
         """Not all mutations are in the same gene, calculate the number of mutations for each gene as a dictionary"""

@@ -12,7 +12,7 @@ from lightning.pytorch.callbacks import (Callback, LearningRateMonitor,
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
 from lightning.pytorch.utilities import grad_norm
-from omegaconf import MISSING, DictConfig
+from omegaconf import MISSING, DictConfig, OmegaConf
 from sklearn import metrics
 from tqdm import tqdm
 
@@ -55,7 +55,7 @@ class LitModel(L.LightningModule):
             state_dict = model.state_dict()
             remove_keys(checkpoint_model, state_dict)
             # checkpoint_model = rename_keys(checkpoint_model)
-            model.load_state_dict(checkpoint_model, strict=False)
+            model.load_state_dict(checkpoint_model['model'], strict=True)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         return model
@@ -260,7 +260,7 @@ class GETDataModule(L.LightningDataModule):
         sequence_obj = sequence_obj if sequence_obj is not None else get_sequence_obj(
             config.genome_seq_zarr)
         gencode_obj = get_gencode_obj(config.genome_seq_zarr, root)
-        self.mutations = pd.read_csv(config.mutations, sep='\t')
+
         return config, sequence_obj, gencode_obj
 
     def build_training_dataset(self, sequence_obj, is_train=True) -> None:
@@ -284,7 +284,6 @@ class GETDataModule(L.LightningDataModule):
             config.pop('mutations')
         # no need to leave out chromosomes or celltypes in inference
         config['leave_out_chromosomes'] = None
-        config['leave_out_celltypes'] = None
         dataset = InferenceDataset(
             is_train=False,
             assembly=self.cfg.assembly,
@@ -323,12 +322,13 @@ class GETDataModule(L.LightningDataModule):
                 self.dataset_predict = self.build_inference_dataset(
                     sequence_obj=sequence_obj)
             elif 'perturb' in self.cfg.task.test_mode:
+                self.mutations = pd.read_csv(self.cfg.task.mutations, sep='\t')
                 if self.mutations is not None:
-                    perturbation_mode = 'mutation'
+                    self.perturbation_mode = 'mutation'
                 elif self.cfg.dataset.peak_inactivation is not None:
-                    perturbation_mode = 'peak_inactivation'
+                    self.perturbation_mode = 'peak_inactivation'
                 self.dataset_predict = self.build_perturb_dataset(
-                    perturbations=self.mutations, perturb_mode=perturbation_mode,
+                    perturbations=self.mutations, perturb_mode=self.perturbation_mode,
                     sequence_obj=sequence_obj, gene_list=self.cfg.task.gene_list)
 
         if stage == 'validate':
@@ -375,12 +375,12 @@ class GETDataModule(L.LightningDataModule):
 def run(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
     model = LitModel(cfg)
-    print(cfg)
+    print(OmegaConf.to_yaml(cfg))
     dm = GETDataModule(cfg)
     model.dm = dm
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="gpu",
+        accelerator="cpu",
         num_sanity_val_steps=10,
         strategy="auto",
         devices=cfg.machine.num_devices,
@@ -388,7 +388,7 @@ def run(cfg: DictConfig):
                             name=cfg.wandb.run_name)],
         callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
                    LearningRateMonitor(logging_interval='step')],
-        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+        # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         log_every_n_steps=100,
@@ -398,34 +398,59 @@ def run(cfg: DictConfig):
     trainer.fit(model, datamodule=dm)
 
 
+def run_downstream(cfg: DictConfig):
+    torch.set_float32_matmul_precision('medium')
+    model = LitModel(cfg)
+    print(OmegaConf.to_yaml(cfg))
+    dm = GETDataModule(cfg)
+    model.dm = dm
+    trainer = L.Trainer(
+        max_epochs=cfg.training.epochs,
+        accelerator="cpu",
+        num_sanity_val_steps=10,
+        strategy="auto",
+        devices=cfg.machine.num_devices,
+        # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+        accumulate_grad_batches=cfg.training.accumulate_grad_batches,
+        gradient_clip_val=cfg.training.clip_grad,
+        log_every_n_steps=100,
+        deterministic=True,
+        default_root_dir=cfg.machine.output_dir,
+    )
+    print(run_ppif_task(trainer, model))
+
+
 def run_ppif_task(trainer: L.Trainer, lm: LitModel):
     import numpy as np
     from scipy.stats import pearsonr, spearmanr
     from sklearn.linear_model import LinearRegression
     from sklearn.metrics import r2_score
     mutation = pd.read_csv(
-        '/home/xf2217/Projects/get_data/prepared_data.tsv', sep='\t')
+        lm.cfg.task.mutations, sep='\t')
     n_mutation = mutation.shape[0]
     n_peaks_upper_bound = lm.cfg.dataset.n_peaks_upper_bound
     result = []
     # setup dataset_predict
     lm.dm.setup(stage='predict')
-    for i, batch in tqdm(enumerate(lm.dm.predict_dataloader())):
-        batch = lm.transfer_batch_to_device(batch, lm.device, dataloader_idx=0)
-        out = lm.predict_step(batch, i)
-        result.append(out)
-    pred_wt = [r['pred_wt']['exp'] for r in result]
-    pred_mut = [r['pred_mut']['exp'] for r in result]
-    n_celltypes = trainer.datamodule.dataset_predict.inference_dataset.datapool.n_celltypes
+    with torch.no_grad():
+        for i, batch in tqdm(enumerate(lm.dm.predict_dataloader()), total=len(lm.dm.predict_dataloader())):
+            batch = lm.transfer_batch_to_device(
+                batch, lm.device, dataloader_idx=0)
+            out = lm.predict_step(batch, i)
+            result.append(out)
+    pred_wt = [r['pred_wt']['atpm'] for r in result]
+    pred_mut = [r['pred_mut']['atpm'] for r in result]
+    n_celltypes = lm.dm.dataset_predict.inference_dataset.datapool.n_celltypes
     pred_wt = torch.cat(pred_wt, dim=0).reshape(
-        n_celltypes, n_mutation, n_peaks_upper_bound, 2)[0, :, n_peaks_upper_bound//2, 0]
+        n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]
     pred_mut = torch.cat(pred_mut, dim=0).reshape(
-        n_celltypes, n_mutation, n_peaks_upper_bound, 2)[0, :, n_peaks_upper_bound//2, 0]
-    pred_change = ((10**pred_mut-1) - (10**pred_wt - 1)) / \
+        n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]
+    pred_change = (10**pred_mut - 10**pred_wt) / \
         (10**pred_wt - 1) * 100
-    mutation['pred_change'] = pred_change.cpu().numpy()
-    y = mutation['% change to PPIF expression'].values
-    x = mutation['pred_change'].values
+    mutation['pred_change'] = pred_change.detach().cpu().numpy()
+    y = mutation.query('~Screen.str.contains("Pro")')[
+        '% change to PPIF expression'].values
+    x = mutation.query('~Screen.str.contains("Pro")')['pred_change'].values
     pearson = np.corrcoef(x, y)[0, 1]
     r2 = r2_score(y, x)
     spearman = spearmanr(x, y)[0]

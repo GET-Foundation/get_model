@@ -432,8 +432,9 @@ class DilatedConv1d(BaseModule):
     def __init__(self, cfg: DilatedConv1dConfig):
         super().__init__(cfg)
         self.conv = nn.Conv1d(cfg.dim, cfg.dim, cfg.kernel_size,
-                              padding='valid', dilation=cfg.dilation)
+                              padding='same', dilation=cfg.dilation)
         self.activation = nn.ReLU()
+        self.batch_norm = nn.BatchNorm1d(cfg.dim)
 
     def forward(self, x):
         """
@@ -444,10 +445,12 @@ class DilatedConv1d(BaseModule):
             torch.Tensor: Output tensor of shape (batch, dim, length).
         """
         out = self.conv(x)
+        out = self.batch_norm(out)
         diff_length = x.shape[-1] - out.shape[-1]
         assert (diff_length % 2 == 0)
         crop_size = diff_length // 2
-        x = x[..., crop_size:-crop_size]
+        if crop_size > 0:
+            x = x[..., crop_size:-crop_size]
         return self.activation(out) + x
 
     def generate_dummy_data(self, batch_size=1):

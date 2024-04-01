@@ -447,17 +447,18 @@ class GETChrombpNet(GETChrombpNetBias):
     def __init__(self, cfg: GETChrombpNetModelConfig):
         super().__init__(cfg)
         self.with_bias = cfg.with_bias
-        self.bias_model = cfg.bias_model
-        if cfg.bias_ckpt is not None:
-            checkpoint = torch.load(cfg.bias_ckpt, map_location="cpu")
-            self.bias_model.load_state_dict(checkpoint["model"])
-            for param in self.bias_model.parameters():
-                param.requires_grad = False
+        if self.with_bias:
+            self.bias_model = cfg.bias_model
+            if cfg.bias_ckpt is not None:
+                checkpoint = torch.load(cfg.bias_ckpt, map_location="cpu")
+                self.bias_model.load_state_dict(checkpoint["model"])
+                for param in self.bias_model.parameters():
+                    param.requires_grad = False
 
         self.apply(self._init_weights)
 
     def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
-        x = self.motif_scanner(sample_peak_sequence)
+        x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
         atpm, aprofile = self.atac_attention(
             x, chunk_size, n_peaks, max_n_peaks)
         if self.with_bias:

@@ -41,6 +41,19 @@ dataset_configs:
     leave_out_chromosomes: null
     random_shift_peak: null
     peak_name: "peaks_p0.05_tissue_open"
-    mutations: "/burg/pmg/users/xf2217/get_revision/PPIF/prepared_data.tsv"
     dataset_size: 4096
+    additional_peak_columns: ["aTPM"]
   # Add more dataset configurations as needed
+
+  finetune_monocyte:
+    data_set: "Expression_Finetune_monocyte.Chr4&14"
+    eval_data_set: "Expression_Finetune_monocyte.Chr4&14.Eval"
+    zarr_dirs:
+      - "vijay_hematopoiesis_dense.zarr"
+    leave_out_celltypes: "Mono.vijay_hematopoiesis.Young2_BMMC.1024"
+    leave_out_chromosomes: null
+    random_shift_peak: null
+    peak_name: "peaks_q0.01_tissue_open_exp"
+    dataset_size: 4096
+    additional_peak_columns:
+      ["Expression_positive", "Expression_negative", "aTPM", "TSS"]

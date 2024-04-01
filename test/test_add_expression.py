@@ -15,6 +15,7 @@ cell_annot_dict = cell_annot[['celltype', 'id']].set_index('celltype').to_dict()
 cdz = CelltypeDenseZarrIO(
     '/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr', 'a'
 )
+cdz.libsize
 # %%
 mapped_id = [cell_annot_dict[id.split('.')[0]] if id.split('.')[0] in cell_annot_dict else None for id in cdz.ids ]
 mapped_id = [x for x in mapped_id if x is not None]

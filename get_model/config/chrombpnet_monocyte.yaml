@@ -5,12 +5,19 @@ defaults:
   - machine/manitou
   - _self_
 
-dataset_name: finetune_thp1
+task:
+  layer_names: ["atac_attention"]
+  test_mode: "perturb"
+  gene_list:
+    - "PPIF"
+  mutations: "/burg/pmg/users/xf2217/get_revision/PPIF/prepared_data.tsv"
+
+dataset_name: finetune_monocyte
 assembly: "hg38"
 dataset:
-  center_expand_target: 2114
-  n_peaks_lower_bound: 1
-  n_peaks_upper_bound: 5
+  center_expand_target: 1000
+  n_peaks_lower_bound: 2
+  n_peaks_upper_bound: 10
 
 training:
   save_ckpt_freq: 10
@@ -33,6 +40,6 @@ wandb:
   run_name: "experiment_1"
 
 finetune:
-  checkpoint: null
+  checkpoint: "/pmglocal/xf2217/Expression_Finetune_monocyte.Chr4&14.conv50.learnable_motif_prior.chrombpnet.shift10.R100L1000.augmented.20240307/checkpoint-17.pth"
   model_prefix: "model."
   patterns_to_freeze: []

@@ -108,6 +108,7 @@ class TaskConfig:
     test_mode: str = 'predict'
     gene_list: list = MISSING
     layer_names: list = field(default_factory=lambda: ['atac_attention'])
+    mutations: str | None = None
 
 
 @dataclass

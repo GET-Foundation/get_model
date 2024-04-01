@@ -10,24 +10,24 @@ model:
     atac_attention:
       pool_method: mean
       motif_dim: 639
-      hidden_dim: 256
+      hidden_dim: 384
       n_dil_layers: 7
       profile_kernel_size: 75
     loss:
       components:
-        atpm: 
+        atpm:
           _target_: torch.nn.MSELoss
-          reduction: 'mean'
+          reduction: "mean"
         aprofile:
           _target_: torch.nn.MSELoss
-          reduction: 'mean'
-      weights: 
+          reduction: "mean"
+      weights:
         atpm: 1.0
         aprofile: 1.0
     metrics:
       components:
-        atpm: ['mse', 'pearson', 'spearman', 'r2']
-        aprofile: ['mse']
+        atpm: ["mse", "pearson", "spearman", "r2"]
+        aprofile: ["mse"]
     with_bias: false
     bias_model:
       _target_: get_model.model.model_refactored.GETChrombpNetBias
@@ -41,7 +41,7 @@ model:
         atac_attention:
           pool_method: mean
           motif_dim: 639
-          hidden_dim: 256
+          hidden_dim: 384
           n_dil_layers: 7
           profile_kernel_size: 75
         loss: ${model.cfg.loss}
