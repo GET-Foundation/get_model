@@ -1,4 +1,5 @@
 
+from ast import List
 import numpy as np
 import torch
 
@@ -169,3 +170,12 @@ def get_rev_collate_fn(batch):
         'hic_matrix': hic_matrix}
 
     return batch
+
+
+def get_perturb_collate_fn(perturbation_batch):
+    # extract WT and MUT list from perturbation_batch List[dict('WT': List[dict], 'MUT': List[dict])]
+    WT_batch = [p['WT'] for p in perturbation_batch]
+    MUT_batch = [p['MUT'] for p in perturbation_batch]
+    WT_batch = get_rev_collate_fn(WT_batch)
+    MUT_batch = get_rev_collate_fn(MUT_batch)
+    return {'WT': WT_batch, 'MUT': MUT_batch}

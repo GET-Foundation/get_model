@@ -11,7 +11,7 @@ class MutationTaskConfig(BaseTaskConfig):
 
 
 @dataclass
-class PeakTaskConfig(BaseTaskConfig):
+class PeakInactivationTaskConfig(BaseTaskConfig):
     peak_file: str = MISSING
 
 

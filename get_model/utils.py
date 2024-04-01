@@ -30,6 +30,16 @@ except ImportError:
 from tensorboardX import SummaryWriter
 
 
+def print_shape(x):
+    """a recursive function to print the shape of values in a nested dictionary"""
+    if isinstance(x, dict):
+        for k, v in x.items():
+            print(k)
+            print_shape(v)
+    else:
+        print(x.shape)
+
+
 class SmoothedValue(object):
     """Track a series of values and provide access to smoothed values over a
     window or the global series average.
@@ -54,7 +64,8 @@ class SmoothedValue(object):
         """
         if not is_dist_avail_and_initialized():
             return
-        t = torch.tensor([self.count, self.total], dtype=torch.float64, device="cuda")
+        t = torch.tensor([self.count, self.total],
+                         dtype=torch.float64, device="cuda")
         dist.barrier()
         dist.all_reduce(t)
         t = t.tolist()
@@ -113,7 +124,8 @@ class MetricLogger(object):
         if attr in self.__dict__:
             return self.__dict__[attr]
         raise AttributeError(
-            "'{}' object has no attribute '{}'".format(type(self).__name__, attr)
+            "'{}' object has no attribute '{}'".format(
+                type(self).__name__, attr)
         )
 
     def __str__(self):
@@ -212,15 +224,16 @@ class TensorboardLogger(object):
     def flush(self):
         self.writer.flush()
 
+
 class WandBLogger(object):
     def __init__(self, wandb_obj):
         self.wandb = wandb_obj
 
     def update(self, head="scalar", print_freq=10, step=None, **kwargs):
-        if step % print_freq ==0:
-            self.wandb.log(kwargs, step=step, commit = True)
+        if step % print_freq == 0:
+            self.wandb.log(kwargs, step=step, commit=True)
         else:
-            self.wandb.log(kwargs, step=step, commit = False)
+            self.wandb.log(kwargs, step=step, commit=False)
 
     def flush(self):
         pass
@@ -325,6 +338,7 @@ def init_distributed_mode(args):
     torch.distributed.barrier()
     setup_for_distributed(args.rank == 0)
 
+
 def load_checkpoint(checkpoint_path, model_key=None):
     if checkpoint_path.startswith("https"):
         checkpoint = torch.hub.load_state_dict_from_url(
@@ -355,6 +369,7 @@ def remove_keys(checkpoint_model, model_state_dict):
             print(f"Removing key {k} from pretrained checkpoint")
             del checkpoint_model[k]
 
+
 def rename_keys(checkpoint_model):
     all_keys = list(checkpoint_model.keys())
     new_dict = OrderedDict()
@@ -364,6 +379,7 @@ def rename_keys(checkpoint_model):
         else:
             new_dict[key] = checkpoint_model[key]
     return new_dict
+
 
 def freeze_layers(model, freeze_last_layer=False, freeze_atac_attention=False):
     if freeze_last_layer:
@@ -399,7 +415,8 @@ def load_state_dict(
         state_dict._metadata = metadata
 
     def load(module, prefix=""):
-        local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+        local_metadata = {} if metadata is None else metadata.get(
+            prefix[:-1], {})
         module._load_from_state_dict(
             state_dict,
             prefix,
@@ -501,11 +518,13 @@ def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
         return torch.tensor(0.0)
     device = parameters[0].grad.device
     if norm_type == inf:
-        total_norm = max(p.grad.detach().abs().max().to(device) for p in parameters)
+        total_norm = max(p.grad.detach().abs().max().to(device)
+                         for p in parameters)
     else:
         total_norm = torch.norm(
             torch.stack(
-                [torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]
+                [torch.norm(p.grad.detach(), norm_type).to(device)
+                 for p in parameters]
             ),
             norm_type,
         )
@@ -527,7 +546,8 @@ def cosine_scheduler(
         warmup_iters = warmup_steps
     print("Set warmup steps = %d" % warmup_iters)
     if warmup_epochs > 0:
-        warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
+        warmup_schedule = np.linspace(
+            start_warmup_value, base_value, warmup_iters)
 
     iters = np.arange(epochs * niter_per_ep - warmup_iters)
     schedule = np.array(
@@ -576,6 +596,7 @@ def save_model(
             client_state=client_state,
         )
 
+
 def rename_keys(state_dict):
     new_state_dict = {}
     for key in state_dict.keys():
@@ -587,12 +608,15 @@ def rename_keys(state_dict):
         if "head." in new_key:
             new_key = new_key.replace("head.", "head_exp.head.")
         if "region_embed.proj." in new_key:
-            new_key = new_key.replace("region_embed.proj.", "region_embed.embed.")
+            new_key = new_key.replace(
+                "region_embed.proj.", "region_embed.embed.")
         new_state_dict[new_key] = state_dict[key]
-    
+
     if 'region_embed.embed.weight' in new_state_dict:
-        new_state_dict['region_embed.embed.weight'] = new_state_dict['region_embed.embed.weight']#.unsqueeze(2)
+        # .unsqueeze(2)
+        new_state_dict['region_embed.embed.weight'] = new_state_dict['region_embed.embed.weight']
     return new_state_dict
+
 
 def auto_load_model(
     args, model, model_without_ddp, optimizer, loss_scaler, model_ema=None
@@ -603,7 +627,8 @@ def auto_load_model(
         if args.auto_resume and len(args.resume) == 0:
             import glob
 
-            all_checkpoints = glob.glob(os.path.join(output_dir, "checkpoint-*.pth"))
+            all_checkpoints = glob.glob(
+                os.path.join(output_dir, "checkpoint-*.pth"))
             latest_ckpt = -1
             for ckpt in all_checkpoints:
                 t = ckpt.split("-")[-1].split(".")[0]
@@ -622,7 +647,8 @@ def auto_load_model(
                 )
             else:
                 checkpoint = torch.load(args.resume, map_location="cpu")
-            model_without_ddp.load_state_dict(rename_keys(checkpoint["model"]), strict=False)
+            model_without_ddp.load_state_dict(
+                rename_keys(checkpoint["model"]), strict=False)
 
             print("Resume checkpoint %s" % args.resume)
             if "optimizer" in checkpoint and "epoch" in checkpoint:
@@ -634,9 +660,10 @@ def auto_load_model(
                     args.start_epoch = checkpoint["epoch"] + 1
                 except:
                     print("Can't load optimizer state dict!")
-                
+
                 if hasattr(args, "model_ema") and args.model_ema:
-                    _load_checkpoint_for_ema(model_ema, checkpoint["model_ema"])
+                    _load_checkpoint_for_ema(
+                        model_ema, checkpoint["model_ema"])
                 if "scaler" in checkpoint:
                     loss_scaler.load_state_dict(checkpoint["scaler"])
                 print("With optim & sched!")
@@ -645,14 +672,16 @@ def auto_load_model(
         if args.auto_resume:
             import glob
 
-            all_checkpoints = glob.glob(os.path.join(output_dir, "checkpoint-*"))
+            all_checkpoints = glob.glob(
+                os.path.join(output_dir, "checkpoint-*"))
             latest_ckpt = -1
             for ckpt in all_checkpoints:
                 t = ckpt.split("-")[-1].split(".")[0]
                 if t.isdigit():
                     latest_ckpt = max(int(t), latest_ckpt)
             if latest_ckpt >= 0:
-                args.resume = os.path.join(output_dir, "checkpoint-%d" % latest_ckpt)
+                args.resume = os.path.join(
+                    output_dir, "checkpoint-%d" % latest_ckpt)
                 print("Auto resume checkpoint: %d" % latest_ckpt)
                 _, client_states = model.load_checkpoint(
                     args.output_dir, tag="checkpoint-%d" % latest_ckpt
@@ -660,11 +689,13 @@ def auto_load_model(
                 args.start_epoch = client_states["epoch"] + 1
                 if model_ema is not None:
                     if args.model_ema:
-                        _load_checkpoint_for_ema(model_ema, client_states["model_ema"])
+                        _load_checkpoint_for_ema(
+                            model_ema, client_states["model_ema"])
 
 
 def create_ds_config(args):
-    args.deepspeed_config = os.path.join(args.output_dir, "deepspeed_config.json")
+    args.deepspeed_config = os.path.join(
+        args.output_dir, "deepspeed_config.json")
     with open(args.deepspeed_config, mode="w") as writer:
         ds_config = {
             "train_batch_size": args.batch_size * args.update_freq * get_world_size(),

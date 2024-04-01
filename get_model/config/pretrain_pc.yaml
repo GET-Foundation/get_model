@@ -2,7 +2,7 @@ defaults:
   - base_config
   - model/GETPretrainMaxNorm@_here_
   - dataset@dataset
-  - machine/pc@_here_
+  - machine/pc
   - _self_
 
 dataset_name: finetune_k562

@@ -45,7 +45,7 @@ def get_sequence_with_mutations(arr, start, end, mut):
 
     offset = 0  # Track the net offset introduced by mutations
 
-    for _, row in tqdm(mut_df_chr.iterrows()):
+    for _, row in mut_df_chr.iterrows():
         # Adjust mutation positions by the current offset
         mut_start = row.Start - start + offset
         mut_end = row.End - start + offset
@@ -675,10 +675,10 @@ class ZarrDataPool(object):
 
         if self.additional_peak_columns is not None:
             # assume numeric columns
-            additional_peak_columns_data = celltype_peaks[self.additional_peak_columns].to_numpy(
+            additional_peak_features = celltype_peaks[self.additional_peak_columns].to_numpy(
             ).astype(np.float32)
         else:
-            additional_peak_columns_data = None
+            additional_peak_features = None
 
         assembly = self.assembly_dict[data_key]
         sequence = self.sequence[assembly].get_track(
@@ -716,15 +716,15 @@ class ZarrDataPool(object):
         # remove atac and expression from inactivated peak
         if inactivated_peak_idx is not None:
             # keep the TSS column but set aTPM and expression to 0
-            additional_peak_columns_data[inactivated_peak_idx, 0:3] = 0
+            additional_peak_features[inactivated_peak_idx, 0:3] = 0
 
         sample = {
             'sample_track': sample_track, 'sample_peak_sequence': sample_peak_sequence,
             'celltype_peaks': celltype_peaks, 'motif_mean_std': motif_mean_std,
-            'additional_peak_columns_data': additional_peak_columns_data, 'hic_matrix': hic_matrix,
+            'additional_peak_features': additional_peak_features, 'hic_matrix': hic_matrix,
             'metadata': {
                 'celltype_id': celltype_id, 'chr_name': chr_name, 'libsize': self.zarr_dict[data_key].libsize[celltype_id],
-                'start': start, 'end': end, 'i_start': _start, 'i_end': _end,
+                'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': 0,
             }
 
         }
@@ -1317,7 +1317,7 @@ class InferenceDataset(PretrainDataset):
 
         self.tss_chunk_idx = self.gencode_obj.gtf.query(
             'gene_name in @self.gene_list').copy()
-        for i, row in tqdm(self.tss_chunk_idx.iterrows()):
+        for i, row in self.tss_chunk_idx.iterrows():
             # get window_index for each gene
             gene_chr = row.Chromosome
             gene_start = row.Start
@@ -1464,11 +1464,11 @@ class InferenceDataset(PretrainDataset):
         """
         if track_start is None or track_end is None:
             # Get the peak start and end positions based on n_peaks_upper_bound
-            peak_start, peak_end = tss_peak - self.n_peaks_upper_bound // 2, tss_peak + \
-                self.n_peaks_upper_bound // 2
+            peak_start, peak_end = tss_peak - self.n_peaks_upper_bound // 2, tss_peak - \
+                self.n_peaks_upper_bound // 2 + self.n_peaks_upper_bound
             tss_peak = tss_peak - peak_start
             track_start = peaks_in_locus.iloc[peak_start].Start-self.padding
-            track_end = peaks_in_locus.iloc[peak_end].End+self.padding
+            track_end = peaks_in_locus.iloc[peak_end-1].End+self.padding
         else:
             peaks_in_locus_subset = peaks_in_locus.query(
                 'Chromosome==@chr_name').query('Start>=@track_start & End<=@track_end')
@@ -1509,7 +1509,17 @@ class InferenceDataset(PretrainDataset):
 
 
 class PerturbationInferenceDataset(Dataset):
-    """Wrapper around InferenceDataset to allow for parallel processing for different mutations"""
+    """
+    Wrapper around InferenceDataset to allow for parallel processing for different mutations.
+
+    Args:
+        inference_dataset (InferenceDataset): The InferenceDataset to use for generating samples.
+        perturbations (pandas.DataFrame): A pandas DataFrame containing the perturbations to apply.
+        mode (str): The mode of perturbation to apply. Can be 'mutation' or 'peak_inactivation'.
+
+    Returns:
+    PerturbationInferenceDataset: A PerturbationInferenceDataset object.
+        """
 
     def __init__(self, inference_dataset, perturbations, mode='mutation') -> None:
         super().__init__()
