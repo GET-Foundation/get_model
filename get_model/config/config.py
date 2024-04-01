@@ -104,7 +104,9 @@ class MachineConfig:
 
 
 @dataclass
-class InterpretationConfig:
+class TaskConfig:
+    test_mode: str = 'predict'
+    gene_list: list = MISSING
     layer_names: list = field(default_factory=lambda: ['atac_attention'])
 
 
@@ -113,16 +115,14 @@ class Config:
     dataset_name: str = MISSING
     assembly: str = 'hg38'
     model: Any = MISSING
-    test_mode: str = 'predict'
-    gene_list: list = MISSING
     machine: MachineConfig = field(default_factory=MachineConfig)
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
-    interpretation: InterpretationConfig = field(
-        default_factory=InterpretationConfig)
+    task: TaskConfig = field(
+        default_factory=TaskConfig)
 
 
 cs = ConfigStore.instance()

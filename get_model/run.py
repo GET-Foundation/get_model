@@ -13,6 +13,8 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import MISSING, DictConfig
+from sklearn import metrics
+from tqdm import tqdm
 
 from get_model.config.config import *
 from get_model.dataset.collate import (get_perturb_collate_fn,
@@ -86,28 +88,36 @@ class LitModel(L.LightningModule):
         self.log("val_loss", loss, batch_size=self.cfg.machine.batch_size)
 
     def test_step(self, batch, batch_idx):
-        if self.cfg.test_mode == 'predict':
+        loss, pred, obs = self._shared_step(batch, batch_idx, stage='test')
+        metrics = self.metrics(pred, obs)
+        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size)
+        self.log("test_loss", loss, batch_size=self.cfg.machine.batch_size)
+        return pred, obs
+
+    def predict_step(self, batch, batch_idx, *args, **kwargs):
+        if self.cfg.task.test_mode == 'perturb':
+            return self.perturb_step(batch, batch_idx)
+        elif self.cfg.task.test_mode == 'predict':
             loss, pred, obs = self._shared_step(
                 batch, batch_idx, stage='predict')
             return pred, obs
-        elif self.cfg.test_mode == 'interpret':
+        elif self.cfg.task.test_mode == 'interpret':
             # assume focus is the center peaks in the input sample
             with torch.enable_grad():
-                return self.interpret_step(batch, batch_idx, layer_names=self.cfg.interpretation.layer_names, focus=self.cfg.dataset.n_peaks_upper_bound//2)
-
-    def predict_step(self, batch, batch_idx, *args, **kwargs):
-        if self.cfg.test_mode == 'perturb':
-            # each batch is a dictionary with keys 'WT' and 'MUT'
-            return self.perturb_step(batch, batch_idx)
+                return self.interpret_step(batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=self.cfg.dataset.n_peaks_upper_bound//2)
+        elif self.cfg.task.test_mode == 'perturb_interpret':
+            with torch.enable_grad():
+                return self.perturb_interpret_step(batch, batch_idx)
 
     def perturb_step(self, batch, batch_idx):
         """Perturb the input sequence and do inference on both.
         """
         batch_wt = batch['WT']
         batch_mut = batch['MUT']
+
         input_wt = self.model.get_input(batch_wt)
-        input_mut = self.model.get_input(batch_mut)
         output_wt = self(input_wt)
+        input_mut = self.model.get_input(batch_mut)
         output_mut = self(input_mut)
         pred_wt, obs_wt = self.model.before_loss(output_wt, batch_wt)
         pred_mut, obs_mut = self.model.before_loss(output_mut, batch_mut)
@@ -116,8 +126,26 @@ class LitModel(L.LightningModule):
                 'pred_mut': pred_mut,
                 'obs_mut': obs_mut}
 
+    def perturb_interpret_step(self, batch, batch_idx):
+        """Perturb the input sequence and do interpretation on both."""
+        batch_wt = batch['WT']
+        batch_mut = batch['MUT']
+
+        pred_wt, obs_wt, jacobians_wt, embeddings_wt = self.interpret_step(
+            batch_wt, batch_idx, layer_names=self.cfg.task.layer_names, focus=self.cfg.dataset.n_peaks_upper_bound//2)
+        pred_mut, obs_mut, jacobians_mut, embeddings_mut = self.interpret_step(
+            batch_mut, batch_idx, layer_names=self.cfg.task.layer_names, focus=self.cfg.dataset.n_peaks_upper_bound//2)
+        return {'pred_wt': pred_wt,
+                'obs_wt': obs_wt,
+                'pred_mut': pred_mut,
+                'obs_mut': obs_mut,
+                'jacobians_wt': jacobians_wt,
+                'embeddings_wt': embeddings_wt,
+                'jacobians_mut': jacobians_mut,
+                'embeddings_mut': embeddings_mut,
+                }
+
     def interpret_step(self, batch, batch_idx, layer_names: List[str] = None, focus: int = None):
-        input = self.model.get_input(batch)
         target_tensors = {}
         hooks = []
 
@@ -188,13 +216,12 @@ class LitModel(L.LightningModule):
             lr_lambda=lambda step: schedule[step],
         )
         return [optimizer], [lr_scheduler]
-    
+
     def on_validation_epoch_end(self):
         trainer = self.trainer
         metric = run_ppif_task(trainer, self)
         step = trainer.global_step
         self.logger.log_metrics(metric, step)
-
 
     # def on_validation_end(self):
     #     # Perform inference on the mutations
@@ -209,17 +236,19 @@ class LitModel(L.LightningModule):
     #         # log correlation
 
 
-def run_ppif_task(trainer:L.Trainer, lm:LitModel):
+def run_ppif_task(trainer: L.Trainer, lm: LitModel):
     import numpy as np
     from scipy.stats import pearsonr, spearmanr
     from sklearn.linear_model import LinearRegression
     from sklearn.metrics import r2_score
     mutation = pd.read_csv(
         '/home/xf2217/Projects/get_data/prepared_data.tsv', sep='\t')
+    n_mutation = mutation.shape[0]
+    n_peaks_upper_bound = lm.cfg.dataset.n_peaks_upper_bound
     result = []
     # setup dataset_predict
     lm.dm.setup(stage='predict')
-    for i, batch in enumerate(lm.dm.predict_dataloader()):
+    for i, batch in tqdm(enumerate(lm.dm.predict_dataloader())):
         batch = lm.transfer_batch_to_device(batch, lm.device, dataloader_idx=0)
         out = lm.predict_step(batch, i)
         result.append(out)
@@ -227,12 +256,11 @@ def run_ppif_task(trainer:L.Trainer, lm:LitModel):
     pred_mut = [r['pred_mut']['exp'] for r in result]
     n_celltypes = trainer.datamodule.dataset_predict.inference_dataset.datapool.n_celltypes
     pred_wt = torch.cat(pred_wt, dim=0).reshape(
-        n_celltypes, 220, 100, 2)[0, :, 50, 0]
+        n_celltypes, n_mutation, n_peaks_upper_bound, 2)[0, :, n_peaks_upper_bound//2, 0]
     pred_mut = torch.cat(pred_mut, dim=0).reshape(
-        n_celltypes, 220, 100, 2)[0, :, 50, 0]
+        n_celltypes, n_mutation, n_peaks_upper_bound, 2)[0, :, n_peaks_upper_bound//2, 0]
     pred_change = ((10**pred_mut-1) - (10**pred_wt - 1)) / \
         (10**pred_wt - 1) * 100
-    mutation = mutation.head(220)
     mutation['pred_change'] = pred_change.cpu().numpy()
     y = mutation['% change to PPIF expression'].values
     x = mutation['pred_change'].values
@@ -246,7 +274,6 @@ def run_ppif_task(trainer:L.Trainer, lm:LitModel):
         'ppif_r2': r2,
         'ppif_slope': slope
     }
-
 
 
 class GETDataModule(L.LightningDataModule):
@@ -328,30 +355,21 @@ class GETDataModule(L.LightningDataModule):
                 sequence_obj=sequence_obj, is_train=True)
             self.dataset_val = self.build_training_dataset(
                 sequence_obj=sequence_obj, is_train=False)
-        if stage == 'test':
-            if self.cfg.test_mode == 'predict':
-                self.dataset_test = self.build_training_dataset(
+        if stage == 'predict':
+            if self.cfg.task.test_mode == 'predict':
+                self.dataset_predict = self.build_training_dataset(
                     sequence_obj=sequence_obj, is_train=False)
-            elif self.cfg.test_mode == 'interpret':
-                self.dataset_test = self.build_inference_dataset(
+            elif self.cfg.task.test_mode == 'interpret':
+                self.dataset_predict = self.build_inference_dataset(
                     sequence_obj=sequence_obj)
-            elif self.cfg.test_mode == 'perturb':
+            elif 'perturb' in self.cfg.task.test_mode:
                 if self.mutations is not None:
                     perturbation_mode = 'mutation'
                 elif self.cfg.dataset.peak_inactivation is not None:
                     perturbation_mode = 'peak_inactivation'
-                self.dataset_test = self.build_perturb_dataset(
+                self.dataset_predict = self.build_perturb_dataset(
                     perturbations=self.mutations, perturb_mode=perturbation_mode,
-                    sequence_obj=sequence_obj, gene_list=self.cfg.gene_list)
-
-        if stage == 'predict':
-            if self.mutations is not None:
-                perturbation_mode = 'mutation'
-            elif self.cfg.dataset.peak_inactivation is not None:
-                perturbation_mode = 'peak_inactivation'
-            self.dataset_predict = self.build_perturb_dataset(
-                perturbations=self.mutations, perturb_mode=perturbation_mode,
-                sequence_obj=sequence_obj, gene_list=self.cfg.gene_list)
+                    sequence_obj=sequence_obj, gene_list=self.cfg.task.gene_list)
 
         if stage == 'validate':
             self.dataset_val = self.build_training_dataset(
@@ -381,7 +399,7 @@ class GETDataModule(L.LightningDataModule):
             batch_size=self.cfg.machine.batch_size,
             num_workers=self.cfg.machine.num_workers,
             drop_last=True,
-            collate_fn=get_rev_collate_fn if self.cfg.test_mode != 'perturb' else get_perturb_collate_fn,
+            collate_fn=get_rev_collate_fn if 'perturb' not in self.cfg.task.test_mode else get_perturb_collate_fn,
         )
 
     def predict_dataloader(self):
@@ -389,8 +407,8 @@ class GETDataModule(L.LightningDataModule):
             self.dataset_predict,
             batch_size=self.cfg.machine.batch_size,
             num_workers=self.cfg.machine.num_workers,
-            drop_last=True,
-            collate_fn=get_rev_collate_fn if self.cfg.test_mode != 'perturb' else get_perturb_collate_fn,
+            drop_last=False,
+            collate_fn=get_rev_collate_fn if 'perturb' not in self.cfg.task.test_mode else get_perturb_collate_fn,
         )
 
 
@@ -418,5 +436,3 @@ def run(cfg: DictConfig):
         default_root_dir=cfg.machine.output_dir,
     )
     trainer.fit(model, datamodule=dm)
-
-

@@ -1,6 +1,3 @@
-defaults:
-  - dataset_template
-
 dataset_configs:
   pretrain:
     data_set: "Pretrain"

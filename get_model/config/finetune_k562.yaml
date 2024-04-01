@@ -1,15 +1,18 @@
 defaults:
   - base_config
-  - model/GETFinetuneMaxNorm@_here_
+  - model/GETFinetune@_here_
   - dataset@dataset
   - machine/pc
   - _self_
 
 dataset_name: finetune_k562
 assembly: "hg38"
-test_mode: 'perturb'
-gene_list: 
-  - "PPIF"
+
+task:
+  layer_names: ["atac_attention"]
+  test_mode: "perturb_interpret"
+  gene_list: 
+    - "PPIF"
 
 training:
   save_ckpt_freq: 10
@@ -36,5 +39,3 @@ finetune:
   model_prefix: "model."
   patterns_to_freeze: []
 
-interpretation:
-  layer_names: ["motif_scanner"]

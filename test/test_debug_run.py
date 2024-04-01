@@ -25,7 +25,7 @@ model = LitModel(cfg)
 trainer = L.Trainer(
     max_epochs=cfg.training.epochs,
     accelerator="gpu",
-    inference_mode=cfg.test_mode != "interpret",
+    inference_mode=cfg.task.test_mode != "interpret",
     num_sanity_val_steps=10,
     strategy="auto",
     devices=cfg.machine.num_devices,
@@ -37,4 +37,3 @@ trainer = L.Trainer(
 )
 
 # %%
-
