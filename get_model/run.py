@@ -148,7 +148,7 @@ class LitModel(L.LightningModule):
     def interpret_step(self, batch, batch_idx, layer_names: List[str] = None, focus: int = None):
         target_tensors = {}
         hooks = []
-
+        input = self.model.get_input(batch)
         assert focus is not None, "Please provide a focus position for interpretation"
         assert layer_names is not None, "Please provide a list of layer names for interpretation"
         for layer_name in layer_names:
