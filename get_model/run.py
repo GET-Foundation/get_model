@@ -1,23 +1,35 @@
 import logging
 
 import lightning as L
+import pandas as pd
 import torch
 import torch.utils.data
+from caesar.io.gencode import Gencode
 from caesar.io.zarr_io import DenseZarrIO
 from hydra.utils import instantiate
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.callbacks import (Callback, LearningRateMonitor,
+                                         ModelCheckpoint)
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import MISSING, DictConfig
+from sklearn import metrics
+from tqdm import tqdm
 
 from get_model.config.config import *
-from get_model.dataset.collate import get_rev_collate_fn
-from get_model.dataset.zarr_dataset import DenseZarrIO, PretrainDataset
+from get_model.dataset.collate import (get_perturb_collate_fn,
+                                       get_rev_collate_fn)
+from get_model.dataset.zarr_dataset import (DenseZarrIO, InferenceDataset,
+                                            PerturbationInferenceDataset,
+                                            PretrainDataset, get_gencode_obj,
+                                            get_sequence_obj)
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
+from get_model.task import run_ppif_task
 from get_model.optim import create_optimizer
 from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys
+
+logging.disable(logging.WARN)
 
 
 class LitModel(L.LightningModule):
@@ -28,6 +40,7 @@ class LitModel(L.LightningModule):
         self.loss = self.model.loss
         self.metrics = self.model.metrics
         self.save_hyperparameters()
+        self.dm = None
 
     def on_before_optimizer_step(self, optimizer):
         # Compute the 2-norm for each layer
@@ -60,29 +73,135 @@ class LitModel(L.LightningModule):
         if isinstance(loss, dict):
             loss = {f"{stage}_{key}": value for key,
                     value in loss.items()}
-            self.log_dict(loss, batch_size=self.cfg.dataset.batch_size)
+            self.log_dict(loss, batch_size=self.cfg.machine.batch_size)
         loss = self.model.after_loss(loss)
         return loss, pred, obs
 
     def training_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='train')
-        self.log("train_loss", loss, batch_size=self.cfg.dataset.batch_size)
+        self.log("train_loss", loss, batch_size=self.cfg.machine.batch_size)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='val')
         metrics = self.metrics(pred, obs)
-        self.log_dict(metrics, batch_size=self.cfg.dataset.batch_size)
-        self.log("val_loss", loss, batch_size=self.cfg.dataset.batch_size)
+        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size)
+        self.log("val_loss", loss, batch_size=self.cfg.machine.batch_size)
 
-    def task_step(self, batch, batch_idx):
-        loss, pred, obs = self._shared_step(batch, batch_idx, stage='predict')
+    def test_step(self, batch, batch_idx):
+        loss, pred, obs = self._shared_step(batch, batch_idx, stage='test')
+        metrics = self.metrics(pred, obs)
+        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size)
+        self.log("test_loss", loss, batch_size=self.cfg.machine.batch_size)
         return pred, obs
+
+    def predict_step(self, batch, batch_idx, *args, **kwargs):
+        if self.cfg.task.test_mode == 'perturb':
+            return self.perturb_step(batch, batch_idx)
+        elif self.cfg.task.test_mode == 'predict':
+            loss, pred, obs = self._shared_step(
+                batch, batch_idx, stage='predict')
+            return pred, obs
+        elif self.cfg.task.test_mode == 'interpret':
+            # assume focus is the center peaks in the input sample
+            with torch.enable_grad():
+                return self.interpret_step(batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=self.cfg.dataset.n_peaks_upper_bound//2)
+        elif self.cfg.task.test_mode == 'perturb_interpret':
+            with torch.enable_grad():
+                return self.perturb_interpret_step(batch, batch_idx)
+
+    def perturb_step(self, batch, batch_idx):
+        """Perturb the input sequence and do inference on both.
+        """
+        batch_wt = batch['WT']
+        batch_mut = batch['MUT']
+
+        input_wt = self.model.get_input(batch_wt)
+        output_wt = self(input_wt)
+        input_mut = self.model.get_input(batch_mut)
+        output_mut = self(input_mut)
+        pred_wt, obs_wt = self.model.before_loss(output_wt, batch_wt)
+        pred_mut, obs_mut = self.model.before_loss(output_mut, batch_mut)
+        return {'pred_wt': pred_wt,
+                'obs_wt': obs_wt,
+                'pred_mut': pred_mut,
+                'obs_mut': obs_mut}
+
+    def perturb_interpret_step(self, batch, batch_idx):
+        """Perturb the input sequence and do interpretation on both."""
+        batch_wt = batch['WT']
+        batch_mut = batch['MUT']
+
+        pred_wt, obs_wt, jacobians_wt, embeddings_wt = self.interpret_step(
+            batch_wt, batch_idx, layer_names=self.cfg.task.layer_names, focus=self.cfg.dataset.n_peaks_upper_bound//2)
+        pred_mut, obs_mut, jacobians_mut, embeddings_mut = self.interpret_step(
+            batch_mut, batch_idx, layer_names=self.cfg.task.layer_names, focus=self.cfg.dataset.n_peaks_upper_bound//2)
+        return {'pred_wt': pred_wt,
+                'obs_wt': obs_wt,
+                'pred_mut': pred_mut,
+                'obs_mut': obs_mut,
+                'jacobians_wt': jacobians_wt,
+                'embeddings_wt': embeddings_wt,
+                'jacobians_mut': jacobians_mut,
+                'embeddings_mut': embeddings_mut,
+                }
+
+    def interpret_step(self, batch, batch_idx, layer_names: List[str] = None, focus: int = None):
+        target_tensors = {}
+        hooks = []
+        input = self.model.get_input(batch)
+        assert focus is not None, "Please provide a focus position for interpretation"
+        assert layer_names is not None, "Please provide a list of layer names for interpretation"
+        for layer_name in layer_names:
+            assert layer_name in self.model.get_layer_names(
+            ), f"{layer_name} is not valid, valid layers are: {self.model.get_layer_names()}"
+
+        # Register hooks to capture the target tensors
+        def capture_target_tensor(name):
+            def hook(module, input, output):
+                target_tensors[name] = output
+                # Retain the gradient of the target tensor
+                output.retain_grad()
+            return hook
+
+        if layer_names is None or len(layer_names) == 0:
+            target_tensors['input'] = input
+        else:
+            for name in layer_names:
+                layer = self.model.get_layer(name)
+                hook = layer.register_forward_hook(capture_target_tensor(name))
+                hooks.append(hook)
+        # Forward pass
+        output = self(input)
+        pred, obs = self.model.before_loss(output, batch)
+
+        # Remove the hooks after the forward pass
+        for hook in hooks:
+            hook.remove()
+
+        # Compute the jacobian of the output with respect to the target tensor
+        jacobians = {}
+        for target_name, target in obs.items():
+            jacobians[target_name] = {}
+            for i in range(target.shape[-1]):
+                jacobians[target_name][str(i)] = {}
+                mask = torch.zeros_like(target).to(self.device)
+                mask[:, focus, i] = 1
+                output.backward(mask, retain_graph=True)
+                for name, embed in target_tensors.items():
+                    jacobians[target_name][str(
+                        i)][name] = embed.grad.detach().cpu().numpy()
+                    embed.grad.zero_()
+
+        embeddings = {name: embed.detach().cpu().numpy()
+                      for name, embed in target_tensors.items()}
+
+        return pred, obs, jacobians, embeddings
 
     def configure_optimizers(self):
         optimizer = create_optimizer(self.cfg.optimizer, self.model)
         num_training_steps_per_epoch = (
-            self.cfg.dataset.dataset_size // self.cfg.dataset.batch_size // self.cfg.machine.num_devices
+            self.cfg.dataset.dataset_size // self.cfg.machine.batch_size // self.cfg.machine.num_devices
         )
         schedule = cosine_scheduler(
             base_value=self.cfg.optimizer.lr,
@@ -98,6 +217,12 @@ class LitModel(L.LightningModule):
             lr_lambda=lambda step: schedule[step],
         )
         return [optimizer], [lr_scheduler]
+
+    def on_validation_epoch_end(self):
+        trainer = self.trainer
+        metric = run_ppif_task(trainer, self)
+        step = trainer.global_step
+        self.logger.log_metrics(metric, step)
 
     # def on_validation_end(self):
     #     # Perform inference on the mutations
@@ -117,7 +242,7 @@ class GETDataModule(L.LightningDataModule):
         super().__init__()
         self.cfg = cfg
 
-    def build_dataset_zarr(self, sequence_obj, is_train=True) -> None:
+    def _shared_build_dataset(self, is_train, sequence_obj=None):
         config = self.cfg.dataset.dataset_configs[self.cfg.dataset_name]
         # merge config with self.cfg.dataset
         config = DictConfig({**self.cfg.dataset, **config})
@@ -125,82 +250,97 @@ class GETDataModule(L.LightningDataModule):
         root = self.cfg.machine.data_path
         codebase = self.cfg.machine.codebase
         assembly = self.cfg.assembly
-        dataset_size = config.dataset_size if is_train else config.eval_dataset_size
-        zarr_dirs = [f'{root}/{zarr_dir}' for zarr_dir in config.zarr_dirs]
-        if sequence_obj is None:
-            sequence_obj = DenseZarrIO(f'{root}/{assembly}.zarr', dtype='int8')
-            sequence_obj.load_to_memory_dense()
-        else:
-            logging.info('sequence_obj is provided')
-            sequence_obj = sequence_obj
+        config.dataset_size = config.dataset_size if is_train else config.eval_dataset_size
+        config.zarr_dirs = [
+            f'{root}/{zarr_dir}' for zarr_dir in config.zarr_dirs]
+        config.genome_seq_zarr = f'{root}/{assembly}.zarr'
+        config.genome_motif_zarr = f'{root}/{assembly}_motif_result.zarr'
+        config.insulation_paths = [
+            f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.adjecent.feather',
+            f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.longrange.feather']
+        sequence_obj = sequence_obj if sequence_obj is not None else get_sequence_obj(
+            config.genome_seq_zarr)
+        gencode_obj = get_gencode_obj(config.genome_seq_zarr, root)
+        self.mutations = pd.read_csv(config.mutations, sep='\t')
+        return config, sequence_obj, gencode_obj
+
+    def build_training_dataset(self, sequence_obj, is_train=True) -> None:
+        config, sequence_obj, gencode_obj = self._shared_build_dataset(
+            is_train, sequence_obj=sequence_obj)
 
         # Create dataset with configuration parameters
         dataset = PretrainDataset(
             is_train=is_train,
             sequence_obj=sequence_obj,
-            zarr_dirs=zarr_dirs,
-            genome_seq_zarr=f'{root}/{assembly}.zarr',
-            genome_motif_zarr=f'{root}/{assembly}_motif_result.zarr',
-            use_insulation=config.use_insulation,
-            insulation_paths=[
-                f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.adjecent.feather',
-                f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.longrange.feather'],
-            hic_path=config.hic_path,
-
-            peak_name=config.peak_name,
-            additional_peak_columns=config.additional_peak_columns,
-            max_peak_length=config.max_peak_length,
-            center_expand_target=config.center_expand_target,
-            n_peaks_lower_bound=config.n_peaks_lower_bound,
-            n_peaks_upper_bound=config.n_peaks_upper_bound,
-            n_peaks_sample_gap=config.n_peaks_upper_bound,
-            non_redundant=config.non_redundant,
-            filter_by_min_depth=config.filter_by_min_depth,
-
-            preload_count=config.preload_count,
-            n_packs=config.n_packs,
-
-            padding=config.padding,
-            mask_ratio=config.mask_ratio,
-            negative_peak_name=config.negative_peak_name,
-            negative_peak_ratio=config.negative_peak_ratio,
-            random_shift_peak=config.random_shift_peak,
-            peak_inactivation=config.peak_inactivation,
-
-            leave_out_celltypes=config.leave_out_celltypes,
-            leave_out_chromosomes=config.leave_out_chromosomes,
-            dataset_size=dataset_size,
+            **config
         )
 
+        return dataset
+
+    def build_inference_dataset(self, sequence_obj, gene_list=None):
+        config, sequence_obj, gencode_obj = self._shared_build_dataset(
+            is_train=False, sequence_obj=sequence_obj)
+        if self.mutations is not None:
+            # remove from config
+            config.pop('mutations')
+        # no need to leave out chromosomes or celltypes in inference
+        config['leave_out_chromosomes'] = None
+        config['leave_out_celltypes'] = None
+        dataset = InferenceDataset(
+            is_train=False,
+            assembly=self.cfg.assembly,
+            gencode_obj=gencode_obj,
+            gene_list=gene_list,
+            mutations=self.mutations,
+            sequence_obj=sequence_obj,
+            **config
+        )
+        return dataset
+
+    def build_perturb_dataset(self, perturbations, perturb_mode, sequence_obj, gene_list=None):
+        inference_dataset = self.build_inference_dataset(
+            sequence_obj, gene_list=gene_list)
+        dataset = PerturbationInferenceDataset(
+            inference_dataset, perturbations, perturb_mode)
         return dataset
 
     def prepare_data(self):
         pass
 
     def setup(self, stage=None):
-        sequence_obj = DenseZarrIO(
-            f'{self.cfg.machine.data_path}/{self.cfg.assembly}.zarr', dtype='int8')
-        sequence_obj.load_to_memory_dense()
+        genome_seq_zarr = f'{self.cfg.machine.data_path}/{self.cfg.assembly}.zarr'
+        sequence_obj = get_sequence_obj(genome_seq_zarr)
+
         if stage == 'fit' or stage is None:
-            self.dataset_train = self.build_dataset_zarr(
+            self.dataset_train = self.build_training_dataset(
                 sequence_obj=sequence_obj, is_train=True)
-            self.dataset_val = self.build_dataset_zarr(
+            self.dataset_val = self.build_training_dataset(
                 sequence_obj=sequence_obj, is_train=False)
-        if stage == 'test' or stage is None:
-            self.dataset_test = self.build_dataset_zarr(
-                sequence_obj=sequence_obj, is_train=False)
-        if stage == 'predict' or stage is None:
-            self.dataset_predict = self.build_dataset_zarr(
-                sequence_obj=sequence_obj, is_train=False)
-        if stage == 'validate' or stage is None:
-            self.dataset_val = self.build_dataset_zarr(
+        if stage == 'predict':
+            if self.cfg.task.test_mode == 'predict':
+                self.dataset_predict = self.build_training_dataset(
+                    sequence_obj=sequence_obj, is_train=False)
+            elif self.cfg.task.test_mode == 'interpret':
+                self.dataset_predict = self.build_inference_dataset(
+                    sequence_obj=sequence_obj)
+            elif 'perturb' in self.cfg.task.test_mode:
+                if self.mutations is not None:
+                    perturbation_mode = 'mutation'
+                elif self.cfg.dataset.peak_inactivation is not None:
+                    perturbation_mode = 'peak_inactivation'
+                self.dataset_predict = self.build_perturb_dataset(
+                    perturbations=self.mutations, perturb_mode=perturbation_mode,
+                    sequence_obj=sequence_obj, gene_list=self.cfg.task.gene_list)
+
+        if stage == 'validate':
+            self.dataset_val = self.build_training_dataset(
                 sequence_obj=sequence_obj, is_train=False)
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
             self.dataset_train,
-            batch_size=self.cfg.dataset.batch_size,
-            num_workers=self.cfg.dataset.num_workers,
+            batch_size=self.cfg.machine.batch_size,
+            num_workers=self.cfg.machine.num_workers,
             drop_last=True,
             collate_fn=get_rev_collate_fn,
         )
@@ -208,8 +348,8 @@ class GETDataModule(L.LightningDataModule):
     def val_dataloader(self):
         return torch.utils.data.DataLoader(
             self.dataset_val,
-            batch_size=self.cfg.dataset.batch_size,
-            num_workers=self.cfg.dataset.num_workers,
+            batch_size=self.cfg.machine.batch_size,
+            num_workers=self.cfg.machine.num_workers,
             drop_last=True,
             collate_fn=get_rev_collate_fn,
         )
@@ -217,25 +357,28 @@ class GETDataModule(L.LightningDataModule):
     def test_dataloader(self):
         return torch.utils.data.DataLoader(
             self.dataset_test,
-            batch_size=self.cfg.dataset.batch_size,
-            num_workers=self.cfg.dataset.num_workers,
+            batch_size=self.cfg.machine.batch_size,
+            num_workers=self.cfg.machine.num_workers,
             drop_last=True,
-            collate_fn=get_rev_collate_fn,
+            collate_fn=get_rev_collate_fn if 'perturb' not in self.cfg.task.test_mode else get_perturb_collate_fn,
         )
 
     def predict_dataloader(self):
         return torch.utils.data.DataLoader(
             self.dataset_predict,
-            batch_size=self.cfg.dataset.batch_size,
-            num_workers=self.cfg.dataset.num_workers,
-            drop_last=True,
-            collate_fn=get_rev_collate_fn,
+            batch_size=self.cfg.machine.batch_size,
+            num_workers=self.cfg.machine.num_workers,
+            drop_last=False,
+            collate_fn=get_rev_collate_fn if 'perturb' not in self.cfg.task.test_mode else get_perturb_collate_fn,
         )
 
 
 def run(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
     model = LitModel(cfg)
+    print(cfg)
+    dm = GETDataModule(cfg)
+    model.dm = dm
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator="gpu",
@@ -253,5 +396,4 @@ def run(cfg: DictConfig):
         deterministic=True,
         default_root_dir=cfg.machine.output_dir,
     )
-
-    trainer.fit(model, datamodule=GETDataModule(cfg))
+    trainer.fit(model, datamodule=dm)

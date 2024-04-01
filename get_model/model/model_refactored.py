@@ -189,6 +189,15 @@ class BaseGETModel(BaseModule):
         """Return a dummy input for the model"""
         raise NotImplementedError
 
+    def get_layer(self, layer_name):
+        if hasattr(self, layer_name):
+            return getattr(self, layer_name)
+        else:
+            raise ValueError(f"Layer '{layer_name}' not found in the model.")
+
+    def get_layer_names(self):
+        return list(self._modules.keys())
+
 
 @dataclass
 class GETPretrainModelConfig(BaseGETModelConfig):

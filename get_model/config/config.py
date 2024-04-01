@@ -30,8 +30,6 @@ class ModelConfig(Generic[T]):
 class DatasetConfig:
     data_set: str = "Expression_Finetune_Fetal"
     eval_data_set: str = "Expression_Finetune_Fetal.fetal_eval"
-    batch_size: int = 16
-    num_workers: int = 16
     n_peaks_lower_bound: int = 5
     n_peaks_upper_bound: int = 10
     max_peak_length: int = 5000
@@ -52,6 +50,7 @@ class DatasetConfig:
     insulation_subsample_ratio: int = 1
     negative_peak_ratio: int = 0
     peak_inactivation: str | None = None
+    mutations: str | None = None
     non_redundant: bool = False
     filter_by_min_depth: bool = False
     hic_path: str | None = None
@@ -100,6 +99,15 @@ class MachineConfig:
     data_path: str = MISSING
     output_dir: str = MISSING
     num_devices: int = 1
+    num_workers: int = 32
+    batch_size: int = 16
+
+
+@dataclass
+class TaskConfig:
+    test_mode: str = 'predict'
+    gene_list: list = MISSING
+    layer_names: list = field(default_factory=lambda: ['atac_attention'])
 
 
 @dataclass
@@ -113,6 +121,8 @@ class Config:
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
+    task: TaskConfig = field(
+        default_factory=TaskConfig)
 
 
 cs = ConfigStore.instance()

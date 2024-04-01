@@ -3,17 +3,19 @@ import os.path
 import sys
 import warnings
 from posixpath import basename
-from caesar.io.zarr_io import DenseZarrIO
+
 import numpy as np
 import pandas as pd
 import torch
 import zarr
+from caesar.io.gencode import Gencode
 from caesar.io.zarr_io import CelltypeDenseZarrIO, DenseZarrIO
 from pyranges import PyRanges as pr
 from scipy.sparse import csr_matrix, vstack
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
+from get_model.config.config import DatasetConfig
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -43,7 +45,7 @@ def get_sequence_with_mutations(arr, start, end, mut):
 
     offset = 0  # Track the net offset introduced by mutations
 
-    for _, row in tqdm(mut_df_chr.iterrows()):
+    for _, row in mut_df_chr.iterrows():
         # Adjust mutation positions by the current offset
         mut_start = row.Start - start + offset
         mut_end = row.End - start + offset
@@ -149,6 +151,38 @@ class MotifMeanStd(object):
             chromosome: self.zarr['mean_std/'+chromosome][:] for chromosome in self.chromosomes}
 
 
+def get_sequence_obj(genome_seq_zarr: dict | str):
+    """
+    Get DenseZarrIO object for genome sequence.
+    """
+    if isinstance(genome_seq_zarr, dict):
+        sequence_obj = {}
+        for assembly, zarr_file in genome_seq_zarr.items():
+            sequence_obj[assembly] = DenseZarrIO(
+                zarr_file, dtype='int8', mode='r')
+            sequence_obj[assembly].load_to_memory_dense()
+    elif isinstance(genome_seq_zarr, str):
+        assembly = basename(genome_seq_zarr).split('.')[0]
+        sequence_obj = {assembly: DenseZarrIO(
+            genome_seq_zarr, dtype='int8', mode='r')}
+        sequence_obj[assembly].load_to_memory_dense()
+    return sequence_obj
+
+
+def get_gencode_obj(genome_seq_zarr: dict | str, gtf_dir: str = '.'):
+    """
+    Get Gencode object for genome sequence.
+    """
+    if isinstance(genome_seq_zarr, dict):
+        gencode_obj = {}
+        for assembly, _ in genome_seq_zarr.items():
+            gencode_obj[assembly] = Gencode(assembly, gtf_dir=gtf_dir)
+    elif isinstance(genome_seq_zarr, str):
+        assembly = basename(genome_seq_zarr).split('.')[0]
+        gencode_obj = {assembly: Gencode(assembly, gtf_dir=gtf_dir)}
+    return gencode_obj
+
+
 class ZarrDataPool(object):
     """This class loads data from a set of zarr files and generates samples for training.
 
@@ -191,12 +225,8 @@ class ZarrDataPool(object):
                  filter_by_min_depth=None, is_train=True, hic_path=None):
         # Rest of the code
         logging.info('Initializing ZarrDataPool')
-        if sequence_obj is None:
-            self.sequence = DenseZarrIO(
-                genome_seq_zarr, dtype='int8', mode='r')
-            self.sequence.load_to_memory_dense()
-        else:
-            self.sequence = sequence_obj
+        self.sequence = sequence_obj if sequence_obj is not None else get_sequence_obj(
+            genome_seq_zarr)
         self.motif_mean_std_obj = motif_mean_std_obj
         self.zarr_dirs = zarr_dirs
         self.insulation_paths = insulation_paths
@@ -225,6 +255,8 @@ class ZarrDataPool(object):
         """
         self._subset_datasets()
         self.data_keys = list(self.zarr_dict.keys())
+        self.assembly_dict = {data_key: cdz.assembly for data_key,
+                              cdz in self.zarr_dict.items()}
         self.peaks_dict = self._load_peaks()
         self.insulation = self._load_insulation()
         self.hic_obj = self._load_hic()
@@ -642,14 +674,14 @@ class ZarrDataPool(object):
 
         if self.additional_peak_columns is not None:
             # assume numeric columns
-            additional_peak_columns_data = celltype_peaks[self.additional_peak_columns].to_numpy(
+            additional_peak_features = celltype_peaks[self.additional_peak_columns].to_numpy(
             ).astype(np.float32)
         else:
-            additional_peak_columns_data = None
+            additional_peak_features = None
 
-        sequence = self.sequence.get_track(
+        assembly = self.assembly_dict[data_key]
+        sequence = self.sequence[assembly].get_track(
             chr_name, track_start, track_end, sparse=False)
-
         if mutations is not None:
             # filter the mutation data with celltype_peaks
             mut_peak = pr(mutations.query('Chromosome==@chr_name')
@@ -683,15 +715,15 @@ class ZarrDataPool(object):
         # remove atac and expression from inactivated peak
         if inactivated_peak_idx is not None:
             # keep the TSS column but set aTPM and expression to 0
-            additional_peak_columns_data[inactivated_peak_idx, 0:3] = 0
+            additional_peak_features[inactivated_peak_idx, 0:3] = 0
 
         sample = {
             'sample_track': sample_track, 'sample_peak_sequence': sample_peak_sequence,
             'celltype_peaks': celltype_peaks, 'motif_mean_std': motif_mean_std,
-            'additional_peak_columns_data': additional_peak_columns_data, 'hic_matrix': hic_matrix,
+            'additional_peak_features': additional_peak_features, 'hic_matrix': hic_matrix,
             'metadata': {
-                'celltype_id': celltype_id, 'chr_name': chr_name, 'libsize': self.zarr_data_pool.zarr_dict[data_key].libsize[celltype_id],
-                'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': self.mask_ratio
+                'celltype_id': celltype_id, 'chr_name': chr_name, 'libsize': self.zarr_dict[data_key].libsize[celltype_id],
+                'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': 0,
             }
 
         }
@@ -896,7 +928,8 @@ class PreloadDataPack(object):
         else:
             additional_peak_features = None
 
-        sequence = self.zarr_data_pool.sequence.get_track(
+        assembly = self.zarr_data_pool.assembly_dict[data_key]
+        sequence = self.zarr_data_pool.sequence[assembly].get_track(
             chr_name, track_start, track_end, sparse=False)
 
         if mutations is not None:
@@ -1102,7 +1135,7 @@ class PretrainDataset(Dataset):
                  leave_out_celltypes=None,
                  leave_out_chromosomes=None,
                  dataset_size=655_36,
-
+                 **kwargs
                  ):
         super().__init__()
         """
@@ -1187,12 +1220,8 @@ class PretrainDataset(Dataset):
             logging.info(
                 'hic_path is not None, use_insulation is set to False')
             self.use_insulation = False
-        if sequence_obj is None:
-            self.sequence = DenseZarrIO(
-                genome_seq_zarr, dtype='int8', mode='r')
-            self.sequence.load_to_memory_dense()
-        else:
-            self.sequence = sequence_obj
+        self.sequence = sequence_obj if sequence_obj is not None else get_sequence_obj(
+            genome_seq_zarr)
         self.mms = MotifMeanStd(genome_motif_zarr)
         self.datapool = ZarrDataPool(zarr_dirs=zarr_dirs, genome_seq_zarr=genome_seq_zarr,
                                      insulation_paths=insulation_paths, peak_name=peak_name,
@@ -1268,13 +1297,14 @@ def worker_init_fn_get(worker_id):
 
 
 class InferenceDataset(PretrainDataset):
-    def __init__(self, zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, gencode_obj, gene_list, peak_name='peaks', n_peaks_upper_bound=100, sequence_obj=None, additional_peak_columns=None, center_expand_target=1000, max_peak_length=5000, use_insulation=False, random_shift_peak=None, hic_path=None, mut=None, peak_inactivation=None, padding=1000):
-        super().__init__(zarr_dirs, genome_seq_zarr, genome_motif_zarr, insulation_paths, peak_name=peak_name, n_peaks_upper_bound=n_peaks_upper_bound,
-                         sequence_obj=sequence_obj, additional_peak_columns=additional_peak_columns, n_packs=1,
-                         max_peak_length=max_peak_length, use_insulation=use_insulation, center_expand_target=center_expand_target,
-                         preload_count=1, insulation_subsample_ratio=1, random_shift_peak=random_shift_peak, hic_path=hic_path, dataset_size=400)
-        self.gencode_obj = gencode_obj
-        self.gene_list = gene_list
+    MAX_CONTEXT_DISTANCE = 4000000
+    PROMOTER_EXTEND = 300
+
+    def __init__(self, assembly, gencode_obj, gene_list=None, **kwargs):
+        super().__init__(**kwargs)
+        self.gencode_obj = gencode_obj[assembly]
+        self.gene_list = gene_list if gene_list is not None else self.gencode_obj.gtf['gene_name'].unique(
+        )
         self.tss_chunk_idx = self._generate_tss_chunk_idx()
         self.mut = mut
         self.peak_inactivation = peak_inactivation
@@ -1289,7 +1319,7 @@ class InferenceDataset(PretrainDataset):
 
         self.tss_chunk_idx = self.gencode_obj.gtf.query(
             'gene_name in @self.gene_list').copy()
-        for i, row in tqdm(self.tss_chunk_idx.iterrows()):
+        for i, row in self.tss_chunk_idx.iterrows():
             # get window_index for each gene
             gene_chr = row.Chromosome
             gene_start = row.Start
@@ -1301,14 +1331,43 @@ class InferenceDataset(PretrainDataset):
             '.feather', '_tss_chunk_idx.feather'))
         return self.tss_chunk_idx
 
+    def _get_window_idx_for_tss_and_celltype(self, data_key, celltype_id, tss_idx):
+        """Get window index for a gene and celltype"""
+        chunk_idx = self.tss_chunk_idx.loc[tss_idx, 'chunk_idx']
+        gene_name = self.tss_chunk_idx.loc[tss_idx, 'gene_name']
+        tss_coord = self.tss_chunk_idx.loc[tss_idx, 'Start']
+        strand = self.tss_chunk_idx.loc[tss_idx, 'Strand']
+        strand = 0 if strand == '+' else 1
+        return {
+            'data_key': data_key,
+            'celltype_id': celltype_id,
+            'gene_name': gene_name,
+            'window_idx': np.array([self.datapool._get_window_index_from_chunk_idx(data_key, celltype_id, chunk_idx)]),
+            'chr_name': self.tss_chunk_idx.loc[tss_idx, 'Chromosome'],
+            'tss_coord': tss_coord,
+            'strand': strand}
+
     def _get_window_idx_for_gene_and_celltype(self, data_key, celltype_id, gene_name):
         """Get window index for a gene and celltype"""
         gene_df = self.tss_chunk_idx.query('gene_name==@gene_name')
         chunk_idxs = gene_df['chunk_idx']
-        start = gene_df['Start'].values
-        return {'gene_name': gene_name,
-                'window_idx': np.unique([self.datapool._get_window_index_from_chunk_idx(data_key, celltype_id, chunk_idx) for chunk_idx in chunk_idxs]),
-                'Start': start}
+        strand = gene_df['Strand'].values[0]
+        tss_coord = gene_df['Start'].values
+        if strand == '-' or strand == 1:
+            tss_coord = tss_coord[-1]
+            strand = 1
+        elif strand == '+' or strand == 0:
+            tss_coord = tss_coord[0]
+            strand = 0
+
+        return {
+            'data_key': data_key,
+            'celltype_id': celltype_id,
+            'gene_name': gene_name,
+            'window_idx': np.unique([self.datapool._get_window_index_from_chunk_idx(data_key, celltype_id, chunk_idx) for chunk_idx in chunk_idxs]),
+            'chr_name': gene_df['Chromosome'].values[0],
+            'tss_coord': tss_coord,
+            'strand': strand}
 
     def _get_gene_info_from_window_idx(self, window_idx):
         chunk_idx = window_idx % self.datapool.genome_chunk_length
@@ -1320,86 +1379,181 @@ class InferenceDataset(PretrainDataset):
         return len(self.gene_list) * self.datapool.n_celltypes
 
     def __getitem__(self, idx):
-        celltype_idx = idx // len(self.gene_list)
+        celltype_id = idx // len(self.gene_list)
         gene_idx = idx % len(self.gene_list)
         gene_name = self.gene_list[gene_idx]
-        data_key, celltype_id = self.datapool._get_celltype(celltype_idx)
-        window_idx = self._get_window_idx_for_gene_and_celltype(
-            data_key, celltype_id, gene_name)['window_idx']
-        return self.datapool.generate_sample(data_key, celltype_id, window_idx[0])
+        data_key, celltype_id = self.datapool._get_celltype(celltype_id)
+        return self.get_item_for_gene_in_celltype(data_key, celltype_id, gene_name, self.mutations, self.peak_inactivation)
 
-    def get_gene_item(self, gene_name):
-        for celltype_idx in range(self.datapool.n_celltypes):
-            data_key, celltype_id = self.datapool._get_celltype(celltype_idx)
-            window_idx = self._get_window_idx_for_gene_and_celltype(
-                data_key, celltype_id, gene_name)['window_idx']
-            yield self.datapool.generate_sample(data_key, celltype_id, window_idx[0])
+    def get_item_for_gene_in_celltype(self, data_key, celltype_id, gene_name, track_start=None, track_end=None, mutations=None, peak_inactivation=None):
+        info = self._get_window_idx_for_gene_and_celltype(
+            data_key, celltype_id, gene_name)
+        window_idx = info['window_idx'][0]
+        gene_info = self._get_gene_info_from_window_idx(
+            window_idx).query('gene_name==@gene_name')
 
-    def get_item_for_gene_in_celltype(self, gene_name, celltype, track_start=None, track_end=None, offset=0, mut=None, peak_inactivation=None):
+        return self._get_item_for_gene_in_celltype(mutations, peak_inactivation, track_start, track_end, gene_info, info)
+
+    def get_item_for_tss_in_celltype(self, tss_idx, celltype, track_start=None, track_end=None, mutations=None, peak_inactivation=None):
         data_key = self.datapool.data_keys[0]
-        window_idx = self._get_window_idx_for_gene_and_celltype(
-            data_key, celltype, gene_name)['window_idx']
+        info = self._get_window_idx_for_tss_and_celltype(
+            data_key, celltype, tss_idx)
+        window_idx = info['window_idx']
+        gene_name = info['gene_name']
         gene_info = self._get_gene_info_from_window_idx(
             window_idx[0]).query('gene_name==@gene_name')
-        chr_name = gene_info['Chromosome'].values[0]
-        tss_coord = gene_info.Start.values[0]
 
-        peak_info = self.datapool._query_peaks(
-            celltype, chr_name, tss_coord-4000000, tss_coord+4000000).reset_index(drop=True).reset_index()
-        track_start, track_end, tss_peak, peak_start, strand = self.get_peak_start_end_from_gene_peak(
-            gene_info, peak_info, gene_name, track_start, track_end)
+        return self._get_item_for_gene_in_celltype(mutations, peak_inactivation, track_start, track_end, gene_info, info)
 
-        if mut is None:
-            mut = self.mut
-        if peak_inactivation is None:
-            peak_inactivation = self.peak_inactivation
+    def _get_item_for_gene_in_celltype(self, mutations, peak_inactivation, track_start, track_end, gene_info, info):
+        celltype_id = info['celltype_id']
+        chr_name = info['chr_name']
+        data_key = info['data_key']
 
+        # get the neighboring peaks for the gene
+        info, peaks_in_locus, track_start, track_end = self._calculate_peak_bounds_for_gene(
+            gene_info, info, track_start, track_end)
+
+        # generate sample
         sample = self.datapool.generate_sample(
-            chr_name, track_start, track_end, data_key, celltype, mutations=mut, peak_inactivation=peak_inactivation, padding=self.padding)
-        tss_peak = tss_peak - offset
+            chr_name, track_start, track_end, data_key, celltype_id, mutations=mutations, peak_inactivation=peak_inactivation, padding=self.padding)
+
+        # get the peak index for mutations in the sample
+        self._get_peak_idx_for_mutations(mutations, peaks_in_locus, info)
+
+        # update sample metadata with new information
+        sample['metadata'].update(info)
+
+        return sample
+
+    def _get_peak_idx_for_mutations(self, mutations, peaks_in_locus, info):
+        """Get the peak index for mutations in the sample."""
         mut_peak = None
-        if mut is not None:
-            mut_peak = pr(peak_info).join(
-                pr(mut)).df['index'].values - offset - peak_start
+        if mutations is not None:
+            mut_peak = pr(peaks_in_locus).join(pr(mutations)).df
+            if mut_peak.shape[0] > 0:
+                mut_peak = mut_peak['index'].values - info['peak_start']
+        info['mut_peak'] = mut_peak
 
-        return {'sample': sample, 'tss_peak': tss_peak, 'mut_peak': mut_peak, 'strand': strand, 'gene_name': gene_name, 'celltype': celltype}
-
-    def get_peak_start_end_from_gene_peak(self, gene_info, peak_info, gene, track_start=None, track_end=None):
+    def _calculate_peak_bounds_for_gene(self, gene_info, info, track_start=None, track_end=None):
         """
-        Determine the peak start and end positions for a specific gene.
+        Calculate the peak bounds for a specific gene.
+        """
+        celltype_id = info['celltype_id']
+        chr_name = info['chr_name']
+        tss_coord = info['tss_coord']
+        gene_name = info['gene_name']
 
-        Parameters:
-        - gene_info (DataFrame): Gene information DataFrame.
-        - peak_info (DataFrame): Peak information DataFrame.
-        - gene (str): The name of the gene.
+        # get peaks in gene locus
+        peaks_in_locus = self.get_peaks_around_pos(
+            celltype_id, chr_name, tss_coord)
 
-        Returns:
-        - tuple: The start and end indices of the peak.
+        # get the absolute peak positions
+        gene_df, tss_peak = self._get_absolute_tss_peak(
+            gene_info, peaks_in_locus, gene_name)
+
+        # get the relative peak positions and track bounds if not provided
+        peaks_in_locus, track_start, track_end, tss_peak, peak_start = self._get_relative_coord_and_idx(
+            peaks_in_locus, track_start, track_end, gene_name, gene_df, tss_peak)
+
+        info.update({'track_start': track_start, 'track_end': track_end,
+                     'tss_peak': tss_peak, 'peak_start': peak_start})
+        return info, peaks_in_locus, track_start, track_end
+
+    def _get_relative_coord_and_idx(self, peaks_in_locus, track_start, track_end, gene_name, gene_df, tss_peak):
+        """
+        Get the relative peak positions and track bounds for a specific gene.
+        """
+        if track_start is None or track_end is None:
+            # Get the peak start and end positions based on n_peaks_upper_bound
+            peak_start, peak_end = tss_peak - self.n_peaks_upper_bound // 2, tss_peak - \
+                self.n_peaks_upper_bound // 2 + self.n_peaks_upper_bound
+            tss_peak = tss_peak - peak_start
+            track_start = peaks_in_locus.iloc[peak_start].Start-self.padding
+            track_end = peaks_in_locus.iloc[peak_end-1].End+self.padding
+        else:
+            peaks_in_locus_subset = peaks_in_locus.query(
+                'Chromosome==@chr_name').query('Start>=@track_start & End<=@track_end')
+            if peaks_in_locus_subset.shape[0] == 0:
+                raise ValueError(
+                    f"No peaks found in the specified region for gene {gene_name}")
+            peak_start, peak_end = peaks_in_locus_subset.index.min(
+            ), peaks_in_locus_subset.index.max()
+            tss_peak = pr(peaks_in_locus_subset).join(
+                pr(gene_df)).df['index'].values
+            tss_peak = tss_peak - peak_start
+            peaks_in_locus = peaks_in_locus_subset
+        return peaks_in_locus, track_start, track_end, tss_peak, peak_start
+
+    def _get_absolute_tss_peak(self, gene_info, peaks_in_locus, gene_name):
+        """
+        Get the absolute tss peak index for a specific gene (tss_peak) and the peaks in the gene locus (gene_df).
         """
         columns_to_include = ['index', 'Chromosome', 'Start',
                               'End',  'gene_name', 'Strand', 'chunk_idx']
         if self.additional_peak_columns is not None:
             columns_to_include += self.additional_peak_columns
-        df = pr(peak_info.copy().reset_index()).join(pr(gene_info.copy().query('gene_name==@gene')[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates(
-        )).extend(300), suffix="_gene", how='left', apply_strand_suffix=False).df[columns_to_include].set_index('index')
-        gene_df = df.query('gene_name==@gene')
-        strand = gene_df.Strand.replace({'+': 1, '-': -1}).values[0]
+        df = pr(peaks_in_locus.copy().reset_index()).join(pr(gene_info.copy().query('gene_name==@gene_name')[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates(
+        )).extend(self.PROMOTER_EXTEND), suffix="_gene", how='left', apply_strand_suffix=False).df[columns_to_include].set_index('index')
+        gene_df = df.query('gene_name==@gene_name')
         if gene_df.shape[0] == 0:
-            raise ValueError(f"Gene {gene} not found in the peak information.")
+            raise ValueError(
+                f"Gene {gene_name} not found in the peak information.")
         tss_peak = gene_df.index.values[0]
-        if track_start is None or track_end is None:
-            # Get the peak start and end positions based on n_peaks_upper_bound
-            peak_start, peak_end = tss_peak - self.n_peaks_upper_bound // 2, tss_peak + \
-                self.n_peaks_upper_bound // 2
-            tss_peak = tss_peak - peak_start
-        else:
-            peak_info_subset = peak_info.query(
-                'Chromosome==@chr_name').query('Start>=@track_start & End<=@track_end')
-            peak_start, peak_end = peak_info_subset.index.min(), peak_info_subset.index.max()
-            tss_peak = pr(peak_info_subset).join(
-                pr(gene_df)).df['index'].values
-            tss_peak = tss_peak - peak_start
-        track_start = peak_info.iloc[peak_start].Start-self.padding
-        track_end = peak_info.iloc[peak_end].End+self.padding
+        return gene_df, tss_peak
 
-        return track_start, track_end, tss_peak, peak_start, strand
+    def get_peaks_around_pos(self, celltype_id, chr_name, pos):
+        """
+        Get the peaks around a specific position with a maximum distance of MAX_CONTEXT_DISTANCE.
+        """
+        return self.datapool._query_peaks(
+            celltype_id, chr_name, pos - self.MAX_CONTEXT_DISTANCE, pos + self.MAX_CONTEXT_DISTANCE).reset_index(drop=True).reset_index()
+
+
+class PerturbationInferenceDataset(Dataset):
+    """
+    Wrapper around InferenceDataset to allow for parallel processing for different mutations.
+
+    Args:
+        inference_dataset (InferenceDataset): The InferenceDataset to use for generating samples.
+        perturbations (pandas.DataFrame): A pandas DataFrame containing the perturbations to apply.
+        mode (str): The mode of perturbation to apply. Can be 'mutation' or 'peak_inactivation'.
+
+    Returns:
+    PerturbationInferenceDataset: A PerturbationInferenceDataset object.
+        """
+
+    def __init__(self, inference_dataset, perturbations, mode='mutation') -> None:
+        super().__init__()
+        self.inference_dataset = inference_dataset
+        self.perturbations = perturbations
+        self.gene_list = inference_dataset.gene_list
+        self.gencode_obj = inference_dataset.gencode_obj
+        self.mode = mode
+        self.calculate_mutation_per_gene()
+
+    def calculate_mutation_per_gene(self):
+        """Not all mutations are in the same gene, calculate the number of mutations for each gene as a dictionary"""
+        mutation_per_gene = {}
+        from pyranges import PyRanges as pr
+        # extend tss to 4mbp
+        self.perturbations_gene_overlap = pr(self.perturbations).join(pr(self.gencode_obj.gtf).extend(
+            2_000_000)).df.query('gene_name in @self.gene_list').drop(['index', 'Start_b', 'End_b', 'Strand'], axis=1)
+
+    def __len__(self):
+        return len(self.perturbations_gene_overlap) * self.inference_dataset.datapool.n_celltypes
+
+    def __getitem__(self, index):
+        """return both wild type and mutated batch in a tuple. implement by calling the get_item_for_gene_in_celltype function with or without specify mutation or peak inactivation. loop through the mutations list or peak inactivation list."""
+        celltype_id = index // len(self.perturbations_gene_overlap)
+        perturbation_gene_pair_idx = index % len(
+            self.perturbations_gene_overlap)
+        gene_name = self.perturbations_gene_overlap.gene_name.values[perturbation_gene_pair_idx]
+        perturbation = self.perturbations_gene_overlap.iloc[
+            perturbation_gene_pair_idx:perturbation_gene_pair_idx+1]
+        data_key, celltype_id = self.inference_dataset.datapool._get_celltype(
+            celltype_id)
+        args = {'mutations': perturbation, 'peak_inactivation': None} if self.mode == 'mutation' else {
+            'mutations': None, 'peak_inactivation': perturbation}
+        return {'WT': self.inference_dataset.get_item_for_gene_in_celltype(data_key, celltype_id, gene_name, mutations=None, peak_inactivation=None),
+                'MUT': self.inference_dataset.get_item_for_gene_in_celltype(data_key, celltype_id, gene_name, **args)}
