@@ -407,8 +407,9 @@ class GETRegionFinetune(BaseGETModel):
         return exp
 
     def before_loss(self, output, batch):
-        pred = {'exp': output}
-        obs = {'exp': batch['exp_label']}
+        tss_idx = batch['mask']
+        pred = {'exp': output[tss_idx == 1]}
+        obs = {'exp': batch['exp_label'][tss_idx == 1]}
         return pred, obs
 
     def generate_dummy_data(self):

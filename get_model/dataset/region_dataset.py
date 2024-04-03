@@ -356,9 +356,9 @@ rd = RegionDataset(root='/home/xf2217/Projects/new_finetune_data_all',
                    sampling_step=100)
 
 # %%
-a = rd.__getitem__(100)
-# %%
-a['region_motif'].shape
-# %%
-sns.scatterplot(x=a['region_motif'][:, -1], y=a['exp_label'].mean(1))
-# %%
+# a = rd.__getitem__(100)
+# # %%
+# a['region_motif'].shape
+# # %%
+# sns.scatterplot(x=a['region_motif'][:, -1], y=a['exp_label'].mean(1))
+# # %%
