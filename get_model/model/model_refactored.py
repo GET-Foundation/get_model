@@ -20,6 +20,15 @@ from get_model.model.modules import (ATACSplitPool, ATACSplitPoolConfig,
 from get_model.model.transformer import GETTransformer
 
 
+class MNLLLoss(nn.Module):
+    def __init__(self):
+        super(MNLLLoss, self).__init__()
+
+    def forward(self, x, y):
+        """Compute the loss use -y* log(softmax(x))"""
+        return (-y.squeeze(1) * F.log_softmax(x, dim=-1)).mean()
+
+
 @dataclass
 class LossConfig:
     components: dict = MISSING
@@ -409,7 +418,7 @@ class GETChrombpNetBias(BaseGETModel):
         return aprofile, aprofile_target
 
     def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
-        x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
+        x = self.motif_scanner(sample_peak_sequence)
         atpm, aprofile = self.atac_attention(
             x, chunk_size, n_peaks, max_n_peaks)
         return {'atpm': atpm, 'aprofile': aprofile}
@@ -417,7 +426,7 @@ class GETChrombpNetBias(BaseGETModel):
     def before_loss(self, output, batch):
         pred = output
         B, R = pred['atpm'].shape
-        obs = {'atpm': batch['atpm'],
+        obs = {'atpm': batch['sample_track'].mean(dim=1).unsqueeze(-1),
                'aprofile': batch['sample_track']}
         pred['aprofile'], obs['aprofile'] = self.crop_output(
             pred['aprofile'], obs['aprofile'], B, R)
@@ -451,24 +460,32 @@ class GETChrombpNet(GETChrombpNetBias):
             self.bias_model = cfg.bias_model
             if cfg.bias_ckpt is not None:
                 checkpoint = torch.load(cfg.bias_ckpt, map_location="cpu")
-                self.bias_model.load_state_dict(checkpoint["model"])
+                if 'model' in checkpoint:
+                    checkpoint = checkpoint['model']
+                if 'state_dict' in checkpoint:
+                    checkpoint = checkpoint['state_dict']
+                if 'model.' in list(checkpoint.keys())[0]:
+                    checkpoint = {
+                        k.replace('model.', ''): v for k, v in checkpoint.items()}
+                self.bias_model.load_state_dict(checkpoint)
                 for param in self.bias_model.parameters():
                     param.requires_grad = False
 
         self.apply(self._init_weights)
 
     def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
-        x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
+        x = self.motif_scanner(sample_peak_sequence)
         atpm, aprofile = self.atac_attention(
             x, chunk_size, n_peaks, max_n_peaks)
         if self.with_bias:
-            bias_atpm, bias_aprofile = self.bias_model(
+            bias_output = self.bias_model(
                 sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
+            bias_atpm, bias_aprofile = bias_output['atpm'], bias_output['aprofile']
             atpm = torch.logsumexp(torch.stack(
                 [atpm, bias_atpm], dim=0), dim=0)
-            diff_length = aprofile.shape[1] - bias_aprofile.shape[1]
-            crop_length = diff_length // 2
-            bias_aprofile = F.pad(
-                bias_aprofile, (crop_length, diff_length - crop_length), "constant", 0)
+            # diff_length = aprofile.shape[1] - bias_aprofile.shape[1]
+            # crop_length = diff_length // 2
+            # bias_aprofile = F.pad(
+            #     bias_aprofile, (crop_length, diff_length - crop_length), "constant", 0)
             aprofile = aprofile + bias_aprofile
         return {'atpm': atpm, 'aprofile': aprofile}

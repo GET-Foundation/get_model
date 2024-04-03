@@ -434,7 +434,7 @@ class DilatedConv1d(BaseModule):
         self.conv = nn.Conv1d(cfg.dim, cfg.dim, cfg.kernel_size,
                               padding='same', dilation=cfg.dilation)
         self.activation = nn.ReLU()
-        self.batch_norm = nn.BatchNorm1d(cfg.dim)
+        # self.batch_norm = nn.BatchNorm1d(cfg.dim)
 
     def forward(self, x):
         """
@@ -445,7 +445,7 @@ class DilatedConv1d(BaseModule):
             torch.Tensor: Output tensor of shape (batch, dim, length).
         """
         out = self.conv(x)
-        out = self.batch_norm(out)
+        # out = self.batch_norm(out)
         diff_length = x.shape[-1] - out.shape[-1]
         assert (diff_length % 2 == 0)
         crop_size = diff_length // 2
@@ -536,8 +536,8 @@ class ConvPool(BaseModule):
     def __init__(self, cfg: ConvPoolConfig):
         super().__init__(cfg)
         self.pool_method = cfg.pool_method
-        self.motif_proj = nn.Conv1d(
-            cfg.motif_dim, cfg.hidden_dim, 1, bias=True)
+        # self.motif_proj = nn.Linear(
+        #     cfg.motif_dim, cfg.hidden_dim)
         self.dila_conv_tower = DilatedConv1dBlock(DilatedConv1dBlockConfig(
             hidden_dim=cfg.hidden_dim, depth=cfg.n_dil_layers))
         self.aprofile_header = nn.Conv1d(
@@ -557,7 +557,7 @@ class ConvPool(BaseModule):
                 - peak_atpms: Tensor of shape (batch, max_n_peaks, 1) representing the aTPM values for each peak.
                 - peak_profiles: Tensor of shape (batch, length) representing the peak profiles.
         """
-        x = self.motif_proj(x.transpose(1, 2)).transpose(1, 2)
+        # x = self.motif_proj(x)
         batch, length, motif_dim = x.shape
 
         if torch.all(n_peaks == max_n_peaks) and np.unique(peak_split).shape[0] == 2:
@@ -568,10 +568,10 @@ class ConvPool(BaseModule):
             peak_profile = self.dila_conv_tower(x)
             peak_atpm = peak_profile.mean(2)
             peak_profile = self.aprofile_header(peak_profile)
-            peak_atpm = F.softplus(self.atpm_header(peak_atpm))
+            peak_atpm = self.atpm_header(peak_atpm)
             peak_atpm = peak_atpm.reshape(batch, num_peaks)
             peak_profile = peak_profile.reshape(batch, -1)
-            peak_profile = F.softplus(peak_profile)
+            peak_profile = peak_profile
             return peak_atpm, peak_profile
         else:
             peak_list = torch.split(

@@ -41,6 +41,7 @@ class DatasetConfig:
     peak_name: str = "peaks_q0.01_tissue_open_exp"
     negative_peak_name: str | None = None
     n_packs: int = 1
+    keep_celltypes: str | None = None
     leave_out_celltypes: str = "Astrocyte"
     leave_out_chromosomes: str = "chr4,chr14"
     additional_peak_columns: list = field(default_factory=lambda: [
@@ -48,7 +49,7 @@ class DatasetConfig:
     padding: int = 0
     mask_ratio: float = 0.5
     insulation_subsample_ratio: int = 1
-    negative_peak_ratio: int = 0
+    negative_peak_ratio: float = 0
     peak_inactivation: str | None = None
     mutations: str | None = None
     non_redundant: bool = False

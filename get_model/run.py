@@ -198,30 +198,37 @@ class LitModel(L.LightningModule):
         return pred, obs, jacobians, embeddings
 
     def configure_optimizers(self):
-        optimizer = create_optimizer(self.cfg.optimizer, self.model)
-        num_training_steps_per_epoch = (
-            self.cfg.dataset.dataset_size // self.cfg.machine.batch_size // self.cfg.machine.num_devices
-        )
-        schedule = cosine_scheduler(
-            base_value=self.cfg.optimizer.lr,
-            final_value=self.cfg.optimizer.min_lr,
-            epochs=self.cfg.training.epochs,
-            niter_per_ep=num_training_steps_per_epoch,
-            warmup_epochs=self.cfg.training.warmup_epochs,
-            start_warmup_value=0,
-            warmup_steps=-1
-        )
-        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer,
-            lr_lambda=lambda step: schedule[step],
-        )
-        return [optimizer], [lr_scheduler]
+        # a adam optimizer with a scheduler using lightning function
+        optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=self.cfg.optimizer.lr)
+        return optimizer
+
+    # def configure_optimizers(self):
+    #     optimizer = create_optimizer(self.cfg.optimizer, self.model)
+    #     num_training_steps_per_epoch = (
+    #         self.cfg.dataset.dataset_size // self.cfg.machine.batch_size // self.cfg.machine.num_devices
+    #     )
+    #     schedule = cosine_scheduler(
+    #         base_value=self.cfg.optimizer.lr,
+    #         final_value=self.cfg.optimizer.min_lr,
+    #         epochs=self.cfg.training.epochs,
+    #         niter_per_ep=num_training_steps_per_epoch,
+    #         warmup_epochs=self.cfg.training.warmup_epochs,
+    #         start_warmup_value=0,
+    #         warmup_steps=-1
+    #     )
+    #     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+    #         optimizer,
+    #         lr_lambda=lambda step: schedule[step],
+    #     )
+    #     return [optimizer], [lr_scheduler]
 
     def on_validation_epoch_end(self):
-        trainer = self.trainer
-        metric = run_ppif_task(trainer, self)
-        step = trainer.global_step
-        self.logger.log_metrics(metric, step)
+        if self.cfg.dataset_name != 'bias_thp1':
+            trainer = self.trainer
+            metric = run_ppif_task(trainer, self)
+            step = trainer.global_step
+            self.logger.log_metrics(metric, step)
 
     # def on_validation_end(self):
     #     # Perform inference on the mutations
@@ -284,6 +291,7 @@ class GETDataModule(L.LightningDataModule):
             config.pop('mutations')
         # no need to leave out chromosomes or celltypes in inference
         config['leave_out_chromosomes'] = None
+        config['random_shift_peak'] = None
         dataset = InferenceDataset(
             is_train=False,
             assembly=self.cfg.assembly,
@@ -380,19 +388,18 @@ def run(cfg: DictConfig):
     model.dm = dm
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="cpu",
+        accelerator="gpu",
         num_sanity_val_steps=10,
         strategy="auto",
         devices=cfg.machine.num_devices,
         logger=[WandbLogger(project=cfg.wandb.project_name,
                             name=cfg.wandb.run_name)],
         callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
-                   LearningRateMonitor(logging_interval='step')],
-        # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+                   LearningRateMonitor(logging_interval='epoch')],
+        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
-        log_every_n_steps=100,
-        deterministic=True,
+        log_every_n_steps=4,
         default_root_dir=cfg.machine.output_dir,
     )
     trainer.fit(model, datamodule=dm)
@@ -448,9 +455,9 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel):
     pred_change = (10**pred_mut - 10**pred_wt) / \
         (10**pred_wt - 1) * 100
     mutation['pred_change'] = pred_change.detach().cpu().numpy()
-    y = mutation.query('~Screen.str.contains("Pro")')[
+    y = mutation.query('Screen.str.contains("Pro")')[
         '% change to PPIF expression'].values
-    x = mutation.query('~Screen.str.contains("Pro")')['pred_change'].values
+    x = mutation.query('Screen.str.contains("Pro")')['pred_change'].values
     pearson = np.corrcoef(x, y)[0, 1]
     r2 = r2_score(y, x)
     spearman = spearmanr(x, y)[0]

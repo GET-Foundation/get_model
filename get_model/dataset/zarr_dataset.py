@@ -220,7 +220,7 @@ class ZarrDataPool(object):
 
     def __init__(self, zarr_dirs=None, genome_seq_zarr=None, sequence_obj=None, insulation_paths=None, peak_name='peaks', negative_peak_name=None, negative_peak_ratio=0.1, insulation_subsample_ratio=0.1,
                  max_peak_length=None, center_expand_target=None,
-                 motif_mean_std_obj=None, additional_peak_columns=None, leave_out_celltypes=None,
+                 motif_mean_std_obj=None, additional_peak_columns=None, keep_celltypes=None, leave_out_celltypes=None,
                  leave_out_chromosomes=None, non_redundant='max_depth', random_shift_peak=None,
                  filter_by_min_depth=None, is_train=True, hic_path=None):
         # Rest of the code
@@ -235,6 +235,7 @@ class ZarrDataPool(object):
         self.negative_peak_name = negative_peak_name
         self.max_peak_length = max_peak_length
         self.center_expand_target = center_expand_target
+        self.keep_celltypes = keep_celltypes
         self.leave_out_celltypes = leave_out_celltypes
         self.leave_out_chromosomes = leave_out_chromosomes
         self.additional_peak_columns = additional_peak_columns
@@ -283,6 +284,16 @@ class ZarrDataPool(object):
         """
         self.zarr_dict = {cdz.data_key: cdz for zarr_dir in self.zarr_dirs for cdz in [
             CelltypeDenseZarrIO(zarr_dir).subset_celltypes_with_data_name(self.peak_name)]}
+
+        if self.keep_celltypes is not None and isinstance(self.keep_celltypes, list):
+            for data_key, cdz in self.zarr_dict.items():
+                self.zarr_dict.update({data_key: cdz.leave_out_celltypes(
+                    self.keep_celltypes, inverse=True)})
+        elif isinstance(self.keep_celltypes, str):
+            # remove the leave out celltypes using substring
+            for data_key, cdz in self.zarr_dict.items():
+                self.zarr_dict.update({data_key: cdz.leave_out_celltypes_with_pattern(
+                    self.keep_celltypes, inverse=True)})
 
         # remove the leave out celltypes using subset
         if self.leave_out_celltypes is not None and isinstance(self.leave_out_celltypes, list):
@@ -1132,6 +1143,7 @@ class PretrainDataset(Dataset):
                  peak_inactivation=None,
                  mutations=None,
 
+                 keep_celltypes=None,
                  leave_out_celltypes=None,
                  leave_out_chromosomes=None,
                  dataset_size=655_36,
@@ -1181,6 +1193,7 @@ class PretrainDataset(Dataset):
         peak_inactivation (pandas.DataFrame): A pandas dataframe containing peaks to inactivate.
         mutations (pandas.DataFrame): A pandas dataframe containing mutations to apply.
 
+        keep_celltypes (list): A list of cell types to keep.
         leave_out_celltypes (list): A list of cell types to leave out.
         leave_out_chromosomes (list): A list of chromosomes to leave out.
         dataset_size (int): The size of the dataset.
@@ -1204,6 +1217,7 @@ class PretrainDataset(Dataset):
         self.negative_peak_ratio = negative_peak_ratio
         self.random_shift_peak = random_shift_peak
         self.use_insulation = use_insulation
+        self.keep_celltypes = keep_celltypes
         self.leave_out_celltypes = leave_out_celltypes
         self.leave_out_chromosomes = leave_out_chromosomes
         self.is_train = is_train
@@ -1229,6 +1243,7 @@ class PretrainDataset(Dataset):
                                      insulation_subsample_ratio=self.insulation_subsample_ratio, max_peak_length=max_peak_length, center_expand_target=center_expand_target, sequence_obj=self.sequence,
                                      motif_mean_std_obj=self.mms,
                                      additional_peak_columns=self.additional_peak_columns,
+                                     keep_celltypes=self.keep_celltypes,
                                      leave_out_celltypes=self.leave_out_celltypes,
                                      leave_out_chromosomes=self.leave_out_chromosomes,
                                      is_train=self.is_train, non_redundant=self.non_redundant, filter_by_min_depth=self.filter_by_min_depth,

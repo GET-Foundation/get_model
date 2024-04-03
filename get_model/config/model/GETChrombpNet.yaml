@@ -2,16 +2,16 @@ model:
   _target_: get_model.model.model_refactored.GETChrombpNet
   cfg:
     motif_scanner:
-      num_motif: 637
-      include_reverse_complement: true
-      bidirectional_except_ctcf: true
-      motif_prior: true
-      learnable: false
+      num_motif: 512
+      include_reverse_complement: false
+      bidirectional_except_ctcf: false
+      motif_prior: false
+      learnable: true
     atac_attention:
       pool_method: mean
-      motif_dim: 639
-      hidden_dim: 384
-      n_dil_layers: 7
+      motif_dim: 512
+      hidden_dim: 512
+      n_dil_layers: 8
       profile_kernel_size: 75
     loss:
       components:
@@ -22,28 +22,28 @@ model:
           _target_: torch.nn.MSELoss
           reduction: "mean"
       weights:
-        atpm: 1.0
+        atpm: 10.0
         aprofile: 1.0
     metrics:
       components:
         atpm: ["mse", "pearson", "spearman", "r2"]
         aprofile: ["mse"]
-    with_bias: false
+    with_bias: true
     bias_model:
       _target_: get_model.model.model_refactored.GETChrombpNetBias
       cfg:
         motif_scanner:
-          num_motif: 637
-          include_reverse_complement: true
-          bidirectional_except_ctcf: true
-          motif_prior: true
-          learnable: false
+          num_motif: 128
+          include_reverse_complement: false
+          bidirectional_except_ctcf: false
+          motif_prior: false
+          learnable: true
         atac_attention:
           pool_method: mean
-          motif_dim: 639
-          hidden_dim: 384
-          n_dil_layers: 7
+          motif_dim: 128
+          hidden_dim: 128
+          n_dil_layers: 4
           profile_kernel_size: 75
         loss: ${model.cfg.loss}
         metrics: ${model.cfg.metrics}
-    bias_ckpt: null
+    bias_ckpt: "/home/xf2217/Projects/get_model/chrombpnet/x4lb0c3n/checkpoints/best.ckpt"

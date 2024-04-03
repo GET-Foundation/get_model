@@ -75,6 +75,7 @@ def get_rev_collate_fn(batch):
             (sample_len_max, sample_peak_sequence[i].shape[1]))
         sample_track[i] = sample_track[i].todense()
         sample_peak_sequence[i] = sample_peak_sequence[i].todense()
+        # TODO Note that the rev_comp function is used here! probably not good for inference
         sample_peak_sequence[i], sample_track[i] = rev_comp(
             sample_peak_sequence[i], sample_track[i], prob=0.5)
         cov = (celltype_peaks[i][:, 1]-celltype_peaks[i][:, 0]).sum()
