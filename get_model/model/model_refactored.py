@@ -377,6 +377,48 @@ class GETFinetuneMaxNorm(GETFinetune):
 
 
 @dataclass
+class GETRegionFinetuneModelConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    use_atac: bool = False
+
+
+class GETRegionFinetune(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        return {
+            'region_motif': batch['region_motif'],
+        }
+
+    def forward(self, region_motif):
+
+        x = self.region_embed(region_motif)
+        x, _ = self.encoder(x)
+        exp = nn.Softplus()(self.head_exp(x))
+        return exp
+
+    def before_loss(self, output, batch):
+        pred = {'exp': output}
+        obs = {'exp': batch['exp_label']}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+        }
+
+
+@dataclass
 class GETChrombpNetBiasModelConfig(BaseGETModelConfig):
     motif_scanner: MotifScannerConfig = MISSING
     atac_attention: ConvPoolConfig = MISSING

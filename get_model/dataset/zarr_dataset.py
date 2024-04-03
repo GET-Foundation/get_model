@@ -1,6 +1,7 @@
 import logging
 import os.path
 import sys
+from typing import Any, Callable, Optional
 import warnings
 from posixpath import basename
 
@@ -1572,3 +1573,4 @@ class PerturbationInferenceDataset(Dataset):
             'mutations': None, 'peak_inactivation': perturbation}
         return {'WT': self.inference_dataset.get_item_for_gene_in_celltype(data_key, celltype_id, gene_name, mutations=None, peak_inactivation=None),
                 'MUT': self.inference_dataset.get_item_for_gene_in_celltype(data_key, celltype_id, gene_name, **args)}
+

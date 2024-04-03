@@ -6,6 +6,7 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
 
 from get_model.model.model_refactored import BaseGETModelConfig, GETChrombpNetBiasModelConfig
+from typing import Optional
 
 T = TypeVar("T")
 
@@ -58,6 +59,19 @@ class DatasetConfig:
     dataset_configs: dict = MISSING
     dataset_size: int = 40960
     eval_dataset_size: int = 4096
+
+
+@dataclass
+class RegionDatasetConfig:
+    root: str = '/home/xf2217/Projects/new_finetune_data_all'
+    metadata_path: str = 'cell_type_align.txt'
+    num_region_per_sample: int = 900
+    transform: Optional[Any] = None
+    data_type: str = 'fetal'
+    leave_out_celltypes: str = 'Astrocytes'
+    leave_out_chromosomes: str = 'chr4,chr14'
+    use_natac: bool = True
+    sampling_step: int = 100
 
 
 @dataclass
@@ -118,7 +132,24 @@ class Config:
     assembly: str = 'hg38'
     model: Any = MISSING
     machine: MachineConfig = field(default_factory=MachineConfig)
-    dataset: DatasetConfig = field(default_factory=DatasetConfig)
+    dataset: DatasetConfig = field(
+        default_factory=DatasetConfig)
+    training: TrainingConfig = field(default_factory=TrainingConfig)
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    wandb: WandbConfig = field(default_factory=WandbConfig)
+    finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
+    task: TaskConfig = field(
+        default_factory=TaskConfig)
+
+
+@dataclass
+class RegionConfig:
+    dataset_name: str = MISSING
+    assembly: str = 'hg38'
+    model: Any = MISSING
+    machine: MachineConfig = field(default_factory=MachineConfig)
+    dataset: RegionDatasetConfig = field(
+        default_factory=RegionDatasetConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
@@ -129,3 +160,6 @@ class Config:
 
 cs = ConfigStore.instance()
 cs.store(name="base_config", node=Config)
+
+csr = ConfigStore.instance()
+csr.store(name="base_region_config", node=RegionConfig)
