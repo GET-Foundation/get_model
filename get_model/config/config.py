@@ -30,13 +30,14 @@ class ModelConfig(Generic[T]):
 class DatasetConfig:
     data_set: str = "Expression_Finetune_Fetal"
     eval_data_set: str = "Expression_Finetune_Fetal.fetal_eval"
+    zarr_dirs: list = MISSING
     n_peaks_lower_bound: int = 5
     n_peaks_upper_bound: int = 10
     max_peak_length: int = 5000
     center_expand_target: int = 500
     use_insulation: bool = False
     preload_count: int = 10
-    random_shift_peak: int = 10
+    random_shift_peak: int|None = None
     pin_mem: bool = True
     peak_name: str = "peaks_q0.01_tissue_open_exp"
     negative_peak_name: str | None = None
@@ -54,7 +55,7 @@ class DatasetConfig:
     non_redundant: bool = False
     filter_by_min_depth: bool = False
     hic_path: str | None = None
-    dataset_configs: dict = MISSING
+    # dataset_configs: dict = MISSING
     dataset_size: int = 40960
     eval_dataset_size: int = 4096
 

@@ -115,6 +115,7 @@ class MotifScannerConfig(BaseConfig):
     bidirectional_except_ctcf: bool = False
     motif_prior: bool = True
     learnable: bool = False
+    has_bias: bool = True
 
 
 class MotifScanner(BaseModule):
@@ -137,6 +138,7 @@ class MotifScanner(BaseModule):
         self.bidirectional_except_ctcf = cfg.bidirectional_except_ctcf
         self.motif_prior = cfg.motif_prior
         self.learnable = cfg.learnable
+        self.has_bias = cfg.has_bias
         if cfg.include_reverse_complement and self.bidirectional_except_ctcf:
             self.num_kernel *= 2
         elif cfg.include_reverse_complement:
@@ -145,7 +147,7 @@ class MotifScanner(BaseModule):
         motifs = self.load_pwm_as_kernel(
             include_reverse_complement=cfg.include_reverse_complement)
         self.motif = nn.Sequential(
-            nn.Conv1d(4, self.num_kernel, 29, padding="same", bias=True),
+            nn.Conv1d(4, self.num_kernel, 29, padding="same", bias=self.has_bias),
             # nn.BatchNorm1d(num_motif),
             nn.ReLU(),
         )

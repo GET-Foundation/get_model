@@ -173,7 +173,9 @@ class LitModel(L.LightningModule):
         # Forward pass
         output = self(input)
         pred, obs = self.model.before_loss(output, batch)
-
+        obs["atac"] = obs["atac"][:, :, None]
+        loss = self.loss(pred, obs)
+        loss = self.model.after_loss(loss)
         # Remove the hooks after the forward pass
         for hook in hooks:
             hook.remove()
@@ -186,7 +188,7 @@ class LitModel(L.LightningModule):
                 jacobians[target_name][str(i)] = {}
                 mask = torch.zeros_like(target).to(self.device)
                 mask[:, focus, i] = 1
-                output.backward(mask, retain_graph=True)
+                loss.backward(mask, retain_graph=True)
                 for name, embed in target_tensors.items():
                     jacobians[target_name][str(
                         i)][name] = embed.grad.detach().cpu().numpy()
@@ -242,9 +244,9 @@ class GETDataModule(L.LightningDataModule):
         self.cfg = cfg
 
     def _shared_build_dataset(self, is_train, sequence_obj=None):
-        config = self.cfg.dataset.dataset_configs[self.cfg.dataset_name]
+        # config = self.cfg.dataset#.dataset_configs[self.cfg.dataset_name]
         # merge config with self.cfg.dataset
-        config = DictConfig({**self.cfg.dataset, **config})
+        config = DictConfig({**self.cfg.dataset})
 
         root = self.cfg.machine.data_path
         codebase = self.cfg.machine.codebase
@@ -257,6 +259,7 @@ class GETDataModule(L.LightningDataModule):
         config.insulation_paths = [
             f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.adjecent.feather',
             f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.longrange.feather']
+        self.dataset_config = config
         sequence_obj = sequence_obj if sequence_obj is not None else get_sequence_obj(
             config.genome_seq_zarr)
         gencode_obj = get_gencode_obj(config.genome_seq_zarr, root)
@@ -380,7 +383,7 @@ def run(cfg: DictConfig):
     model.dm = dm
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="cpu",
+        accelerator="gpu",
         num_sanity_val_steps=10,
         strategy="auto",
         devices=cfg.machine.num_devices,
@@ -406,7 +409,7 @@ def run_downstream(cfg: DictConfig):
     model.dm = dm
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="cpu",
+        accelerator="gpu",
         num_sanity_val_steps=10,
         strategy="auto",
         devices=cfg.machine.num_devices,
@@ -433,24 +436,25 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel):
     # setup dataset_predict
     lm.dm.setup(stage='predict')
     with torch.no_grad():
+        lm.to("cuda")
         for i, batch in tqdm(enumerate(lm.dm.predict_dataloader()), total=len(lm.dm.predict_dataloader())):
             batch = lm.transfer_batch_to_device(
                 batch, lm.device, dataloader_idx=0)
             out = lm.predict_step(batch, i)
             result.append(out)
-    pred_wt = [r['pred_wt']['atpm'] for r in result]
-    pred_mut = [r['pred_mut']['atpm'] for r in result]
+    pred_wt = [r['pred_wt']['exp'] for r in result]
+    pred_mut = [r['pred_mut']['exp'] for r in result]
     n_celltypes = lm.dm.dataset_predict.inference_dataset.datapool.n_celltypes
     pred_wt = torch.cat(pred_wt, dim=0).reshape(
-        n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]
+        n_celltypes, n_mutation, -1, 2)[0, :, batch["WT"]["metadata"][0]["tss_peak"], batch["WT"]["metadata"][0]["strand"]]
     pred_mut = torch.cat(pred_mut, dim=0).reshape(
-        n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]
+        n_celltypes, n_mutation, -1, 2)[0, :, batch["WT"]["metadata"][0]["tss_peak"], batch["WT"]["metadata"][0]["strand"]]
     pred_change = (10**pred_mut - 10**pred_wt) / \
         (10**pred_wt - 1) * 100
     mutation['pred_change'] = pred_change.detach().cpu().numpy()
-    y = mutation.query('~Screen.str.contains("Pro")')[
+    y = mutation.query('Screen.str.contains("Pro")')[
         '% change to PPIF expression'].values
-    x = mutation.query('~Screen.str.contains("Pro")')['pred_change'].values
+    x = mutation.query('Screen.str.contains("Pro")')['pred_change'].values
     pearson = np.corrcoef(x, y)[0, 1]
     r2 = r2_score(y, x)
     spearman = spearmanr(x, y)[0]
