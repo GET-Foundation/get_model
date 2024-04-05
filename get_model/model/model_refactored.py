@@ -378,7 +378,7 @@ class GETFinetuneGBM(GETFinetune):
 
     def before_loss(self, output, batch):
         pred = {'exp': output[0], 'atac': output[1]}
-        obs = {'exp': batch['exp_label'], 'atac': batch['atpm']}
+        obs = {'exp': batch['exp_label'], 'atac': batch['atpm'].unsqueeze(-1)}
         return pred, obs
 
 

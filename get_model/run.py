@@ -173,22 +173,21 @@ class LitModel(L.LightningModule):
         # Forward pass
         output = self(input)
         pred, obs = self.model.before_loss(output, batch)
-        obs["atac"] = obs["atac"][:, :, None]
-        loss = self.loss(pred, obs)
-        loss = self.model.after_loss(loss)
         # Remove the hooks after the forward pass
-        for hook in hooks:
-            hook.remove()
-
+        # for hook in hooks:
+        #     hook.remove()
         # Compute the jacobian of the output with respect to the target tensor
         jacobians = {}
         for target_name, target in obs.items():
             jacobians[target_name] = {}
             for i in range(target.shape[-1]):
+                output = self(input)
+                pred, obs = self.model.before_loss(output, batch)
+                breakpoint()
                 jacobians[target_name][str(i)] = {}
                 mask = torch.zeros_like(target).to(self.device)
                 mask[:, focus, i] = 1
-                loss.backward(mask, retain_graph=True)
+                pred[target_name].backward(mask)
                 for name, embed in target_tensors.items():
                     jacobians[target_name][str(
                         i)][name] = embed.grad.detach().cpu().numpy()
