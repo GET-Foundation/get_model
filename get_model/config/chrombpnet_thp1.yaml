@@ -1,7 +1,7 @@
 defaults:
   - base_config
   - model/GETChrombpNet@_here_
-  - dataset@dataset
+  - dataset/finetune_thp1@dataset
   - machine/pc_chrombpnet
   - _self_
 

@@ -1,27 +1,22 @@
 defaults:
   - base_config
-  - model/GETChrombpNet@_here_
-  - dataset/fintune_k562@dataset
+  - model/GETRegionFinetune@_here_
   - machine/pc
+  - dataset/tfatlas_eval@dataset
   - _self_
 
-dataset_name: finetune_k562
 assembly: "hg38"
-dataset:
-  center_expand_target: 2000
-  n_peaks_lower_bound: 0
-  n_peaks_upper_bound: 1
 
 training:
-  save_ckpt_freq: 10
-  epochs: 2
+  save_ckpt_freq: 1
+  epochs: 100
   warmup_epochs: 1
   accumulate_grad_batches: 1
   clip_grad: null
-  use_fp16: true
+  use_fp16: false
 
 optimizer:
-  lr: 0.0001
+  lr: 0.00005
   min_lr: 0.0001
   weight_decay: 0.05
   opt: "adamw"
@@ -29,10 +24,10 @@ optimizer:
   opt_betas: [0.9, 0.95]
 
 wandb:
-  project_name: "debug_finetune"
-  run_name: "experiment_1"
+  project_name: "debug"
+  run_name: "debug"
 
 finetune:
-  checkpoint: null
+  checkpoint: "/home/xf2217/Projects/geneformer_esc/Astrocytes/checkpoint-best.pth"
   model_prefix: "model."
   patterns_to_freeze: []

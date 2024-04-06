@@ -1,7 +1,7 @@
 defaults:
   - base_config
   - model/GETChrombpNet@_here_
-  - dataset@dataset
+  - dataset/finetune_monocyte@dataset
   - machine/manitou
   - _self_
 

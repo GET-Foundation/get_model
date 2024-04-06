@@ -1,10 +1,10 @@
 import hydra
-from run_region import run
+from get_model.run_region import run
 
 from get_model.config.config import *
 
 
-@hydra.main(config_path="config", config_name="eval_fetal_region", version_base="1.3")
+@hydra.main(config_path="../config", config_name="fetal_region", version_base="1.3")
 def main(cfg: Config):
     run(cfg)
 

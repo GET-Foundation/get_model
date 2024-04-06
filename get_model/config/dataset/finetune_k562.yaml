@@ -1,0 +1,8 @@
+zarr_dirs:
+  - "encode_hg38atac_dense.zarr"
+leave_out_celltypes: null
+leave_out_chromosomes: "chr4,chr14"
+random_shift_peak: null
+peak_name: "peaks_p0.05_tissue_open_exp"
+mutations: "/home/xf2217/Projects/get_data/prepared_data.tsv"
+dataset_size: 4096

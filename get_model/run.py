@@ -4,8 +4,6 @@ import lightning as L
 import pandas as pd
 import torch
 import torch.utils.data
-from caesar.io.gencode import Gencode
-from caesar.io.zarr_io import DenseZarrIO
 from hydra.utils import instantiate
 from lightning.pytorch.callbacks import (Callback, LearningRateMonitor,
                                          ModelCheckpoint)
@@ -13,13 +11,12 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import MISSING, DictConfig, OmegaConf
-from sklearn import metrics
 from tqdm import tqdm
 
 from get_model.config.config import *
 from get_model.dataset.collate import (get_perturb_collate_fn,
                                        get_rev_collate_fn)
-from get_model.dataset.zarr_dataset import (DenseZarrIO, InferenceDataset,
+from get_model.dataset.zarr_dataset import (InferenceDataset,
                                             PerturbationInferenceDataset,
                                             PretrainDataset, get_gencode_obj,
                                             get_sequence_obj)
@@ -249,9 +246,9 @@ class GETDataModule(L.LightningDataModule):
         self.cfg = cfg
 
     def _shared_build_dataset(self, is_train, sequence_obj=None):
-        config = self.cfg.dataset.dataset_configs[self.cfg.dataset_name]
+        # config = self.cfg.dataset.dataset_configs[self.cfg.dataset_name]
         # merge config with self.cfg.dataset
-        config = DictConfig({**self.cfg.dataset, **config})
+        config = DictConfig({**self.cfg.dataset})
 
         root = self.cfg.machine.data_path
         codebase = self.cfg.machine.codebase
@@ -402,7 +399,12 @@ def run(cfg: DictConfig):
         log_every_n_steps=4,
         default_root_dir=cfg.machine.output_dir,
     )
-    trainer.fit(model, datamodule=dm)
+    if cfg.stage == 'fit':
+        trainer.fit(model, dm)
+    if cfg.stage == 'validate':
+        trainer.validate(model, datamodule=dm)
+    if cfg.stage == 'predict':
+        trainer.predict(model, datamodule=dm)
 
 
 def run_downstream(cfg: DictConfig):

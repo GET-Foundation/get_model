@@ -29,34 +29,46 @@ class ModelConfig(Generic[T]):
 
 @dataclass
 class DatasetConfig:
-    data_set: str = "Expression_Finetune_Fetal"
-    eval_data_set: str = "Expression_Finetune_Fetal.fetal_eval"
+    zarr_dirs: list = MISSING
+
+    # peaks
     n_peaks_lower_bound: int = 5
     n_peaks_upper_bound: int = 10
     max_peak_length: int = 5000
     center_expand_target: int = 500
-    use_insulation: bool = False
-    preload_count: int = 10
-    random_shift_peak: int = 10
-    pin_mem: bool = True
+    padding: int = 0
     peak_name: str = "peaks_q0.01_tissue_open_exp"
     negative_peak_name: str | None = None
-    n_packs: int = 1
-    keep_celltypes: str | None = None
-    leave_out_celltypes: str = "Astrocyte"
-    leave_out_chromosomes: str = "chr4,chr14"
-    additional_peak_columns: list = field(default_factory=lambda: [
-                                          'Expression_positive', 'Expression_negative', 'aTPM', 'TSS'])
-    padding: int = 0
-    mask_ratio: float = 0.5
-    insulation_subsample_ratio: int = 1
     negative_peak_ratio: float = 0
-    peak_inactivation: str | None = None
-    mutations: str | None = None
+    additional_peak_columns: list = field(default_factory=lambda: [
+        'Expression_positive', 'Expression_negative', 'aTPM', 'TSS'])
+    random_shift_peak: int = 10
+
+    # insulation
+    use_insulation: bool = False
+    insulation_subsample_ratio: int = 1
+
+    # hic
+    hic_path: str | None = None
+
+    # performance
+    preload_count: int = 10
+    pin_mem: bool = True
+    n_packs: int = 1
+
+    # leave-out & filtering
+    keep_celltypes: str | None = None
+    leave_out_celltypes: str | None = "Astrocyte"
+    leave_out_chromosomes: str | None = "chr4,chr14"
     non_redundant: bool = False
     filter_by_min_depth: bool = False
-    hic_path: str | None = None
-    dataset_configs: dict = MISSING
+
+    # Augmentation & perturbation
+    mask_ratio: float = 0.5
+    peak_inactivation: str | None = None
+    mutations: str | None = None
+
+    # Dataset size
     dataset_size: int = 40960
     eval_dataset_size: int = 4096
 
@@ -128,6 +140,7 @@ class TaskConfig:
 
 @dataclass
 class Config:
+    stage: str = 'fit'
     dataset_name: str = MISSING
     assembly: str = 'hg38'
     model: Any = MISSING
@@ -144,7 +157,7 @@ class Config:
 
 @dataclass
 class RegionConfig:
-    dataset_name: str = MISSING
+    stage: str = 'fit'
     assembly: str = 'hg38'
     model: Any = MISSING
     machine: MachineConfig = field(default_factory=MachineConfig)

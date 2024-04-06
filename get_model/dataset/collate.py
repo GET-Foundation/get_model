@@ -136,8 +136,10 @@ def get_rev_collate_fn(batch):
             # assuming the third column is aTPM, use aTPM to thresholding the expression
             additional_peak_features = additional_peak_features.reshape(
                 -1, n_peak_labels)
-            additional_peak_features[additional_peak_features[:, 2] < 0.1, 0] = 0
-            additional_peak_features[additional_peak_features[:, 2] < 0.1, 1] = 0
+            # additional_peak_features[additional_peak_features[:, 2]
+            #  < 0.01, 0] = 0
+            # additional_peak_features[additional_peak_features[:, 2]
+            #  < 0.01, 1] = 0
             additional_peak_features = additional_peak_features.reshape(
                 batch_size, -1, n_peak_labels)
             other_peak_labels = additional_peak_features[:, :, 2:]

@@ -1,14 +1,13 @@
 defaults:
   - base_region_config
   - model/GETRegionFinetune@_here_
-  - machine/pc_chrombpnet
+  - machine/pc_region_v1
   - _self_
 
-dataset_name: eval_fetal_region
 assembly: "hg38"
 
 dataset:
-    root: '/home/xf2217/Projects/new_finetune_data_all'
+    root: ${machine.data_path}
     metadata_path: 'cell_type_align.txt'
     num_region_per_sample: 900
     transform: null

@@ -1,7 +1,7 @@
 defaults:
   - base_config
   - model/GETChrombpNetBias@_here_
-  - dataset@dataset
+  - dataset/bias_thp1@dataset
   - machine/pc_chrombpnet
   - _self_
 
