@@ -37,8 +37,8 @@ optimizer:
   opt_betas: [0.9, 0.95]
 
 wandb:
-  project_name: "chrombpnet"
-  run_name: "thp1"
+  project_name: "chrombpnet_thp1"
+  run_name: "bias"
 
 finetune:
   checkpoint: null
