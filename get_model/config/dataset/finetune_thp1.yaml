@@ -12,4 +12,4 @@ n_peaks_lower_bound: 1
 n_peaks_upper_bound: 1
 negative_peak_name: "peaks_negative_tissue_open_exp"
 negative_peak_ratio: 0.1
-random_shift_peak: 500
+random_shift_peak: 128

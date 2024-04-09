@@ -53,7 +53,7 @@ def get_rev_collate_fn(batch):
     celltype_peaks = list(batch['celltype_peaks'])
     metadata = list(batch['metadata'])
     for i, meta in enumerate(metadata):
-        sample_track[i] = sample_track[i]/meta['libsize'] * 100000000
+        sample_track[i] = sample_track[i]  # /meta['libsize'] * 100000000
     motif_mean_std = list(batch['motif_mean_std'])
     additional_peak_features = list(batch['additional_peak_features'])
     hic_matrix = list(batch['hic_matrix'])

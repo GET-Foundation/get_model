@@ -14,24 +14,17 @@ task:
 
 dataset_name: finetune_thp1
 assembly: "hg38"
-dataset:
-  center_expand_target: 2114
-  n_peaks_lower_bound: 1
-  n_peaks_upper_bound: 1
-  peak_name: "peaks_chrombpnet_filtered_open"
-  negative_peak_name: "peaks_negative_tissue_open_exp"
-  negative_peak_ratio: 0.1
 
 training:
   save_ckpt_freq: 1
-  epochs: 100
+  epochs: 50
   warmup_epochs: 1
   accumulate_grad_batches: 1
   clip_grad: null
   use_fp16: false
 
 optimizer:
-  lr: 0.00005
+  lr: 0.001
   min_lr: 0.0001
   weight_decay: 0.05
   opt: "adamw"
@@ -39,8 +32,8 @@ optimizer:
   opt_betas: [0.9, 0.95]
 
 wandb:
-  project_name: "chrombpnet"
-  run_name: "thp1"
+  project_name: "chrombpnet_thp1"
+  run_name: "atac"
 
 finetune:
   checkpoint: null

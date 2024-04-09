@@ -7,7 +7,7 @@ import torch.utils.data
 from hydra.utils import instantiate
 from lightning.pytorch.callbacks import (Callback, LearningRateMonitor,
                                          ModelCheckpoint)
-from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger, CSVLogger
 from lightning.pytorch.plugins import MixedPrecision
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import MISSING, DictConfig, OmegaConf
@@ -38,11 +38,11 @@ class LitModel(L.LightningModule):
         self.save_hyperparameters()
         self.dm = None
 
-    def on_before_optimizer_step(self, optimizer):
-        # Compute the 2-norm for each layer
-        # If using mixed precision, the gradients are already unscaled here
-        norms = grad_norm(self.model, norm_type=2)
-        self.log_dict(norms)
+    # def on_before_optimizer_step(self, optimizer):
+    #     # Compute the 2-norm for each layer
+    #     # If using mixed precision, the gradients are already unscaled here
+    #     # norms = grad_norm(self.model, norm_type=2)
+    #     # self.log_dict(norms)
 
     def get_model(self):
         model = instantiate(self.cfg.model)
@@ -389,10 +389,14 @@ def run(cfg: DictConfig):
         num_sanity_val_steps=10,
         strategy="auto",
         devices=cfg.machine.num_devices,
-        logger=[WandbLogger(project=cfg.wandb.project_name,
-                            name=cfg.wandb.run_name)],
-        callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
-                   LearningRateMonitor(logging_interval='epoch')],
+        # logger=[WandbLogger(project=cfg.wandb.project_name,
+        #                     name=cfg.wandb.run_name)],
+        # callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
+        #            LearningRateMonitor(logging_interval='epoch')],
+        logger=[
+            CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
+        callbacks=[ModelCheckpoint(
+            monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
         plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,

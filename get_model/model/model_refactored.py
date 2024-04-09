@@ -537,8 +537,10 @@ class GETChrombpNetBias(BaseGETModel):
     def before_loss(self, output, batch):
         pred = output
         B, R = pred['atpm'].shape
-        obs = {'atpm': batch['sample_track'].mean(dim=1).unsqueeze(-1),
+        obs = {'atpm': batch['sample_track'].sum(dim=1).unsqueeze(-1),
                'aprofile': batch['sample_track']}
+        pred['aprofile'] = torch.nn.functional.log_softmax(
+            pred['aprofile'], dim=-1)
         pred['aprofile'], obs['aprofile'] = self.crop_output(
             pred['aprofile'], obs['aprofile'], B, R)
         return pred, obs
@@ -593,7 +595,7 @@ class GETChrombpNet(GETChrombpNetBias):
                 sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
             bias_atpm, bias_aprofile = bias_output['atpm'], bias_output['aprofile']
             atpm = torch.logsumexp(torch.stack(
-                [atpm, torch.log(bias_atpm+1)], dim=0), dim=0)
+                [atpm, bias_atpm], dim=0), dim=0)
             # diff_length = aprofile.shape[1] - bias_aprofile.shape[1]
             # crop_length = diff_length // 2
             # bias_aprofile = F.pad(
