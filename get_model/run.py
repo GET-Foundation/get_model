@@ -170,9 +170,10 @@ class LitModel(L.LightningModule):
                 layer = self.model.get_layer(name)
                 hook = layer.register_forward_hook(capture_target_tensor(name))
                 hooks.append(hook)
+
         # Forward pass
         output = self(input)
-        pred, obs = self.model.before_loss(output, batch)
+        pred, obs = self.model.before_loss(output, batch)    
         # Remove the hooks after the forward pass
         # for hook in hooks:
         #     hook.remove()
@@ -183,7 +184,6 @@ class LitModel(L.LightningModule):
             for i in range(target.shape[-1]):
                 output = self(input)
                 pred, obs = self.model.before_loss(output, batch)
-                breakpoint()
                 jacobians[target_name][str(i)] = {}
                 mask = torch.zeros_like(target).to(self.device)
                 mask[:, focus, i] = 1
@@ -195,7 +195,10 @@ class LitModel(L.LightningModule):
 
         embeddings = {name: embed.detach().cpu().numpy()
                       for name, embed in target_tensors.items()}
-
+        for target_name, target in pred.items():
+            pred[target_name] = target.detach().cpu().numpy()
+        for target_name, target in obs.items():
+            obs[target_name] = target.detach().cpu().numpy()
         return pred, obs, jacobians, embeddings
 
     def configure_optimizers(self):
@@ -444,13 +447,11 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel):
     pred_wt = [r['pred_wt']['exp'] for r in result]
     pred_mut = [r['pred_mut']['exp'] for r in result]
     n_celltypes = lm.dm.dataset_predict.inference_dataset.datapool.n_celltypes
-    pred_wt = torch.cat(pred_wt, dim=0).reshape(
+    pred_wt = np.concatenate(pred_wt, axis=0).reshape(
         n_celltypes, n_mutation, -1, 2)[0, :, batch["WT"]["metadata"][0]["tss_peak"], batch["WT"]["metadata"][0]["strand"]]
-    pred_mut = torch.cat(pred_mut, dim=0).reshape(
+    pred_mut = np.concatenate(pred_mut, axis=0).reshape(
         n_celltypes, n_mutation, -1, 2)[0, :, batch["WT"]["metadata"][0]["tss_peak"], batch["WT"]["metadata"][0]["strand"]]
-    pred_change = (10**pred_mut - 10**pred_wt) / \
-        (10**pred_wt - 1) * 100
-    mutation['pred_change'] = pred_change.detach().cpu().numpy()
+    mutation['pred_change'] = (10**pred_mut - 10**pred_wt) / (10**pred_wt - 1) * 100
     y = mutation.query('Screen.str.contains("Pro")')[
         '% change to PPIF expression'].values
     x = mutation.query('Screen.str.contains("Pro")')['pred_change'].values

@@ -1,4 +1,4 @@
-data_path: "/pmglocal/alb2281/GET_STARTED/get_data/"
+data_path: "/pmglocal/alb2281/get/get_data/"
 codebase: "/pmglocal/alb2281/repos/get_model"
 output_dir: "/pmglocal/alb2281/output"
 num_devices: 1

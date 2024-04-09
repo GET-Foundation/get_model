@@ -45,6 +45,6 @@ wandb:
   run_name: "experiment_1"
 
 finetune:
-  checkpoint: "/pmglocal/alb2281/ckpts/get_ckpts/pretrain/R200L500-with-atac-loss-GBM-leaveout-Tumor.htan_gbm.C3N-01814_CPT0167860015-chr11.pth"
+  checkpoint: "/pmglocal/alb2281/get/get_ckpts/pretrain/R200L500-with-atac-loss-GBM-leaveout-Tumor.htan_gbm.C3N-01814_CPT0167860015-chr11.pth"
   model_prefix: "model."
   patterns_to_freeze: []
