@@ -586,10 +586,24 @@ class GETChrombpNet(GETChrombpNetBias):
 
         self.apply(self._init_weights)
 
-    def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+    def get_input(self, batch, perturb=False):
+        result = {
+            'sample_peak_sequence': batch['sample_peak_sequence'],
+            'chunk_size': batch['chunk_size'],
+            'n_peaks': batch['n_peaks'],
+            'max_n_peaks': batch['max_n_peaks'],
+            'motif_mean_std': batch['motif_mean_std'],
+        }
+        if perturb:
+            result['output_bias'] = False
+        return result
+
+    def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std, output_bias=True):
         x = self.motif_scanner(sample_peak_sequence)
         atpm, aprofile = self.atac_attention(
             x, chunk_size, n_peaks, max_n_peaks)
+        if not output_bias:
+            return {'atpm': atpm, 'aprofile': aprofile}
         if self.with_bias:
             bias_output = self.bias_model(
                 sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std)

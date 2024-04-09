@@ -565,7 +565,7 @@ class ZarrDataPool(object):
             peak_sequence[start-window_start:end-window_start] = 1
         return csr_matrix(peak_sequence*sequence)
 
-    def _query_peaks(self, celltype_id, chr_name, start, end, random_shift=None):
+    def _query_peaks(self, celltype_id, chr_name, start, end, random_shift_peak=None):
         """
         Query peaks data for a celltype and a window.
 
@@ -582,9 +582,9 @@ class ZarrDataPool(object):
         This method is used by PreloadDataPack to query peaks data.
         """
         df = self.peaks_dict[celltype_id]
-        if random_shift is not None and isinstance(random_shift, int):
-            random_int = np.random.randint(-random_shift,
-                                           random_shift, size=df.shape[0])
+        if random_shift_peak is not None and isinstance(random_shift_peak, int) and random_shift_peak > 0:
+            random_int = np.random.randint(-random_shift_peak,
+                                           random_shift_peak, size=df.shape[0])
         else:
             random_int = 0
         df['Start'] = df['Start'].values + random_int

@@ -46,13 +46,13 @@ class LitModel(L.LightningModule):
 
     def get_model(self):
         model = instantiate(self.cfg.model)
-        if self.cfg.finetune.checkpoint is not None:
-            checkpoint_model = load_checkpoint(
-                self.cfg.finetune.checkpoint)
-            state_dict = model.state_dict()
-            remove_keys(checkpoint_model, state_dict)
-            # checkpoint_model = rename_keys(checkpoint_model)
-            model.load_state_dict(checkpoint_model['model'], strict=True)
+        # if self.cfg.finetune.checkpoint is not None:
+        # checkpoint_model = load_checkpoint(
+        # self.cfg.finetune.checkpoint)
+        # state_dict = model.state_dict()
+        # remove_keys(checkpoint_model, state_dict)
+        # checkpoint_model = rename_keys(checkpoint_model)
+        # model.load_state_dict(checkpoint_model['model'], strict=True)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         return model
@@ -112,9 +112,9 @@ class LitModel(L.LightningModule):
         batch_wt = batch['WT']
         batch_mut = batch['MUT']
 
-        input_wt = self.model.get_input(batch_wt)
+        input_wt = self.model.get_input(batch_wt, perturb=True)
         output_wt = self(input_wt)
-        input_mut = self.model.get_input(batch_mut)
+        input_mut = self.model.get_input(batch_mut, perturb=True)
         output_mut = self(input_mut)
         pred_wt, obs_wt = self.model.before_loss(output_wt, batch_wt)
         pred_mut, obs_mut = self.model.before_loss(output_mut, batch_mut)
@@ -380,7 +380,6 @@ class GETDataModule(L.LightningDataModule):
 def run(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
     model = LitModel(cfg)
-    print(OmegaConf.to_yaml(cfg))
     dm = GETDataModule(cfg)
     model.dm = dm
     trainer = L.Trainer(
@@ -404,7 +403,7 @@ def run(cfg: DictConfig):
         default_root_dir=cfg.machine.output_dir,
     )
     if cfg.stage == 'fit':
-        trainer.fit(model, dm)
+        trainer.fit(model, dm, ckpt_path=cfg.finetune.checkpoint)
     if cfg.stage == 'validate':
         trainer.validate(model, datamodule=dm)
     if cfg.stage == 'predict':
@@ -413,13 +412,17 @@ def run(cfg: DictConfig):
 
 def run_downstream(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
-    model = LitModel(cfg)
-    print(OmegaConf.to_yaml(cfg))
+    if cfg.finetune.checkpoint is not None:
+        model = LitModel.load_from_checkpoint(cfg.finetune.checkpoint)
+    else:
+        model = LitModel(cfg)
+    # move the model to the gpu
+    model.to('cuda')
     dm = GETDataModule(cfg)
     model.dm = dm
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="cpu",
+        accelerator="gpu",
         num_sanity_val_steps=10,
         strategy="auto",
         devices=cfg.machine.num_devices,
@@ -461,9 +464,10 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel):
     pred_change = (10**pred_mut - 10**pred_wt) / \
         (10**pred_wt - 1) * 100
     mutation['pred_change'] = pred_change.detach().cpu().numpy()
-    y = mutation.query('Screen.str.contains("Pro")')[
+    y = mutation.query('Screen.str.contains("Pro")').query('Screen.str.contains("iling")')[
         '% change to PPIF expression'].values
-    x = mutation.query('Screen.str.contains("Pro")')['pred_change'].values
+    x = mutation.query('Screen.str.contains("Pro")').query(
+        'Screen.str.contains("iling")')['pred_change'].values
     pearson = np.corrcoef(x, y)[0, 1]
     r2 = r2_score(y, x)
     spearman = spearmanr(x, y)[0]

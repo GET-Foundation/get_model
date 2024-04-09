@@ -432,7 +432,7 @@ class DilatedConv1d(BaseModule):
     def __init__(self, cfg: DilatedConv1dConfig):
         super().__init__(cfg)
         self.conv = nn.Conv1d(cfg.dim, cfg.dim, cfg.kernel_size,
-                              padding='same', dilation=cfg.dilation)
+                              padding='valid', dilation=cfg.dilation)
         self.activation = nn.ReLU()
         # self.batch_norm = nn.BatchNorm1d(cfg.dim)
 
