@@ -44,4 +44,4 @@ model:
           profile_kernel_size: 75
         loss: ${model.cfg.loss}
         metrics: ${model.cfg.metrics}
-    bias_ckpt: "/home/xf2217/Projects/get_model/logs/bias/version_8/checkpoints/best.ckpt"
+    bias_ckpt: "/home/xf2217/Projects/get_model/logs/chrombpnet_thp1_bias/version_1/checkpoints/best.ckpt"

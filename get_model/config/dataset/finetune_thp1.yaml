@@ -4,7 +4,7 @@ keep_celltypes: "THP1"
 leave_out_celltypes: null
 leave_out_chromosomes: "chr4,chr14"
 peak_name: "peaks_chrombpnet_filtered_open"
-dataset_size: 8192
+dataset_size: 30000
 eval_dataset_size: 512
 additional_peak_columns: ["aTPM", "Count"]
 center_expand_target: 2114
