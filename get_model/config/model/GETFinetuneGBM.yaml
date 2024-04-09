@@ -18,7 +18,7 @@ model:
       learnable: false
       has_bias: false
     atac_attention:
-      motif_dim: 639 # 637 motifs + 2 ctcf
+      motif_dim: 639 # 637 motifs + 2 ctcf when both include_reverse_complement and bidirectional_except_ctcf are true
       pool_method: "mean"
       atac_kernel_num: 161
       atac_kernel_size: 3

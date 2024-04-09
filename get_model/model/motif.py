@@ -37,4 +37,5 @@ def parse_meme_file(file_path):
         motifs.append(current_motif)
 
     motifs = np.stack([motif["letter_prob_matrix"] for motif in motifs], axis=0)
-    return motifs
+    motif_names = [motif["name"] for motif in motifs]
+    return motifs, motif_names
