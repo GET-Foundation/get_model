@@ -610,9 +610,9 @@ class GETChrombpNet(GETChrombpNetBias):
             bias_atpm, bias_aprofile = bias_output['atpm'], bias_output['aprofile']
             atpm = torch.logsumexp(torch.stack(
                 [atpm, bias_atpm], dim=0), dim=0)
-            # diff_length = aprofile.shape[1] - bias_aprofile.shape[1]
-            # crop_length = diff_length // 2
-            # bias_aprofile = F.pad(
-            #     bias_aprofile, (crop_length, diff_length - crop_length), "constant", 0)
+            diff_length = aprofile.shape[1] - bias_aprofile.shape[1]
+            crop_length = diff_length // 2
+            bias_aprofile = F.pad(
+                bias_aprofile, (crop_length, diff_length - crop_length), "constant", 0)
             aprofile = aprofile + bias_aprofile
         return {'atpm': atpm, 'aprofile': aprofile}

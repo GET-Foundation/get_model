@@ -7,8 +7,9 @@ import torch.utils.data
 from hydra.utils import instantiate
 from lightning.pytorch.callbacks import (Callback, LearningRateMonitor,
                                          ModelCheckpoint)
-from lightning.pytorch.loggers import WandbLogger, CSVLogger
+from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
+from lightning.pytorch.tuner import Tuner
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import MISSING, DictConfig, OmegaConf
 from tqdm import tqdm
@@ -35,6 +36,7 @@ class LitModel(L.LightningModule):
         self.model = self.get_model()
         self.loss = self.model.loss
         self.metrics = self.model.metrics
+        self.lr = cfg.optimizer.lr
         self.save_hyperparameters()
         self.dm = None
 
@@ -197,7 +199,7 @@ class LitModel(L.LightningModule):
     def configure_optimizers(self):
         # a adam optimizer with a scheduler using lightning function
         optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.cfg.optimizer.lr)
+            self.model.parameters(), lr=self.lr)
         return optimizer
 
     # def configure_optimizers(self):
@@ -388,8 +390,6 @@ def run(cfg: DictConfig):
         num_sanity_val_steps=10,
         strategy="auto",
         devices=cfg.machine.num_devices,
-        # logger=[WandbLogger(project=cfg.wandb.project_name,
-        #                     name=cfg.wandb.run_name)],
         # callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
         #            LearningRateMonitor(logging_interval='epoch')],
         logger=[
@@ -399,9 +399,11 @@ def run(cfg: DictConfig):
         plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
-        log_every_n_steps=4,
+        log_every_n_steps=25,
         default_root_dir=cfg.machine.output_dir,
     )
+    # tuner = Tuner(trainer)
+    # tuner.lr_find(model, datamodule=dm)
     if cfg.stage == 'fit':
         trainer.fit(model, dm, ckpt_path=cfg.finetune.checkpoint)
     if cfg.stage == 'validate':

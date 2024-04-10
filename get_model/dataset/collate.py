@@ -180,6 +180,6 @@ def get_perturb_collate_fn(perturbation_batch):
     # extract WT and MUT list from perturbation_batch List[dict('WT': List[dict], 'MUT': List[dict])]
     WT_batch = [p['WT'] for p in perturbation_batch]
     MUT_batch = [p['MUT'] for p in perturbation_batch]
-    WT_batch = get_rev_collate_fn(WT_batch, rev_comp=False)
-    MUT_batch = get_rev_collate_fn(MUT_batch, rev_comp=False)
+    WT_batch = get_rev_collate_fn(WT_batch, reverse_complement=False)
+    MUT_batch = get_rev_collate_fn(MUT_batch, reverse_complement=False)
     return {'WT': WT_batch, 'MUT': MUT_batch}
