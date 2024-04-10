@@ -1,5 +1,5 @@
 import hydra
-from run import run, run_downstream
+from get_model.run import run, run_downstream
 
 from get_model.config.config import *
 

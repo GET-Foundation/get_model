@@ -2,6 +2,7 @@ defaults:
   - base_config
   - model/GETFinetuneGBM@_here_
   - machine/manitou_alb2281
+  - dataset/gbm@dataset
   - _self_
 
 dataset_name: pretrain_gbm_eval
