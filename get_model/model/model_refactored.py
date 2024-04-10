@@ -10,7 +10,7 @@ from omegaconf import MISSING, DictConfig
 from torch.nn.init import trunc_normal_
 
 from get_model.model.modules import (ATACSplitPool, ATACSplitPoolConfig,
-                                     ATACSplitPoolMaxNorm,
+                                     ATACSplitPoolMaxNorm, ATACHead, ATACHeadConfig, 
                                      ATACSplitPoolMaxNormConfig, BaseConfig,
                                      BaseModule, ConvPool, ConvPoolConfig,
                                      ExpressionHead, ExpressionHeadConfig,
@@ -431,6 +431,33 @@ class GETFinetune(BaseGETModel):
             'max_n_peaks': R,
             'motif_mean_std': torch.randn(B, 2, 639).abs().float(),
         }
+
+@dataclass
+class GETFinetuneGBMConfig(GETFinetuneModelConfig):
+        head_atac: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+
+class GETFinetuneGBM(GETFinetune):
+    def __init__(self, cfg: GETFinetuneGBMConfig):
+        super().__init__(cfg)
+        self.head_atac = ATACHead(cfg.head_atac)
+
+    def forward(self, sample_peak_sequence, sample_track, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+        x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
+        x_original = self.atac_attention(
+            x, sample_track, chunk_size, n_peaks, max_n_peaks)
+        x = self.region_embed(x_original)
+
+        x, _ = self.encoder(x, mask=padding_mask)
+        exp = F.softplus(self.head_exp(x))
+        atac = F.softplus(self.head_atac(x_original))
+        return exp, atac
+
+    def before_loss(self, output, batch):
+        pred = {'exp': output[0], 'atac': output[1]}
+        obs = {'exp': batch['exp_label'], 'atac': batch['atpm'].unsqueeze(-1)}
+        return pred, obs
+
 
 
 @dataclass

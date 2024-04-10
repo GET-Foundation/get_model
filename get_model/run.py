@@ -169,23 +169,24 @@ class LitModel(L.LightningModule):
                 layer = self.model.get_layer(name)
                 hook = layer.register_forward_hook(capture_target_tensor(name))
                 hooks.append(hook)
+
         # Forward pass
         output = self(input)
         pred, obs = self.model.before_loss(output, batch)
-
         # Remove the hooks after the forward pass
-        for hook in hooks:
-            hook.remove()
-
+        # for hook in hooks:
+        #     hook.remove()
         # Compute the jacobian of the output with respect to the target tensor
         jacobians = {}
         for target_name, target in obs.items():
             jacobians[target_name] = {}
             for i in range(target.shape[-1]):
+                output = self(input)
+                pred, obs = self.model.before_loss(output, batch)
                 jacobians[target_name][str(i)] = {}
                 mask = torch.zeros_like(target).to(self.device)
                 mask[:, focus, i] = 1
-                output.backward(mask, retain_graph=True)
+                pred[target_name].backward(mask)
                 for name, embed in target_tensors.items():
                     jacobians[target_name][str(
                         i)][name] = embed.grad.detach().cpu().numpy()
@@ -193,7 +194,10 @@ class LitModel(L.LightningModule):
 
         embeddings = {name: embed.detach().cpu().numpy()
                       for name, embed in target_tensors.items()}
-
+        for target_name, target in pred.items():
+            pred[target_name] = target.detach().cpu().numpy()
+        for target_name, target in obs.items():
+            obs[target_name] = target.detach().cpu().numpy()
         return pred, obs, jacobians, embeddings
 
     def configure_optimizers(self):
@@ -263,6 +267,7 @@ class GETDataModule(L.LightningDataModule):
         config.insulation_paths = [
             f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.adjecent.feather',
             f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.longrange.feather']
+        self.dataset_config = config
         sequence_obj = sequence_obj if sequence_obj is not None else get_sequence_obj(
             config.genome_seq_zarr)
         gencode_obj = get_gencode_obj(config.genome_seq_zarr, root)
@@ -451,13 +456,14 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel):
     # setup dataset_predict
     lm.dm.setup(stage='predict')
     with torch.no_grad():
+        lm.to("cuda")
         for i, batch in tqdm(enumerate(lm.dm.predict_dataloader()), total=len(lm.dm.predict_dataloader())):
             batch = lm.transfer_batch_to_device(
                 batch, lm.device, dataloader_idx=0)
             out = lm.predict_step(batch, i)
             result.append(out)
-    pred_wt = [r['pred_wt']['atpm'] for r in result]
-    pred_mut = [r['pred_mut']['atpm'] for r in result]
+    pred_wt = [r['pred_wt']['exp'] for r in result]
+    pred_mut = [r['pred_mut']['exp'] for r in result]
     n_celltypes = lm.dm.dataset_predict.inference_dataset.datapool.n_celltypes
     pred_wt = torch.cat(pred_wt, dim=0).reshape(
         n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]
@@ -466,10 +472,9 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel):
     pred_change = (10**pred_mut - 10**pred_wt) / \
         (10**pred_wt - 1) * 100
     mutation['pred_change'] = pred_change.detach().cpu().numpy()
-    y = mutation.query('Screen.str.contains("Pro")').query('Screen.str.contains("iling")')[
+    y = mutation.query('~Screen.str.contains("Pro")')[
         '% change to PPIF expression'].values
-    x = mutation.query('Screen.str.contains("Pro")').query(
-        'Screen.str.contains("iling")')['pred_change'].values
+    x = mutation.query('~Screen.str.contains("Pro")')['pred_change'].values
     pearson = np.corrcoef(x, y)[0, 1]
     r2 = r2_score(y, x)
     spearman = spearmanr(x, y)[0]

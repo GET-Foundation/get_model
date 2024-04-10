@@ -42,7 +42,7 @@ class DatasetConfig:
     negative_peak_ratio: float = 0
     additional_peak_columns: list = field(default_factory=lambda: [
         'Expression_positive', 'Expression_negative', 'aTPM', 'TSS'])
-    random_shift_peak: int = 10
+    random_shift_peak: int|None = None
 
     # insulation
     use_insulation: bool = False

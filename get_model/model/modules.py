@@ -115,6 +115,7 @@ class MotifScannerConfig(BaseConfig):
     bidirectional_except_ctcf: bool = False
     motif_prior: bool = True
     learnable: bool = False
+    has_bias: bool = True
 
 
 class MotifScanner(BaseModule):
@@ -134,18 +135,24 @@ class MotifScanner(BaseModule):
     def __init__(self, cfg: MotifScannerConfig):
         super().__init__(cfg)
         self.num_kernel = cfg.num_motif
+        self.include_reverse_complement = cfg.include_reverse_complement
         self.bidirectional_except_ctcf = cfg.bidirectional_except_ctcf
         self.motif_prior = cfg.motif_prior
         self.learnable = cfg.learnable
+        self.has_bias = cfg.has_bias
+        motifs, motif_names = self.load_pwm_as_kernel(
+            include_reverse_complement=cfg.include_reverse_complement)
+        
         if cfg.include_reverse_complement and self.bidirectional_except_ctcf:
             self.num_kernel *= 2
+            motif_names = motif_names + ['CTCF_fwd', 'CTCF_rev']
         elif cfg.include_reverse_complement:
             self.num_kernel *= 2
+            motif_names = motif_names + [f"{name}_rev" for name in motif_names]
 
-        motifs = self.load_pwm_as_kernel(
-            include_reverse_complement=cfg.include_reverse_complement)
+
         self.motif = nn.Sequential(
-            nn.Conv1d(4, self.num_kernel, 29, padding="same", bias=True),
+            nn.Conv1d(4, self.num_kernel, 29, padding="same", bias=self.has_bias),
             # nn.BatchNorm1d(num_motif),
             nn.ReLU(),
         )
@@ -154,6 +161,8 @@ class MotifScanner(BaseModule):
                 motifs.shape == self.motif[0].weight.shape
             ), f"Motif prior shape ({motifs.shape}) doesn't match model ({self.motif[0].weight.shape})."
             self.motif[0].weight.data = motifs
+            self.motif_names = motif_names
+
         if not self.learnable:
             self.motif[0].weight.requires_grad = False
 
@@ -166,13 +175,13 @@ class MotifScanner(BaseModule):
         if not os.path.exists("consensus_pwms.meme"):
             os.system(f"wget {pwm_path}")
         # load pwm
-        motifs = parse_meme_file("consensus_pwms.meme")
+        motifs, motif_names = parse_meme_file("consensus_pwms.meme")
         motifs_rev = motifs[:, ::-1, ::-1].copy()
         # construct reverse complement
         motifs = torch.tensor(motifs)
         motifs_rev = torch.tensor(motifs_rev)
         motifs = torch.cat([motifs, motifs_rev], dim=0)
-        return motifs.permute(0, 2, 1).float()
+        return motifs.permute(0, 2, 1).float(), motif_names
 
     def normalize_motif(self, x, motif_mean_std):
         return (x - motif_mean_std[:, 0, :].unsqueeze(1)) / motif_mean_std[:, 1, :].unsqueeze(1)
@@ -180,7 +189,7 @@ class MotifScanner(BaseModule):
     def forward(self, x, motif_mean_std=None):
         x = x.permute(0, 2, 1)
         x = self.motif(x)
-        if self.bidirectional_except_ctcf:
+        if self.include_reverse_complement and self.bidirectional_except_ctcf:
             # get ctcf scanned score for both motif and reverse complement motif. idx of ctcf is 77 and 637+77=714
             ctcf = x[:, 77, :]
             ctcf_rev = x[:, 714, :]
@@ -188,6 +197,8 @@ class MotifScanner(BaseModule):
             x = x[:, :637, :] + x[:, 637:, :]
             # add ctcf/ctcf_rev score to the end
             x = torch.cat([x, ctcf.unsqueeze(1), ctcf_rev.unsqueeze(1)], dim=1)
+        if self.include_reverse_complement:
+            x = x[:, :637, :] + x[:, 637:, :] # output should be 637 dim
         x = x.permute(0, 2, 1)
         if motif_mean_std is not None:
             x = self.normalize_motif(x, motif_mean_std)

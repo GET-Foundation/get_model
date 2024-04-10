@@ -1,0 +1,50 @@
+defaults:
+  - base_config
+  - model/GETFinetuneGBM@_here_
+  - machine/manitou_alb2281
+  - _self_
+
+dataset_name: pretrain_gbm_eval
+assembly: "hg38"
+dataset:
+  data_set: "Pretrain.GBM_eval"
+  zarr_dirs:
+    - "htan_gbm_dense.zarr"
+  leave_out_celltypes: "Tumor.htan_gbm.C3N-01814_CPT0167860015_snATAC_GBM_Tumor.16384"
+  dataset_size: 4096
+  n_peaks_upper_bound: 200
+  random_shift_peak: null
+  additional_peak_columns:
+    ["Expression_positive", "Expression_negative", "aTPM", "TSS"]
+
+task:
+  layer_names: ["atac_attention"]
+  test_mode: "perturb_interpret"
+  gene_list: 
+    - "PPIF"
+  mutations: "/burg/pmg/users/xf2217/get_revision/PPIF/prepared_data.tsv"
+   
+training:
+  save_ckpt_freq: 10
+  epochs: 2
+  warmup_epochs: 1
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: true
+
+optimizer:
+  lr: 0.0001
+  min_lr: 0.0001
+  weight_decay: 0.05
+  opt: "adamw"
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.95]
+
+wandb:
+  project_name: "debug_finetune"
+  run_name: "experiment_1"
+
+finetune:
+  checkpoint: "/pmglocal/alb2281/get/get_ckpts/pretrain/R200L500-with-atac-loss-GBM-leaveout-Tumor.htan_gbm.C3N-01814_CPT0167860015-chr11.pth"
+  model_prefix: "model."
+  patterns_to_freeze: []
