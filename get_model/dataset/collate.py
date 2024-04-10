@@ -46,14 +46,14 @@ def batch_dict_list_to_dict(batch: list):
     return new_batch
 
 
-def get_rev_collate_fn(batch):
+def get_rev_collate_fn(batch, reverse_complement=True):
     batch = batch_dict_list_to_dict(batch)
     sample_track = list(batch['sample_track'])
     sample_peak_sequence = list(batch['sample_peak_sequence'])
     celltype_peaks = list(batch['celltype_peaks'])
     metadata = list(batch['metadata'])
     for i, meta in enumerate(metadata):
-        sample_track[i] = sample_track[i]/meta['libsize'] * 100000000
+        sample_track[i] = sample_track[i]  # /meta['libsize'] * 100000000
     motif_mean_std = list(batch['motif_mean_std'])
     additional_peak_features = list(batch['additional_peak_features'])
     hic_matrix = list(batch['hic_matrix'])
@@ -75,10 +75,12 @@ def get_rev_collate_fn(batch):
             (sample_len_max, sample_peak_sequence[i].shape[1]))
         sample_track[i] = sample_track[i].todense()
         sample_peak_sequence[i] = sample_peak_sequence[i].todense()
-        sample_peak_sequence[i], sample_track[i] = rev_comp(
-            sample_peak_sequence[i], sample_track[i], prob=0.5)
-        cov = (celltype_peaks[i][:, 1]-celltype_peaks[i][:, 0]).sum()
-        real_cov = sample_track[i].sum()
+        # TODO Note that the rev_comp function is used here! probably not good for inference
+        if reverse_complement:
+            sample_peak_sequence[i], sample_track[i] = rev_comp(
+                sample_peak_sequence[i], sample_track[i], prob=0.5)
+        # cov = (celltype_peaks[i][:, 1]-celltype_peaks[i][:, 0]).sum()
+        # real_cov = sample_track[i].sum()
         conv = 50  # int(min(500, max(100, int(cov/(real_cov+20)))))
         sample_track[i] = np.convolve(
             np.array(sample_track[i]).reshape(-1), np.ones(conv)/conv, mode='same')
@@ -135,8 +137,10 @@ def get_rev_collate_fn(batch):
             # assuming the third column is aTPM, use aTPM to thresholding the expression
             additional_peak_features = additional_peak_features.reshape(
                 -1, n_peak_labels)
-            additional_peak_features[additional_peak_features[:, 2] < 0.1, 0] = 0
-            additional_peak_features[additional_peak_features[:, 2] < 0.1, 1] = 0
+            # additional_peak_features[additional_peak_features[:, 2]
+            #  < 0.01, 0] = 0
+            # additional_peak_features[additional_peak_features[:, 2]
+            #  < 0.01, 1] = 0
             additional_peak_features = additional_peak_features.reshape(
                 batch_size, -1, n_peak_labels)
             other_peak_labels = additional_peak_features[:, :, 2:]
@@ -176,6 +180,6 @@ def get_perturb_collate_fn(perturbation_batch):
     # extract WT and MUT list from perturbation_batch List[dict('WT': List[dict], 'MUT': List[dict])]
     WT_batch = [p['WT'] for p in perturbation_batch]
     MUT_batch = [p['MUT'] for p in perturbation_batch]
-    WT_batch = get_rev_collate_fn(WT_batch)
-    MUT_batch = get_rev_collate_fn(MUT_batch)
+    WT_batch = get_rev_collate_fn(WT_batch, reverse_complement=False)
+    MUT_batch = get_rev_collate_fn(MUT_batch, reverse_complement=False)
     return {'WT': WT_batch, 'MUT': MUT_batch}

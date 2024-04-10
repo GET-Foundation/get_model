@@ -1,8 +1,11 @@
 import logging
+import os
 import os.path
 import sys
 import warnings
+from dataclasses import dataclass
 from posixpath import basename
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -11,7 +14,7 @@ import zarr
 from caesar.io.gencode import Gencode
 from caesar.io.zarr_io import CelltypeDenseZarrIO, DenseZarrIO
 from pyranges import PyRanges as pr
-from scipy.sparse import csr_matrix, vstack
+from scipy.sparse import coo_matrix, csr_matrix, load_npz, vstack
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
@@ -23,6 +26,26 @@ logging.basicConfig(level=logging.INFO,
 
 # Suppress all deprecated warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+
+def _chromosome_splitter(all_chromosomes: list, leave_out_chromosomes: str, is_train=True):
+    input_chromosomes = all_chromosomes.copy()
+    if ',' in leave_out_chromosomes:
+        leave_out_chromosomes = leave_out_chromosomes.split(",")
+    else:
+        leave_out_chromosomes = [leave_out_chromosomes]
+
+    if is_train:
+        input_chromosomes = [
+            chrom for chrom in input_chromosomes if chrom not in leave_out_chromosomes]
+    else:
+        input_chromosomes = all_chromosomes if leave_out_chromosomes == [
+        ] else leave_out_chromosomes
+
+    if isinstance(input_chromosomes, str):
+        input_chromosomes = [input_chromosomes]
+
+    return input_chromosomes
 
 
 def get_padding_pos(mask):
@@ -220,7 +243,7 @@ class ZarrDataPool(object):
 
     def __init__(self, zarr_dirs=None, genome_seq_zarr=None, sequence_obj=None, insulation_paths=None, peak_name='peaks', negative_peak_name=None, negative_peak_ratio=0.1, insulation_subsample_ratio=0.1,
                  max_peak_length=None, center_expand_target=None,
-                 motif_mean_std_obj=None, additional_peak_columns=None, leave_out_celltypes=None,
+                 motif_mean_std_obj=None, additional_peak_columns=None, keep_celltypes=None, leave_out_celltypes=None,
                  leave_out_chromosomes=None, non_redundant='max_depth', random_shift_peak=None,
                  filter_by_min_depth=None, is_train=True, hic_path=None):
         # Rest of the code
@@ -235,6 +258,7 @@ class ZarrDataPool(object):
         self.negative_peak_name = negative_peak_name
         self.max_peak_length = max_peak_length
         self.center_expand_target = center_expand_target
+        self.keep_celltypes = keep_celltypes
         self.leave_out_celltypes = leave_out_celltypes
         self.leave_out_chromosomes = leave_out_chromosomes
         self.additional_peak_columns = additional_peak_columns
@@ -283,6 +307,16 @@ class ZarrDataPool(object):
         """
         self.zarr_dict = {cdz.data_key: cdz for zarr_dir in self.zarr_dirs for cdz in [
             CelltypeDenseZarrIO(zarr_dir).subset_celltypes_with_data_name(self.peak_name)]}
+
+        if self.keep_celltypes is not None and isinstance(self.keep_celltypes, list):
+            for data_key, cdz in self.zarr_dict.items():
+                self.zarr_dict.update({data_key: cdz.leave_out_celltypes(
+                    self.keep_celltypes, inverse=True)})
+        elif isinstance(self.keep_celltypes, str):
+            # remove the leave out celltypes using substring
+            for data_key, cdz in self.zarr_dict.items():
+                self.zarr_dict.update({data_key: cdz.leave_out_celltypes_with_pattern(
+                    self.keep_celltypes, inverse=True)})
 
         # remove the leave out celltypes using subset
         if self.leave_out_celltypes is not None and isinstance(self.leave_out_celltypes, list):
@@ -531,7 +565,7 @@ class ZarrDataPool(object):
             peak_sequence[start-window_start:end-window_start] = 1
         return csr_matrix(peak_sequence*sequence)
 
-    def _query_peaks(self, celltype_id, chr_name, start, end, random_shift=None):
+    def _query_peaks(self, celltype_id, chr_name, start, end, random_shift_peak=None):
         """
         Query peaks data for a celltype and a window.
 
@@ -548,9 +582,9 @@ class ZarrDataPool(object):
         This method is used by PreloadDataPack to query peaks data.
         """
         df = self.peaks_dict[celltype_id]
-        if random_shift is not None and isinstance(random_shift, int):
-            random_int = np.random.randint(-random_shift,
-                                           random_shift, size=df.shape[0])
+        if random_shift_peak is not None and isinstance(random_shift_peak, int) and random_shift_peak > 0:
+            random_int = np.random.randint(-random_shift_peak,
+                                           random_shift_peak, size=df.shape[0])
         else:
             random_int = 0
         df['Start'] = df['Start'].values + random_int
@@ -1132,6 +1166,7 @@ class PretrainDataset(Dataset):
                  peak_inactivation=None,
                  mutations=None,
 
+                 keep_celltypes=None,
                  leave_out_celltypes=None,
                  leave_out_chromosomes=None,
                  dataset_size=655_36,
@@ -1181,6 +1216,7 @@ class PretrainDataset(Dataset):
         peak_inactivation (pandas.DataFrame): A pandas dataframe containing peaks to inactivate.
         mutations (pandas.DataFrame): A pandas dataframe containing mutations to apply.
 
+        keep_celltypes (list): A list of cell types to keep.
         leave_out_celltypes (list): A list of cell types to leave out.
         leave_out_chromosomes (list): A list of chromosomes to leave out.
         dataset_size (int): The size of the dataset.
@@ -1204,6 +1240,7 @@ class PretrainDataset(Dataset):
         self.negative_peak_ratio = negative_peak_ratio
         self.random_shift_peak = random_shift_peak
         self.use_insulation = use_insulation
+        self.keep_celltypes = keep_celltypes
         self.leave_out_celltypes = leave_out_celltypes
         self.leave_out_chromosomes = leave_out_chromosomes
         self.is_train = is_train
@@ -1229,6 +1266,7 @@ class PretrainDataset(Dataset):
                                      insulation_subsample_ratio=self.insulation_subsample_ratio, max_peak_length=max_peak_length, center_expand_target=center_expand_target, sequence_obj=self.sequence,
                                      motif_mean_std_obj=self.mms,
                                      additional_peak_columns=self.additional_peak_columns,
+                                     keep_celltypes=self.keep_celltypes,
                                      leave_out_celltypes=self.leave_out_celltypes,
                                      leave_out_chromosomes=self.leave_out_chromosomes,
                                      is_train=self.is_train, non_redundant=self.non_redundant, filter_by_min_depth=self.filter_by_min_depth,
@@ -1536,6 +1574,7 @@ class PerturbationInferenceDataset(Dataset):
         """Not all mutations are in the same gene, calculate the number of mutations for each gene as a dictionary"""
         mutation_per_gene = {}
         from pyranges import PyRanges as pr
+
         # extend tss to 4mbp
         self.perturbations_gene_overlap = pr(self.perturbations).join(pr(self.gencode_obj.gtf).extend(
             2_000_000)).df.query('gene_name in @self.gene_list').drop(['index', 'Start_b', 'End_b', 'Strand'], axis=1)
@@ -1557,3 +1596,493 @@ class PerturbationInferenceDataset(Dataset):
             'mutations': None, 'peak_inactivation': perturbation}
         return {'WT': self.inference_dataset.get_item_for_gene_in_celltype(data_key, celltype_id, gene_name, mutations=None, peak_inactivation=None),
                 'MUT': self.inference_dataset.get_item_for_gene_in_celltype(data_key, celltype_id, gene_name, **args)}
+
+
+@dataclass
+class ReferenceRegionMotifConfig:
+    data: str = '/home/xf2217/Projects/get_data/fetal_union_peak_motif_v1.hg38.zarr'
+    assembly: str = 'hg38'
+
+
+class ReferenceRegionMotif(object):
+    def __init__(self, cfg: ReferenceRegionMotifConfig) -> None:
+        self.cfg = cfg
+        self.dataset = zarr.open_group(cfg.data, mode='r')
+        self.data = self.dataset['data'][:]
+        self.peak_names = self.dataset['peak_names'][:]
+        self.motif_names = self.dataset['motif_names'][:]
+
+    @property
+    def num_peaks(self):
+        return len(self.peak_names)
+
+    @property
+    def num_motifs(self):
+        return len(self.motif_names)
+
+    @property
+    def peaks(self):
+        df = pd.DataFrame(self.peak_names[:])
+        # split chr:start-end into chr, start, end
+        df.columns = ['peak_names']
+        df['Chromosome'] = df['peak_names'].apply(lambda x: x.split(':')[0])
+        df['Start'] = df['peak_names'].apply(
+            lambda x: x.split(':')[1].split('-')[0])
+        df['End'] = df['peak_names'].apply(
+            lambda x: x.split(':')[1].split('-')[1])
+        return df.reset_index()
+
+    @property
+    def peak_names_to_index(self):
+        return {name: i for i, name in enumerate(self.peak_names)}
+
+    @staticmethod
+    def get_cutoff(d):
+        # for each column, find 90% quantile value and return a vector of cutoffs
+        cutoffs = []
+        for i in range(d.shape[1]):
+            cutoffs.append(np.quantile(d[:, i], 0.9))
+        return cutoffs
+
+    def map_peaks_to_motifs(self, peaks, normalize=True):
+        """
+        Map peaks to motifs.
+
+        Args:
+            peak_names: List of peak names.
+        """
+        if isinstance(peaks, list) or isinstance(peaks, np.ndarray):
+            peaks = self.peaks.query('peak_names.isin(@peaks)')
+        elif isinstance(peaks, pd.DataFrame) and 'Chromosome' in peaks.columns and 'Start' in peaks.columns and 'End' in peaks.columns:
+            peaks = pr(self.peaks).join(pr(peaks), suffix='_input').df
+        print(peaks)
+        peak_indices = peaks['index'].values
+        data = self.data[peak_indices]
+        data_cutoff = self.get_cutoff(data)
+        data = data * (data > data_cutoff)
+        if normalize:
+            data = data / data.max(0) / 1
+        return data, peaks
+
+    def __repr__(self) -> str:
+        return f'ReferenceRegionMotif(num_peaks={self.num_peaks}, num_motifs={self.num_motifs})'
+
+
+class ReferenceRegionDataset(Dataset):
+    def __init__(self, reference_region_motif: ReferenceRegionMotif,
+                 zarr_dataset: PretrainDataset,
+                 transform=None,
+                 use_natac: bool = True,
+                 sampling_step: int = 900,
+                 ) -> None:
+        super().__init__()
+        self.reference_region_motif = reference_region_motif
+        self.zarr_dataset = zarr_dataset
+        self.transform = transform
+        self.use_natac = use_natac
+        self.sampling_step = sampling_step
+        self.is_train = zarr_dataset.is_train
+        self.num_region_per_sample = zarr_dataset.n_peaks_upper_bound
+        self.leave_out_celltypes = zarr_dataset.leave_out_celltypes
+        self.leave_out_chromosomes = zarr_dataset.leave_out_chromosomes
+        self.setup()
+
+    @property
+    def data_dict(self):
+        return {data_key: self.reference_region_motif.map_peaks_to_motifs(
+            peaks.query('Count>0')
+        ) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
+
+    def extract_data_list(self, region_motif, peaks):
+        peak_list = []
+        target_list = []
+        tssidx_list = []
+
+        all_chromosomes = peaks["Chromosome"].unique(
+        ).tolist()
+        input_chromosomes = _chromosome_splitter(
+            all_chromosomes, self.leave_out_chromosomes, is_train=self.is_train
+        )
+        target_data = peaks[["Expression_positive",
+                             "Expression_negative"]].values
+        tssidx_data = peaks["TSS"].values
+        atpm = peaks['aTPM'].values
+        if self.use_natac:
+            region_motif = np.concatenate(
+                [region_motif, np.zeros((region_motif.shape[0], 1))+1], axis=1)
+        else:
+            region_motif = np.concatenate(
+                [region_motif, atpm.reshape(-1, 1)/atpm.reshape(-1, 1).max()], axis=1)
+        for chromosome in input_chromosomes:
+            idx_peak_list = peaks.query('Chromosome==@chromosome').index.values
+            idx_peak_start = idx_peak_list[0]
+            idx_peak_end = idx_peak_list[-1]
+            for i in range(idx_peak_start, idx_peak_end, self.sampling_step):
+                shift = np.random.randint(-self.sampling_step //
+                                          2, self.sampling_step // 2)
+                start_index = max(0, i + shift)
+                end_index = start_index + self.num_region_per_sample
+
+                celltype_annot_i = peaks.iloc[start_index:end_index, :]
+                if celltype_annot_i.iloc[-1].End - celltype_annot_i.iloc[0].Start > 5000000:
+                    end_index = celltype_annot_i[celltype_annot_i.End -
+                                                 celltype_annot_i.Start < 5000000].index[-1]
+                if celltype_annot_i["Start"].min() < 0:
+                    continue
+                peak_data_i = coo_matrix(region_motif[start_index:end_index])
+
+                target_i = coo_matrix(
+                    target_data[start_index:end_index])
+                tssidx_i = tssidx_data[start_index:end_index]
+
+                if peak_data_i.shape[0] == self.num_region_per_sample:
+                    peak_list.append(peak_data_i)
+                    target_list.append(target_i)
+                    tssidx_list.append(tssidx_i)
+        return peak_list, target_list, tssidx_list
+
+    def setup(self):
+        self.peaks = []
+        self.targets = []
+        self.tssidxs = []
+
+        for data_key, (region_motif, peaks) in tqdm(self.data_dict.items()):
+            peak_list_i, target_list_i, tssidx_list_i = self.extract_data_list(
+                region_motif, peaks)
+            self.peaks.extend(peak_list_i)
+            self.targets.extend(target_list_i)
+            self.tssidxs.extend(tssidx_list_i)
+
+    def __len__(self):
+        return len(self.peaks)
+
+    def __getitem__(self, index):
+        peak = self.peaks[index]
+        target = self.targets[index]
+        tssidx = self.tssidxs[index]
+        mask = tssidx
+        if self.transform is not None:
+            peak, mask, target = self.transform(peak, tssidx, target)
+        if peak.shape[0] == 1:
+            peak = peak.squeeze(0)
+        return {'region_motif': peak.toarray().astype(np.float32),
+                'mask': mask,
+                'exp_label': target.toarray().astype(np.float32)}
+
+
+class RegionDataset(Dataset):
+    """
+    PyTorch dataset class for cell type expression data.
+
+    Args:
+        root (str): Root directory path.
+        num_region_per_sample (int): Number of regions for each sample.
+        is_train (bool, optional): Specify if the dataset is for training. Defaults to True.
+        transform (callable, optional): A function/transform that takes in a sample and returns a transformed version.
+        args (Any, optional): Additional arguments. Defaults to None.
+
+    Attributes:
+        root (str): Root directory path.
+        transform (callable): Transform function.
+        peaks (List[coo_matrix]): List of peak data.
+        targets (List[np.ndarray]): List of target data.
+        tssidxs (np.ndarray): Array of TSS indices.
+    """
+
+    def __init__(
+        self,
+        root: str,
+        metadata_path: str,
+        num_region_per_sample: int,
+        transform: Optional[Callable] = None,
+        data_type: str = "fetal",
+        is_train: bool = True,
+        leave_out_celltypes: str = "",
+        leave_out_chromosomes: str = "",
+        use_natac: bool = True,
+        sampling_step: int = 100,
+    ) -> None:
+        super().__init__()
+
+        self.root = root
+        self.transform = transform
+        self.is_train = is_train
+        self.leave_out_celltypes = leave_out_celltypes
+        self.leave_out_chromosomes = leave_out_chromosomes
+        self.use_natac = use_natac
+        self.sampling_step = sampling_step
+
+        metadata_path = os.path.join(
+            self.root, metadata_path
+        )
+        peaks, targets, tssidx = self._make_dataset(
+            False,
+            data_type,
+            self.root,
+            metadata_path,
+            num_region_per_sample,
+            leave_out_celltypes,
+            leave_out_chromosomes,
+            use_natac,
+            is_train,
+            sampling_step,
+        )
+
+        if len(peaks) == 0:
+            raise RuntimeError(f"Found 0 files in subfolders of: {self.root}")
+
+        self.peaks = peaks
+        self.targets = targets
+        self.tssidxs = np.array(tssidx)
+
+    def __repr__(self) -> str:
+        return f"""
+Total {'train' if self.is_train else 'test'} samples: {len(self.peaks)}
+Leave out celltypes: {self.leave_out_celltypes}
+Leave out chromosomes: {self.leave_out_chromosomes}
+Use natac: {self.use_natac}
+Sampling step: {self.sampling_step}
+        """
+
+    def __getitem__(self, index: int) -> Tuple[coo_matrix, np.ndarray, np.ndarray]:
+        """
+        Get an item from the dataset.
+
+        Args:
+            index (int): Index of the item.
+
+        Returns:
+            Tuple[coo_matrix, np.ndarray, np.ndarray]: Tuple containing peak data, mask, and target data.
+        """
+        peak = self.peaks[index]
+        target = self.targets[index]
+        tssidx = self.tssidxs[index]
+        mask = tssidx
+        if self.transform is not None:
+            peak, mask, target = self.transform(peak, tssidx, target)
+        if peak.shape[0] == 1:
+            peak = peak.squeeze(0)
+        return {'region_motif': peak.toarray().astype(np.float32),
+                'mask': mask,
+                'exp_label': target.toarray().astype(np.float32)}
+
+    def __len__(self) -> int:
+        """
+        Get the length of the dataset.
+
+        Returns:
+            int: Length of the dataset.
+        """
+        return len(self.peaks)
+
+    @staticmethod
+    def _cell_splitter(
+        celltype_metadata: pd.DataFrame,
+        leave_out_celltypes: str,
+        datatypes: str,
+        is_train: bool = True,
+        is_pretrain: bool = False,
+    ) -> Tuple[List[str], Dict[str, str], Dict[str, str]]:
+        """
+        Process data based on given parameters.
+
+        Args:
+            celltype_metadata (pd.DataFrame): Cell type metadata dataframe.
+            leave_out_celltypes (str): Comma-separated string of cell types to be excluded or used for validation.
+            datatypes (str): Comma-separated string of data types to be considered.
+            is_train (bool, optional): Specify if the processing is for training data. Defaults to True.
+            is_pretrain (bool, optional): Specify if the processing is for pre-training data. Defaults to False.
+
+        Returns:
+            Tuple[List[str], Dict[str, str], Dict[str, str]]: Tuple containing the list of target file IDs,
+            cell labels dictionary, and datatype dictionary.
+        """
+        leave_out_celltypes = leave_out_celltypes.split(",")
+        datatypes = datatypes.split(",")
+
+        celltype_list = sorted(celltype_metadata["celltype"].unique().tolist())
+        if is_train:
+            celltype_list = [
+                cell for cell in celltype_list if cell not in leave_out_celltypes]
+            print(f"Train cell types list: {celltype_list}")
+            print(f"Train data types list: {datatypes}")
+        else:
+            celltype_list = leave_out_celltypes if leave_out_celltypes != [
+                ""] else celltype_list
+            print(f"Validation cell types list: {celltype_list}")
+            print(f"Validation data types list: {datatypes}")
+
+        file_id_list = []
+        datatype_dict = {}
+        cell_dict = {}
+
+        for cell in celltype_list:
+            celltype_metadata_of_cell = celltype_metadata[celltype_metadata["celltype"] == cell]
+            for file, cluster, datatype, expression in zip(
+                celltype_metadata_of_cell["id"],
+                celltype_metadata_of_cell["cluster"],
+                celltype_metadata_of_cell["datatype"],
+                celltype_metadata_of_cell["expression"],
+            ):
+                if is_pretrain and datatype in datatypes:
+                    file_id_list.append(file)
+                    cell_dict[file] = cluster
+                    datatype_dict[file] = datatype
+                elif datatype in datatypes and expression == "True":
+                    file_id_list.append(file)
+                    cell_dict[file] = cluster
+                    datatype_dict[file] = datatype
+
+        if not is_train:
+            file_id_list = sorted(file_id_list)
+
+        print(f"File ID list: {file_id_list}")
+        return file_id_list, cell_dict, datatype_dict
+
+    @staticmethod
+    @staticmethod
+    def _generate_paths(file_id: int, data_path: str, data_type: str, use_natac: bool = True) -> dict:
+        """
+        Generate a dictionary of paths based on the given parameters.
+
+        Args:
+            file_id (int): File ID.
+            data_path (str): Path to the data directory.
+            data_type (str): Data type.
+            use_natac (bool, optional): Specify if natac files should be used. Defaults to True.
+
+        Returns:
+            dict: Dictionary of paths with file IDs as keys and corresponding paths as values.
+
+        Raises:
+            FileNotFoundError: If the peak file is not found.
+        """
+        peak_npz_path = os.path.join(
+            data_path, data_type, f"{file_id}.{'natac' if use_natac else 'watac'}.npz"
+        )
+
+        if not os.path.exists(peak_npz_path):
+            raise FileNotFoundError(f"Peak file not found: {peak_npz_path}")
+
+        target_npy_path = os.path.join(
+            data_path, data_type, f"{file_id}.exp.npy")
+        tssidx_npy_path = os.path.join(
+            data_path, data_type, f"{file_id}.tss.npy")
+        celltype_annot = os.path.join(
+            data_path, data_type, f"{file_id}.csv.gz")
+
+        return {
+            "file_id": file_id,
+            "peak_npz": peak_npz_path,
+            "target_npy": target_npy_path,
+            "tssidx_npy": tssidx_npy_path,
+            "celltype_annot_csv": celltype_annot,
+        }
+
+    def _make_dataset(
+        self,
+        is_pretrain: bool,
+        datatypes: str,
+        data_path: str,
+        celltype_metadata_path: str,
+        num_region_per_sample: int,
+        leave_out_celltypes: str,
+        leave_out_chromosomes: str,
+        use_natac: bool,
+        is_train: bool,
+        step: int = 200,
+    ) -> Tuple[List[coo_matrix], List[coo_matrix], List[np.ndarray]]:
+        """
+        Generate a dataset for training or testing.
+
+        Args:
+            is_pretrain (bool): Whether it is a pretraining dataset.
+            datatypes (str): String of comma-separated data types.
+            data_path (str): Path to the data.
+            celltype_metadata_path (str): Path to the celltype metadata file.
+            num_region_per_sample (int): Number of regions per sample.
+            leave_out_celltypes (str): String of comma-separated cell types to leave out.
+            leave_out_chromosomes (str): String of comma-separated chromosomes to leave out.
+            use_natac (bool): Whether to use peak data with no ATAC count values.
+            is_train (bool): Whether it is a training dataset.
+            step (int, optional): Step size for generating samples. Defaults to 200.
+
+        Returns:
+            Tuple[List[coo_matrix], List[str], List[coo_matrix], List[np.ndarray]]: Tuple containing the generated peak data,
+            cell labels, target data, and TSS indices.
+        """
+        celltype_metadata = pd.read_csv(
+            celltype_metadata_path, sep=",", dtype=str)
+        file_id_list, cell_dict, datatype_dict = self._cell_splitter(
+            celltype_metadata,
+            leave_out_celltypes,
+            datatypes,
+            is_train=is_train,
+            is_pretrain=is_pretrain,
+        )
+        peak_list = []
+        cell_list = []
+        target_list = [] if not is_pretrain else None
+        tssidx_list = [] if not is_pretrain else None
+
+        for file_id in file_id_list:
+            cell_label = cell_dict[file_id]
+            data_type = datatype_dict[file_id]
+            print(file_id, data_path, data_type)
+            paths_dict = self._generate_paths(
+                file_id, data_path, data_type, use_natac=use_natac
+            )
+
+            celltype_peak_annot = pd.read_csv(
+                paths_dict["celltype_annot_csv"], sep=",")
+
+            try:
+                peak_data = load_npz(paths_dict["peak_npz"])
+                print(f"Feature shape: {peak_data.shape}")
+            except FileNotFoundError:
+                print(f"File not found - FILE ID: {file_id}")
+                continue
+
+            if not is_pretrain:
+                target_data = np.load(paths_dict["target_npy"])
+                tssidx_data = np.load(paths_dict["tssidx_npy"])
+                print(f"Target shape: {target_data.shape}")
+
+            all_chromosomes = celltype_peak_annot["Chromosome"].unique(
+            ).tolist()
+            input_chromosomes = _chromosome_splitter(
+                all_chromosomes, leave_out_chromosomes, is_train=is_train
+            )
+
+            for chromosome in input_chromosomes:
+                idx_peak_list = celltype_peak_annot.index[celltype_peak_annot["Chromosome"] == chromosome].tolist(
+                )
+                idx_peak_start = idx_peak_list[0]
+                idx_peak_end = idx_peak_list[-1]
+                print(idx_peak_end)
+                for i in range(idx_peak_start, idx_peak_end, step):
+                    shift = np.random.randint(-step // 2, step // 2)
+                    start_index = max(0, i + shift)
+                    end_index = start_index + num_region_per_sample
+
+                    celltype_annot_i = celltype_peak_annot.iloc[start_index:end_index, :]
+                    if celltype_annot_i.iloc[-1].End - celltype_annot_i.iloc[0].Start > 5000000:
+                        end_index = celltype_annot_i[celltype_annot_i.End -
+                                                     celltype_annot_i.Start < 5000000].index[-1]
+                    if celltype_annot_i["Start"].min() < 0:
+                        continue
+                    peak_data_i = coo_matrix(peak_data[start_index:end_index])
+
+                    if not is_pretrain:
+                        target_i = coo_matrix(
+                            target_data[start_index:end_index])
+                        tssidx_i = tssidx_data[start_index:end_index]
+
+                    if peak_data_i.shape[0] == num_region_per_sample:
+                        peak_list.append(peak_data_i)
+                        cell_list.append(cell_label)
+                        if not is_pretrain:
+                            target_list.append(target_i)
+                            tssidx_list.append(tssidx_i)
+
+        return peak_list, target_list, tssidx_list

@@ -20,6 +20,83 @@ from get_model.model.modules import (ATACSplitPool, ATACSplitPoolConfig,
 from get_model.model.transformer import GETTransformer
 
 
+class MNLLLoss(nn.Module):
+    def __init__(self):
+        """
+From @jmschrei/bpnet-lite
+A loss function based on the multinomial negative log-likelihood.
+
+    This loss function takes in a tensor of normalized log probabilities such
+    that the sum of each row is equal to 1 (e.g. from a log softmax) and
+    an equal sized tensor of true counts and returns the probability of
+    observing the true counts given the predicted probabilities under a
+    multinomial distribution. Can accept tensors with 2 or more dimensions
+    and averages over all except for the last axis, which is the number
+    of categories.
+
+    Adapted from Alex Tseng.
+
+    Parameters
+    ----------
+    logps: torch.tensor, shape=(n, ..., L)
+            A tensor with `n` examples and `L` possible categories.
+
+    true_counts: torch.tensor, shape=(n, ..., L)
+            A tensor with `n` examples and `L` possible categories.
+
+    Returns
+    -------
+    loss: float
+            The multinomial log likelihood loss of the true counts given the
+            predicted probabilities, averaged over all examples and all other
+            dimensions.
+        """
+        super().__init__()
+
+    def forward(self, logps, true_counts):
+        log_fact_sum = torch.lgamma(torch.sum(true_counts, dim=-1) + 1)
+        log_prod_fact = torch.sum(torch.lgamma(true_counts + 1), dim=-1)
+        log_prod_exp = torch.sum(true_counts * logps, dim=-1)
+        return (-log_fact_sum + log_prod_fact - log_prod_exp).mean()
+
+
+class log1pMSELoss(nn.Module):
+    def __init__(self):
+        """
+From @jmschrei/bpnet-lite
+A MSE loss on the log(x+1) of the inputs.
+
+    This loss will accept tensors of predicted counts and a vector of true
+    counts and return the MSE on the log of the labels. The squared error
+    is calculated for each position in the tensor and then averaged, regardless
+    of the shape.
+
+    Note: The predicted counts are in log space but the true counts are in the
+    original count space.
+
+    Parameters
+    ----------
+    log_predicted_counts: torch.tensor, shape=(n, ...)
+            A tensor of log predicted counts where the first axis is the number of
+            examples. Important: these values are already in log space.
+
+    true_counts: torch.tensor, shape=(n, ...)
+            A tensor of the true counts where the first axis is the number of
+            examples.
+
+    Returns
+    -------
+    loss: torch.tensor, shape=(n, 1)
+            The MSE loss on the log of the two inputs, averaged over all examples
+            and all other dimensions.
+    """
+        super().__init__()
+
+    def forward(self, log_predicted_counts, true_counts):
+        log_true = torch.log(true_counts + 1)
+        return torch.mean(torch.square(log_true - log_predicted_counts))
+
+
 @dataclass
 class LossConfig:
     components: dict = MISSING
@@ -395,6 +472,49 @@ class GETFinetuneMaxNorm(GETFinetune):
 
 
 @dataclass
+class GETRegionFinetuneModelConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    use_atac: bool = False
+
+
+class GETRegionFinetune(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        return {
+            'region_motif': batch['region_motif'],
+        }
+
+    def forward(self, region_motif):
+
+        x = self.region_embed(region_motif)
+        x, _ = self.encoder(x)
+        exp = nn.Softplus()(self.head_exp(x))
+        return exp
+
+    def before_loss(self, output, batch):
+
+        pred = {'exp': output}
+        obs = {'exp': batch['exp_label']}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+        }
+
+
+@dataclass
 class GETChrombpNetBiasModelConfig(BaseGETModelConfig):
     motif_scanner: MotifScannerConfig = MISSING
     atac_attention: ConvPoolConfig = MISSING
@@ -436,7 +556,7 @@ class GETChrombpNetBias(BaseGETModel):
         return aprofile, aprofile_target
 
     def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
-        x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
+        x = self.motif_scanner(sample_peak_sequence)
         atpm, aprofile = self.atac_attention(
             x, chunk_size, n_peaks, max_n_peaks)
         return {'atpm': atpm, 'aprofile': aprofile}
@@ -444,8 +564,10 @@ class GETChrombpNetBias(BaseGETModel):
     def before_loss(self, output, batch):
         pred = output
         B, R = pred['atpm'].shape
-        obs = {'atpm': batch['atpm'],
+        obs = {'atpm': batch['sample_track'].sum(dim=1).unsqueeze(-1),
                'aprofile': batch['sample_track']}
+        pred['aprofile'] = torch.nn.functional.log_softmax(
+            pred['aprofile'], dim=-1)
         pred['aprofile'], obs['aprofile'] = self.crop_output(
             pred['aprofile'], obs['aprofile'], B, R)
         return pred, obs
@@ -478,19 +600,41 @@ class GETChrombpNet(GETChrombpNetBias):
             self.bias_model = cfg.bias_model
             if cfg.bias_ckpt is not None:
                 checkpoint = torch.load(cfg.bias_ckpt, map_location="cpu")
-                self.bias_model.load_state_dict(checkpoint["model"])
+                if 'model' in checkpoint:
+                    checkpoint = checkpoint['model']
+                if 'state_dict' in checkpoint:
+                    checkpoint = checkpoint['state_dict']
+                if 'model.' in list(checkpoint.keys())[0]:
+                    checkpoint = {
+                        k.replace('model.', ''): v for k, v in checkpoint.items()}
+                self.bias_model.load_state_dict(checkpoint)
                 for param in self.bias_model.parameters():
                     param.requires_grad = False
 
         self.apply(self._init_weights)
 
-    def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
-        x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
+    def get_input(self, batch, perturb=False):
+        result = {
+            'sample_peak_sequence': batch['sample_peak_sequence'],
+            'chunk_size': batch['chunk_size'],
+            'n_peaks': batch['n_peaks'],
+            'max_n_peaks': batch['max_n_peaks'],
+            'motif_mean_std': batch['motif_mean_std'],
+        }
+        if perturb:
+            result['output_bias'] = False
+        return result
+
+    def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std, output_bias=True):
+        x = self.motif_scanner(sample_peak_sequence)
         atpm, aprofile = self.atac_attention(
             x, chunk_size, n_peaks, max_n_peaks)
+        if not output_bias:
+            return {'atpm': atpm, 'aprofile': aprofile}
         if self.with_bias:
-            bias_atpm, bias_aprofile = self.bias_model(
+            bias_output = self.bias_model(
                 sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
+            bias_atpm, bias_aprofile = bias_output['atpm'], bias_output['aprofile']
             atpm = torch.logsumexp(torch.stack(
                 [atpm, bias_atpm], dim=0), dim=0)
             diff_length = aprofile.shape[1] - bias_aprofile.shape[1]

@@ -1,11 +1,10 @@
 defaults:
   - base_config
   - model/GETPretrainMaxNorm@_here_
-  - dataset@dataset
+  - dataset/pretrain@dataset
   - machine/pc
   - _self_
 
-dataset_name: finetune_k562
 assembly: "hg38"
 
 training:

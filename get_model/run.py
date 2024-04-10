@@ -4,22 +4,20 @@ import lightning as L
 import pandas as pd
 import torch
 import torch.utils.data
-from caesar.io.gencode import Gencode
-from caesar.io.zarr_io import DenseZarrIO
 from hydra.utils import instantiate
 from lightning.pytorch.callbacks import (Callback, LearningRateMonitor,
                                          ModelCheckpoint)
-from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
+from lightning.pytorch.tuner import Tuner
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import MISSING, DictConfig, OmegaConf
-from sklearn import metrics
 from tqdm import tqdm
 
 from get_model.config.config import *
 from get_model.dataset.collate import (get_perturb_collate_fn,
                                        get_rev_collate_fn)
-from get_model.dataset.zarr_dataset import (DenseZarrIO, InferenceDataset,
+from get_model.dataset.zarr_dataset import (InferenceDataset,
                                             PerturbationInferenceDataset,
                                             PretrainDataset, get_gencode_obj,
                                             get_sequence_obj)
@@ -38,24 +36,25 @@ class LitModel(L.LightningModule):
         self.model = self.get_model()
         self.loss = self.model.loss
         self.metrics = self.model.metrics
+        self.lr = cfg.optimizer.lr
         self.save_hyperparameters()
         self.dm = None
 
-    def on_before_optimizer_step(self, optimizer):
-        # Compute the 2-norm for each layer
-        # If using mixed precision, the gradients are already unscaled here
-        norms = grad_norm(self.model, norm_type=2)
-        self.log_dict(norms)
+    # def on_before_optimizer_step(self, optimizer):
+    #     # Compute the 2-norm for each layer
+    #     # If using mixed precision, the gradients are already unscaled here
+    #     # norms = grad_norm(self.model, norm_type=2)
+    #     # self.log_dict(norms)
 
     def get_model(self):
         model = instantiate(self.cfg.model)
-        if self.cfg.finetune.checkpoint is not None:
-            checkpoint_model = load_checkpoint(
-                self.cfg.finetune.checkpoint)
-            state_dict = model.state_dict()
-            remove_keys(checkpoint_model, state_dict)
-            # checkpoint_model = rename_keys(checkpoint_model)
-            model.load_state_dict(checkpoint_model['model'], strict=True)
+        # if self.cfg.finetune.checkpoint is not None:
+        # checkpoint_model = load_checkpoint(
+        # self.cfg.finetune.checkpoint)
+        # state_dict = model.state_dict()
+        # remove_keys(checkpoint_model, state_dict)
+        # checkpoint_model = rename_keys(checkpoint_model)
+        # model.load_state_dict(checkpoint_model['model'], strict=True)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         return model
@@ -115,9 +114,9 @@ class LitModel(L.LightningModule):
         batch_wt = batch['WT']
         batch_mut = batch['MUT']
 
-        input_wt = self.model.get_input(batch_wt)
+        input_wt = self.model.get_input(batch_wt, perturb=True)
         output_wt = self(input_wt)
-        input_mut = self.model.get_input(batch_mut)
+        input_mut = self.model.get_input(batch_mut, perturb=True)
         output_mut = self(input_mut)
         pred_wt, obs_wt = self.model.before_loss(output_wt, batch_wt)
         pred_mut, obs_mut = self.model.before_loss(output_mut, batch_mut)
@@ -173,7 +172,7 @@ class LitModel(L.LightningModule):
 
         # Forward pass
         output = self(input)
-        pred, obs = self.model.before_loss(output, batch)    
+        pred, obs = self.model.before_loss(output, batch)
         # Remove the hooks after the forward pass
         # for hook in hooks:
         #     hook.remove()
@@ -202,30 +201,37 @@ class LitModel(L.LightningModule):
         return pred, obs, jacobians, embeddings
 
     def configure_optimizers(self):
-        optimizer = create_optimizer(self.cfg.optimizer, self.model)
-        num_training_steps_per_epoch = (
-            self.cfg.dataset.dataset_size // self.cfg.machine.batch_size // self.cfg.machine.num_devices
-        )
-        schedule = cosine_scheduler(
-            base_value=self.cfg.optimizer.lr,
-            final_value=self.cfg.optimizer.min_lr,
-            epochs=self.cfg.training.epochs,
-            niter_per_ep=num_training_steps_per_epoch,
-            warmup_epochs=self.cfg.training.warmup_epochs,
-            start_warmup_value=0,
-            warmup_steps=-1
-        )
-        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer,
-            lr_lambda=lambda step: schedule[step],
-        )
-        return [optimizer], [lr_scheduler]
+        # a adam optimizer with a scheduler using lightning function
+        optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=self.lr)
+        return optimizer
+
+    # def configure_optimizers(self):
+    #     optimizer = create_optimizer(self.cfg.optimizer, self.model)
+    #     num_training_steps_per_epoch = (
+    #         self.cfg.dataset.dataset_size // self.cfg.machine.batch_size // self.cfg.machine.num_devices
+    #     )
+    #     schedule = cosine_scheduler(
+    #         base_value=self.cfg.optimizer.lr,
+    #         final_value=self.cfg.optimizer.min_lr,
+    #         epochs=self.cfg.training.epochs,
+    #         niter_per_ep=num_training_steps_per_epoch,
+    #         warmup_epochs=self.cfg.training.warmup_epochs,
+    #         start_warmup_value=0,
+    #         warmup_steps=-1
+    #     )
+    #     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+    #         optimizer,
+    #         lr_lambda=lambda step: schedule[step],
+    #     )
+    #     return [optimizer], [lr_scheduler]
 
     def on_validation_epoch_end(self):
-        trainer = self.trainer
-        metric = run_ppif_task(trainer, self)
-        step = trainer.global_step
-        self.logger.log_metrics(metric, step)
+        if self.cfg.dataset_name != 'bias_thp1':
+            trainer = self.trainer
+            metric = run_ppif_task(trainer, self)
+            step = trainer.global_step
+            self.logger.log_metrics(metric, step)
 
     # def on_validation_end(self):
     #     # Perform inference on the mutations
@@ -246,7 +252,7 @@ class GETDataModule(L.LightningDataModule):
         self.cfg = cfg
 
     def _shared_build_dataset(self, is_train, sequence_obj=None):
-        # config = self.cfg.dataset#.dataset_configs[self.cfg.dataset_name]
+        # config = self.cfg.dataset.dataset_configs[self.cfg.dataset_name]
         # merge config with self.cfg.dataset
         config = DictConfig({**self.cfg.dataset})
 
@@ -289,6 +295,7 @@ class GETDataModule(L.LightningDataModule):
             config.pop('mutations')
         # no need to leave out chromosomes or celltypes in inference
         config['leave_out_chromosomes'] = None
+        config['random_shift_peak'] = None
         dataset = InferenceDataset(
             is_train=False,
             assembly=self.cfg.assembly,
@@ -380,7 +387,6 @@ class GETDataModule(L.LightningDataModule):
 def run(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
     model = LitModel(cfg)
-    print(OmegaConf.to_yaml(cfg))
     dm = GETDataModule(cfg)
     model.dm = dm
     trainer = L.Trainer(
@@ -389,24 +395,36 @@ def run(cfg: DictConfig):
         num_sanity_val_steps=10,
         strategy="auto",
         devices=cfg.machine.num_devices,
-        logger=[WandbLogger(project=cfg.wandb.project_name,
-                            name=cfg.wandb.run_name)],
-        callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
-                   LearningRateMonitor(logging_interval='step')],
-        # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+        # callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
+        #            LearningRateMonitor(logging_interval='epoch')],
+        logger=[
+            CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
+        callbacks=[ModelCheckpoint(
+            monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
+        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
-        log_every_n_steps=100,
-        deterministic=True,
+        log_every_n_steps=25,
         default_root_dir=cfg.machine.output_dir,
     )
-    trainer.fit(model, datamodule=dm)
+    # tuner = Tuner(trainer)
+    # tuner.lr_find(model, datamodule=dm)
+    if cfg.stage == 'fit':
+        trainer.fit(model, dm, ckpt_path=cfg.finetune.checkpoint)
+    if cfg.stage == 'validate':
+        trainer.validate(model, datamodule=dm)
+    if cfg.stage == 'predict':
+        trainer.predict(model, datamodule=dm)
 
 
 def run_downstream(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
-    model = LitModel(cfg)
-    print(OmegaConf.to_yaml(cfg))
+    if cfg.finetune.checkpoint is not None:
+        model = LitModel.load_from_checkpoint(cfg.finetune.checkpoint)
+    else:
+        model = LitModel(cfg)
+    # move the model to the gpu
+    model.to('cuda')
     dm = GETDataModule(cfg)
     model.dm = dm
     trainer = L.Trainer(
@@ -447,14 +465,16 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel):
     pred_wt = [r['pred_wt']['exp'] for r in result]
     pred_mut = [r['pred_mut']['exp'] for r in result]
     n_celltypes = lm.dm.dataset_predict.inference_dataset.datapool.n_celltypes
-    pred_wt = np.concatenate(pred_wt, axis=0).reshape(
-        n_celltypes, n_mutation, -1, 2)[0, :, batch["WT"]["metadata"][0]["tss_peak"], batch["WT"]["metadata"][0]["strand"]]
-    pred_mut = np.concatenate(pred_mut, axis=0).reshape(
-        n_celltypes, n_mutation, -1, 2)[0, :, batch["WT"]["metadata"][0]["tss_peak"], batch["WT"]["metadata"][0]["strand"]]
-    mutation['pred_change'] = (10**pred_mut - 10**pred_wt) / (10**pred_wt - 1) * 100
-    y = mutation.query('Screen.str.contains("Pro")')[
+    pred_wt = torch.cat(pred_wt, dim=0).reshape(
+        n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]
+    pred_mut = torch.cat(pred_mut, dim=0).reshape(
+        n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]
+    pred_change = (10**pred_mut - 10**pred_wt) / \
+        (10**pred_wt - 1) * 100
+    mutation['pred_change'] = pred_change.detach().cpu().numpy()
+    y = mutation.query('~Screen.str.contains("Pro")')[
         '% change to PPIF expression'].values
-    x = mutation.query('Screen.str.contains("Pro")')['pred_change'].values
+    x = mutation.query('~Screen.str.contains("Pro")')['pred_change'].values
     pearson = np.corrcoef(x, y)[0, 1]
     r2 = r2_score(y, x)
     spearman = spearmanr(x, y)[0]

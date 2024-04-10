@@ -1,0 +1,41 @@
+defaults:
+  - base_config
+  - model/GETChrombpNetBias@_here_
+  - dataset/bias_thp1@dataset
+  - machine/pc_chrombpnet
+  - _self_
+
+task:
+  layer_names: []
+  test_mode: "perturb"
+  gene_list:
+    - "PPIF"
+  mutations: "/home/xf2217/Projects/get_data/prepared_data.tsv"
+
+dataset_name: bias_thp1
+assembly: "hg38"
+
+training:
+  save_ckpt_freq: 1
+  epochs: 50
+  warmup_epochs: 1
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: false
+
+optimizer:
+  lr: 0.0001
+  min_lr: 0.0001
+  weight_decay: 0.05
+  opt: "adamw"
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.95]
+
+wandb:
+  project_name: "chrombpnet_thp1"
+  run_name: "bias"
+
+finetune:
+  checkpoint: null
+  model_prefix: "model."
+  patterns_to_freeze: []

@@ -2,5 +2,5 @@ data_path: "/home/xf2217/Projects/get_data/"
 codebase: "/home/xf2217/Projects/get_model/"
 output_dir: "/home/xf2217/output"
 num_devices: 1
-num_workers: 0
-batch_size: 4
+num_workers: 8
+batch_size: 64

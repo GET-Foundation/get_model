@@ -1,0 +1,9 @@
+eval_data_set: null
+zarr_dirs:
+  - "shendure_fetal_dense.zarr"
+  - "encode_hg38atac_dense.zarr"
+  - "vijay_hematopoiesis_dense.zarr"
+  - "htan_gbm_dense.zarr"
+  - "bingren_adult_dense.zarr"
+leave_out_celltypes: null
+additional_peak_columns: null

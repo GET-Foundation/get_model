@@ -2,24 +2,27 @@ model:
   _target_: get_model.model.model_refactored.GETChrombpNetBias
   cfg:
     motif_scanner:
-      num_motif: 637
-      include_reverse_complement: true
-      bidirectional_except_ctcf: true
-      motif_prior: true
-      learnable: false
+      num_motif: 128
+      include_reverse_complement: false
+      bidirectional_except_ctcf: false
+      motif_prior: false
+      learnable: true
     atac_attention:
       pool_method: mean
-      motif_dim: 639
-      hidden_dim: 256
-      n_dil_layers: 7
+      motif_dim: 128
+      hidden_dim: 128
+      n_dil_layers: 4
       profile_kernel_size: 75
     loss:
       components:
-        masked:
-          _target_: torch.nn.MSELoss
-          reduction: "mean"
+        atpm:
+          _target_: get_model.model.model_refactored.log1pMSELoss
+        aprofile:
+          _target_: get_model.model.model_refactored.MNLLLoss
       weights:
-        masked: 1.0
+        atpm: 10.0
+        aprofile: 1.0
     metrics:
       components:
-        masked: ["pearson", "spearman", "mse"]
+        atpm: ["mse", "pearson", "spearman", "r2"]
+        aprofile: ["mse"]

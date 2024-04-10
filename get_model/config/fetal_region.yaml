@@ -1,0 +1,43 @@
+defaults:
+  - base_region_config
+  - model/GETRegionFinetune@_here_
+  - machine/pc_region_v1
+  - _self_
+
+assembly: "hg38"
+
+dataset:
+    root: ${machine.data_path}
+    metadata_path: 'cell_type_align.txt'
+    num_region_per_sample: 900
+    transform: null
+    data_type: 'fetal'
+    leave_out_celltypes: 'Astrocytes'
+    leave_out_chromosomes: 'chr1,chr2,chr3,chr4,chr5'
+    use_natac: true
+    sampling_step: 900
+
+training:
+  save_ckpt_freq: 1
+  epochs: 100
+  warmup_epochs: 1
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: false
+
+optimizer:
+  lr: 0.00005
+  min_lr: 0.0001
+  weight_decay: 0.05
+  opt: "adamw"
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.95]
+
+wandb:
+  project_name: "debug"
+  run_name: "debug"
+
+finetune:
+  checkpoint: "/home/xf2217/Projects/geneformer_esc/Astrocytes_natac/checkpoint-best.pth"
+  model_prefix: "model."
+  patterns_to_freeze: []

@@ -1,0 +1,8 @@
+zarr_dirs:
+  - "htan_gbm_dense.zarr"
+leave_out_celltypes: "Tumor.htan_gbm.C3N-01814_CPT0167860015_snATAC_GBM_Tumor.16384"
+dataset_size: 4096
+n_peaks_upper_bound: 200
+random_shift_peak: null
+additional_peak_columns:
+  ["Expression_positive", "Expression_negative", "aTPM", "TSS"]
