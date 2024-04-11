@@ -7,6 +7,7 @@ model:
       bidirectional_except_ctcf: false
       motif_prior: false
       learnable: true
+      has_bias: true
     atac_attention:
       pool_method: mean
       motif_dim: 512
@@ -36,6 +37,7 @@ model:
           bidirectional_except_ctcf: false
           motif_prior: false
           learnable: true
+          has_bias: true
         atac_attention:
           pool_method: mean
           motif_dim: 128

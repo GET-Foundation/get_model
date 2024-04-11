@@ -443,7 +443,7 @@ def run_downstream(cfg: DictConfig):
     print(run_ppif_task(trainer, model))
 
 
-def run_ppif_task(trainer: L.Trainer, lm: LitModel):
+def run_ppif_task(trainer: L.Trainer, lm: LitModel, output_key='atpm'):
     import numpy as np
     from scipy.stats import pearsonr, spearmanr
     from sklearn.linear_model import LinearRegression
@@ -462,8 +462,8 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel):
                 batch, lm.device, dataloader_idx=0)
             out = lm.predict_step(batch, i)
             result.append(out)
-    pred_wt = [r['pred_wt']['exp'] for r in result]
-    pred_mut = [r['pred_mut']['exp'] for r in result]
+    pred_wt = [r['pred_wt'][output_key] for r in result]
+    pred_mut = [r['pred_mut'][output_key] for r in result]
     n_celltypes = lm.dm.dataset_predict.inference_dataset.datapool.n_celltypes
     pred_wt = torch.cat(pred_wt, dim=0).reshape(
         n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]

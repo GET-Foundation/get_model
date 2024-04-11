@@ -26,7 +26,7 @@ def parse_meme_file(file_path):
             current_motif["letter_prob_matrix"] /= current_motif["width"]
             if current_motif["width"] < 29:
                 current_motif["letter_prob_matrix"] = np.concatenate(
-                    (   
+                    (
                         current_motif["letter_prob_matrix"],
                         np.zeros((29 - current_motif["width"], 4)),
                     ),
@@ -36,6 +36,7 @@ def parse_meme_file(file_path):
         # pad to 29, 4
         motifs.append(current_motif)
 
-    motifs = np.stack([motif["letter_prob_matrix"] for motif in motifs], axis=0)
+    motifs_matrix = np.stack([motif["letter_prob_matrix"]
+                             for motif in motifs], axis=0)
     motif_names = [motif["name"] for motif in motifs]
-    return motifs, motif_names
+    return motifs_matrix, motif_names

@@ -9,8 +9,8 @@ from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig
 from torch.nn.init import trunc_normal_
 
-from get_model.model.modules import (ATACSplitPool, ATACSplitPoolConfig,
-                                     ATACSplitPoolMaxNorm, ATACHead, ATACHeadConfig, 
+from get_model.model.modules import (ATACHead, ATACHeadConfig, ATACSplitPool,
+                                     ATACSplitPoolConfig, ATACSplitPoolMaxNorm,
                                      ATACSplitPoolMaxNormConfig, BaseConfig,
                                      BaseModule, ConvPool, ConvPoolConfig,
                                      ExpressionHead, ExpressionHeadConfig,
@@ -432,10 +432,12 @@ class GETFinetune(BaseGETModel):
             'motif_mean_std': torch.randn(B, 2, 639).abs().float(),
         }
 
+
 @dataclass
 class GETFinetuneGBMConfig(GETFinetuneModelConfig):
-        head_atac: ExpressionHeadConfig = field(
+    head_atac: ExpressionHeadConfig = field(
         default_factory=ExpressionHeadConfig)
+
 
 class GETFinetuneGBM(GETFinetune):
     def __init__(self, cfg: GETFinetuneGBMConfig):
@@ -457,7 +459,6 @@ class GETFinetuneGBM(GETFinetune):
         pred = {'exp': output[0], 'atac': output[1]}
         obs = {'exp': batch['exp_label'], 'atac': batch['atpm'].unsqueeze(-1)}
         return pred, obs
-
 
 
 @dataclass

@@ -142,7 +142,7 @@ class MotifScanner(BaseModule):
         self.has_bias = cfg.has_bias
         motifs, motif_names = self.load_pwm_as_kernel(
             include_reverse_complement=cfg.include_reverse_complement)
-        
+
         if cfg.include_reverse_complement and self.bidirectional_except_ctcf:
             self.num_kernel *= 2
             motif_names = motif_names + ['CTCF_fwd', 'CTCF_rev']
@@ -150,9 +150,9 @@ class MotifScanner(BaseModule):
             self.num_kernel *= 2
             motif_names = motif_names + [f"{name}_rev" for name in motif_names]
 
-
         self.motif = nn.Sequential(
-            nn.Conv1d(4, self.num_kernel, 29, padding="same", bias=self.has_bias),
+            nn.Conv1d(4, self.num_kernel, 29,
+                      padding="same", bias=self.has_bias),
             # nn.BatchNorm1d(num_motif),
             nn.ReLU(),
         )
@@ -198,7 +198,7 @@ class MotifScanner(BaseModule):
             # add ctcf/ctcf_rev score to the end
             x = torch.cat([x, ctcf.unsqueeze(1), ctcf_rev.unsqueeze(1)], dim=1)
         if self.include_reverse_complement:
-            x = x[:, :637, :] + x[:, 637:, :] # output should be 637 dim
+            x = x[:, :637, :] + x[:, 637:, :]  # output should be 637 dim
         x = x.permute(0, 2, 1)
         if motif_mean_std is not None:
             x = self.normalize_motif(x, motif_mean_std)
