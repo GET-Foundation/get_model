@@ -28,8 +28,10 @@ def get_args_parser():
     parser.add_argument("--epochs", default=300, type=int)
     parser.add_argument("--save_ckpt_freq", default=1, type=int)
     # wandb params
-    parser.add_argument("--wandb_project_name", type=str, default="get-pretrain", help="wandb project name")
-    parser.add_argument("--wandb_run_name", type=str, default=None, help="wandb run name")
+    parser.add_argument("--wandb_project_name", type=str,
+                        default="get-pretrain", help="wandb project name")
+    parser.add_argument("--wandb_run_name", type=str,
+                        default=None, help="wandb run name")
     # Model parameters
     parser.add_argument(
         "--model",
@@ -93,11 +95,11 @@ def get_args_parser():
         help="lower bound of number of peaks",
     )
     parser.add_argument(
-            "--peak_inactivation",
-            default=None,
-            choices=['random_tss', None],
-            help="CRISPR inactivation (pass a dataframe in script) or random TSS inactivation during training"
-            )
+        "--peak_inactivation",
+        default=None,
+        choices=['random_tss', None],
+        help="CRISPR inactivation (pass a dataframe in script) or random TSS inactivation during training"
+    )
     parser.add_argument(
         "--n_peaks_upper_bound",
         default=200,
@@ -107,14 +109,16 @@ def get_args_parser():
     parser.add_argument(
         "--non_redundant",
         default=None,
-        choices=["max_depth", "depth_512", "depth_1024", "depth_2048", "depth_4096", None],
+        choices=["max_depth", "depth_512", "depth_1024",
+                 "depth_2048", "depth_4096", None],
     )
     parser.add_argument(
-            "--filter_by_min_depth",
-            default=None,
-            choices=["depth_512", "depth_1024", "depth_2048", "depth_4096", "depth_8192", None],
-            help="Filter out samples that do not meet minimum depth threshold"
-            )
+        "--filter_by_min_depth",
+        default=None,
+        choices=["depth_512", "depth_1024", "depth_2048",
+                 "depth_4096", "depth_8192", None],
+        help="Filter out samples that do not meet minimum depth threshold"
+    )
     parser.add_argument(
         "--num_motif",
         default=1273,
@@ -154,7 +158,6 @@ def get_args_parser():
     parser.add_argument(
         "--final_bn", default=False, type=bool, help="Whether to BN motifxregion matrix before region embedding"
     )
-
 
     parser.add_argument(
         "--input_dim", default=111, type=int, help="input dimension size for backbone"
@@ -272,8 +275,10 @@ def get_args_parser():
         help="dataset path",
     )
     parser.add_argument("--hic_data_path", type=str, help="hic dataset path")
-    parser.add_argument("--data_type", default="fetal", type=str, help="dataset type")
-    parser.add_argument("--use_natac", action="store_true", default=False)
+    parser.add_argument("--data_type", default="fetal",
+                        type=str, help="dataset type")
+    parser.add_argument("--quantitative_atac",
+                        action="store_true", default=False)
     parser.add_argument("--data_set", default="Pretrain", type=str)
     parser.add_argument(
         "--eval_data_set",
@@ -298,14 +303,16 @@ def get_args_parser():
     parser.add_argument(
         "--output_dir", default="", help="path where to save, empty for no saving"
     )
-    parser.add_argument("--log_dir", default=None, help="path where to tensorboard log")
+    parser.add_argument("--log_dir", default=None,
+                        help="path where to tensorboard log")
     parser.add_argument(
         "--device", default="cuda", help="device to use for training / testing"
     )
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--resume", default="", help="resume from checkpoint")
     parser.add_argument("--auto_resume", action="store_true")
-    parser.add_argument("--no_auto_resume", action="store_false", dest="auto_resume")
+    parser.add_argument("--no_auto_resume",
+                        action="store_false", dest="auto_resume")
     parser.set_defaults(auto_resume=True)
 
     parser.add_argument(
@@ -317,9 +324,11 @@ def get_args_parser():
         action="store_true",
         help="Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.",
     )
-    parser.add_argument("--no_pin_mem", action="store_false", dest="pin_mem", help="")
+    parser.add_argument("--no_pin_mem", action="store_false",
+                        dest="pin_mem", help="")
     parser.set_defaults(pin_mem=False)
-    parser.add_argument("--flash_attn", action="store_true", default=False, help="flash attention")
+    parser.add_argument("--flash_attn", action="store_true",
+                        default=False, help="flash attention")
 
     # distributed training parameters
     parser.add_argument("--distributed", default=True, action="store_true")
@@ -358,7 +367,6 @@ def get_model(args):
 def main(args):
     utils.init_distributed_mode(args)
 
-
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
@@ -372,7 +380,7 @@ def main(args):
     model = get_model(args)
     num_region_per_sample = args.num_region_per_sample
     num_motif = args.num_motif
-    motif_dim=args.input_dim
+    motif_dim = args.input_dim
     print("Region size = %s" % str(num_region_per_sample))
     print("Number motif = %s" % str(num_motif))
     print("Dimension motif = %s" % str(motif_dim))
@@ -382,8 +390,10 @@ def main(args):
     sequence_obj = DenseZarrIO(f'{args.data_path}/hg38.zarr', dtype='int8')
     sequence_obj.load_to_memory_dense()
 
-    dataset_train = build_dataset(is_train=True, args=args, sequence_obj=sequence_obj)
-    dataset_eval = build_dataset(is_train=False, args=args, sequence_obj=sequence_obj)
+    dataset_train = build_dataset(
+        is_train=True, args=args, sequence_obj=sequence_obj)
+    dataset_eval = build_dataset(
+        is_train=False, args=args, sequence_obj=sequence_obj)
     if args.distributed:
         num_tasks = utils.get_world_size()
         global_rank = utils.get_rank()
@@ -402,7 +412,7 @@ def main(args):
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_eval = torch.utils.data.RandomSampler(dataset_eval)
-    
+
     log_writer = None
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
@@ -422,7 +432,7 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        collate_fn = get_rev_collate_fn,
+        collate_fn=get_rev_collate_fn,
         worker_init_fn=worker_init_fn_get,
     )
 
@@ -433,7 +443,7 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        collate_fn = get_rev_collate_fn,
+        collate_fn=get_rev_collate_fn,
         worker_init_fn=worker_init_fn_get,
     )
 
@@ -442,11 +452,11 @@ def main(args):
     # compile model using torch.compile
     if args.compile_model:
         model = torch.compile(model)
-    # ddp 
-    
+    # ddp
 
     model_without_ddp = model
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_parameters = sum(p.numel()
+                       for p in model.parameters() if p.requires_grad)
 
     print("Model = %s" % str(model_without_ddp))
     print("number of params: {} M".format(n_parameters / 1e6))
@@ -554,8 +564,7 @@ def main(args):
 
         if utils.is_main_process():
             wandb.log(log_stats)
-        
-                
+
         if args.output_dir and utils.is_main_process():
             if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
                 log_writer.flush()
@@ -563,8 +572,6 @@ def main(args):
                 os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8"
             ) as f:
                 f.write(json.dumps(log_stats) + "\n")
-
-            
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

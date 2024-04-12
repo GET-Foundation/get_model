@@ -40,12 +40,12 @@ def get_args():
     parser.add_argument("--update_freq", default=1, type=int)
     parser.add_argument("--save_ckpt_freq", default=1, type=int)
     # wandb params
-    parser.add_argument("--wandb_project_name", type=str, default="get-finetune", help="wandb project name")
-    parser.add_argument("--wandb_run_name", type=str, default=None, help="wandb run name")
-
+    parser.add_argument("--wandb_project_name", type=str,
+                        default="get-finetune", help="wandb project name")
+    parser.add_argument("--wandb_run_name", type=str,
+                        default=None, help="wandb run name")
 
     parser.add_argument("--setting", default="ood", type=str)
-
 
     # Model parameters
     parser.add_argument(
@@ -132,12 +132,14 @@ def get_args():
     parser.add_argument(
         "--non_redundant",
         default=None,
-        choices=["max_depth", "depth_512", "depth_1024", "depth_2048", "depth_4096", None],
+        choices=["max_depth", "depth_512", "depth_1024",
+                 "depth_2048", "depth_4096", None],
     )
     parser.add_argument(
         "--filter_by_min_depth",
         default=None,
-        choices=["depth_512", "depth_1024", "depth_2048", "depth_4096", "depth_8192", None],
+        choices=["depth_512", "depth_1024", "depth_2048",
+                 "depth_4096", "depth_8192", None],
         help="Filter out samples that do not meet minimum depth threshold"
     )
     parser.add_argument(
@@ -216,7 +218,8 @@ def get_args():
     )
 
     parser.add_argument("--model_ema", action="store_true", default=False)
-    parser.add_argument("--model_ema_decay", type=float, default=0.9999, help="")
+    parser.add_argument("--model_ema_decay", type=float,
+                        default=0.9999, help="")
     parser.add_argument(
         "--model_ema_force_cpu", action="store_true", default=False, help=""
     )
@@ -325,13 +328,15 @@ def get_args():
     )
 
     # * Finetuning params
-    parser.add_argument("--finetune", default="", help="finetune from checkpoint")
+    parser.add_argument("--finetune", default="",
+                        help="finetune from checkpoint")
     parser.add_argument("--model_key", default="model|module", type=str)
     parser.add_argument("--model_prefix", default="", type=str)
     # cls token and mean pooling
     parser.add_argument("--use_mean_pooling", action="store_true")
     parser.set_defaults(use_mean_pooling=True)
-    parser.add_argument("--use_cls", action="store_false", dest="use_mean_pooling")
+    parser.add_argument("--use_cls", action="store_false",
+                        dest="use_mean_pooling")
     # Chrombpnet setting
     parser.add_argument("--with_bias", action="store_true")
     parser.add_argument("--bias_ckpt", default="", type=str)
@@ -362,24 +367,28 @@ def get_args():
     parser.add_argument(
         "--output_dir", default="", help="path where to save, empty for no saving"
     )
-    parser.add_argument("--log_dir", default=None, help="path where to tensorboard log")
+    parser.add_argument("--log_dir", default=None,
+                        help="path where to tensorboard log")
     parser.add_argument(
         "--device", default="cuda", help="device to use for training / testing"
     )
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--resume", default="", help="resume from checkpoint")
     parser.add_argument("--auto_resume", action="store_true")
-    parser.add_argument("--no_auto_resume", action="store_false", dest="auto_resume")
+    parser.add_argument("--no_auto_resume",
+                        action="store_false", dest="auto_resume")
     parser.set_defaults(auto_resume=True)
 
     parser.add_argument("--save_ckpt", action="store_true")
-    parser.add_argument("--no_save_ckpt", action="store_false", dest="save_ckpt")
+    parser.add_argument(
+        "--no_save_ckpt", action="store_false", dest="save_ckpt")
     parser.set_defaults(save_ckpt=True)
 
     parser.add_argument(
         "--start_epoch", default=0, type=int, metavar="N", help="start epoch"
     )
-    parser.add_argument("--eval", action="store_true", help="Perform evaluation only")
+    parser.add_argument("--eval", action="store_true",
+                        help="Perform evaluation only")
     parser.add_argument(
         "--eval_freq",
         default=1,
@@ -400,7 +409,8 @@ def get_args():
     )
     parser.add_argument("--no_pin_mem", action="store_false", dest="pin_mem")
     parser.set_defaults(pin_mem=True)
-    parser.add_argument("--flash_attn", action="store_true", default=False, help="flash attention")
+    parser.add_argument("--flash_attn", action="store_true",
+                        default=False, help="flash attention")
 
     parser.add_argument("--split_ratio", default=0.7, type=float)
 
@@ -415,7 +425,8 @@ def get_args():
         "--dist_url", default="env://", help="url used to set up distributed training"
     )
 
-    parser.add_argument("--enable_deepspeed", action="store_true", default=False)
+    parser.add_argument("--enable_deepspeed",
+                        action="store_true", default=False)
 
     parser.add_argument(
         "--vis_attn", action="store_true", help="Perform attention visualization only"
@@ -440,7 +451,8 @@ def get_args():
         "--spike_in", default=1.0, type=float, help="ratio of spike fetal finetuning"
     )
     parser.add_argument("--plot_scatter", action="store_true", default=False)
-    parser.add_argument("--use_natac", action="store_true", default=False)
+    parser.add_argument("--quantitative_atac",
+                        action="store_true", default=False)
     parser.add_argument("--mask_tss", action="store_true", default=False)
     parser.add_argument("--leave_out_celltypes", default=None, type=str)
     parser.add_argument("--leave_out_chromosomes", default=None, type=str)
@@ -475,7 +487,7 @@ def main(args, ds_init):
 
     print(args)
 
-    if utils.is_main_process(): # Log metrics only on main process
+    if utils.is_main_process():  # Log metrics only on main process
         if args.wandb_project_name is not None:
             wandb.login()
             run = wandb.init(
@@ -495,11 +507,13 @@ def main(args, ds_init):
     sequence_obj.load_to_memory_dense()
 
     cudnn.benchmark = True
-    dataset_train = build_dataset(is_train=True, args=args, sequence_obj=sequence_obj)
+    dataset_train = build_dataset(
+        is_train=True, args=args, sequence_obj=sequence_obj)
     if args.disable_eval_during_finetuning:
         dataset_val = None
     else:
-        dataset_val = build_dataset(is_train=False, args=args, sequence_obj=sequence_obj)
+        dataset_val = build_dataset(
+            is_train=False, args=args, sequence_obj=sequence_obj)
 
     if args.distributed:
         num_tasks = utils.get_world_size()
@@ -544,7 +558,7 @@ def main(args, ds_init):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        collate_fn = get_rev_collate_fn,
+        collate_fn=get_rev_collate_fn,
         worker_init_fn=worker_init_fn_get,
     )
 
@@ -556,9 +570,9 @@ def main(args, ds_init):
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
             drop_last=True,
-            collate_fn = get_rev_collate_fn,
+            collate_fn=get_rev_collate_fn,
             worker_init_fn=worker_init_fn_get,
-    )
+        )
     else:
         data_loader_val = None
 
@@ -583,7 +597,6 @@ def main(args, ds_init):
         bias_ckpt=args.bias_ckpt,
 
     )
-
 
     num_region_per_sample = args.num_region_per_sample
     print("Region size = %s" % str(num_region_per_sample))
@@ -625,7 +638,8 @@ def main(args, ds_init):
                 new_dict[key] = checkpoint_model[key]
         checkpoint_model = new_dict
 
-        utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
+        utils.load_state_dict(model, checkpoint_model,
+                              prefix=args.model_prefix)
         if args.last_layer:
             for name, param in model.named_parameters():
                 if not (
@@ -643,7 +657,6 @@ def main(args, ds_init):
                 if "atac_attention" in name:
                     param.requires_grad = False
                     print(f"Freezed weights of {name}")
-                
 
     model.to(device)
 
@@ -659,7 +672,8 @@ def main(args, ds_init):
         print("Using EMA with decay = %.8f" % args.model_ema_decay)
 
     model_without_ddp = model
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_parameters = sum(p.numel()
+                       for p in model.parameters() if p.requires_grad)
 
     print("Model = %s" % str(model_without_ddp))
     print("number of params:", n_parameters)
@@ -671,7 +685,8 @@ def main(args, ds_init):
     print("Batch size = %d" % total_batch_size)
     print("Update frequent = %d" % args.update_freq)
     print("Number of training examples = %d" % len(dataset_train))
-    print("Number of training training per epoch = %d" % num_training_steps_per_epoch)
+    print("Number of training training per epoch = %d" %
+          num_training_steps_per_epoch)
     if dataset_val is not None:
         print("Number of testing examples = %d" % len(dataset_val))
 
@@ -769,12 +784,14 @@ def main(args, ds_init):
     )
 
     if args.eval:
-        test_stats = evaluate_all(data_loader_val, model, device, criterion, args)
+        test_stats = evaluate_all(
+            data_loader_val, model, device, criterion, args)
         max_r2score = test_stats["r2score"]
         max_pearsonr_score = test_stats["pearsonr_score"]
         max_spearmanr_score = test_stats["spearmanr_score"]
 
-        print(f"Statistics of the network on the {len(dataset_val)} test images")
+        print(
+            f"Statistics of the network on the {len(dataset_val)} test images")
         print(
             f"R2score: {max_r2score:.3f}, pearsonr_score: {max_pearsonr_score:.3f}, spearmanr_score: {max_spearmanr_score:.3f}"
         )
@@ -812,7 +829,8 @@ def main(args, ds_init):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
         if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
-            log_writer.set_step(epoch * num_training_steps_per_epoch * args.update_freq)
+            log_writer.set_step(
+                epoch * num_training_steps_per_epoch * args.update_freq)
         train_stats = train_one_epoch(
             model,
             criterion,
@@ -845,7 +863,7 @@ def main(args, ds_init):
                     epoch=epoch,
                     model_ema=model_ema,
                 )
-        
+
         if (
             data_loader_val is not None
             and args.eval_freq > 0
@@ -915,7 +933,8 @@ def main(args, ds_init):
                     head="perf",
                     step=epoch,
                 )
-                log_writer.update(test_loss=test_stats["loss"], head="perf", step=epoch)
+                log_writer.update(
+                    test_loss=test_stats["loss"], head="perf", step=epoch)
 
             log_stats = {
                 **{f"train_{k}": v for k, v in train_stats.items()},
@@ -930,10 +949,10 @@ def main(args, ds_init):
                 "epoch": epoch,
                 "n_parameters": n_parameters,
             }
-        
+
         if utils.is_main_process():
             wandb.log(log_stats)
-        
+
         if args.output_dir and utils.is_main_process():
             if log_writer is not None and isinstance(log_writer, utils.TensorboardLogger):
                 log_writer.flush()

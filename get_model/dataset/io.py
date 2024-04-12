@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 from pyranges import PyRanges as pr
 
-def generate_paths(file_id: int, data_path: str, data_type: str, use_natac: bool = True) -> dict:
+
+def generate_paths(file_id: int, data_path: str, data_type: str, quantitative_atac: bool = False) -> dict:
     """
     Generate a dictionary of paths based on the given parameters.
 
@@ -13,7 +14,7 @@ def generate_paths(file_id: int, data_path: str, data_type: str, use_natac: bool
         file_id (int): File ID.
         data_path (str): Path to the data directory.
         data_type (str): Data type.
-        use_natac (bool, optional): Specify if natac files should be used. Defaults to True.
+        quantitative_atac (bool, optional): Specify if natac files should be used. Defaults to False.
 
     Returns:
         dict: Dictionary of paths with file IDs as keys and corresponding paths as values.
@@ -23,17 +24,23 @@ def generate_paths(file_id: int, data_path: str, data_type: str, use_natac: bool
 
     """
     paths_dict = {}
-    if use_natac:
-        peak_npz_path = os.path.join(data_path, data_type, str(file_id) + ".natac.npz")
+    if quantitative_atac:
+        peak_npz_path = os.path.join(
+            data_path, data_type, str(file_id) + ".watac.npz")
     else:
-        peak_npz_path = os.path.join(data_path, data_type, str(file_id) + ".watac.npz")
+        peak_npz_path = os.path.join(
+            data_path, data_type, str(file_id) + ".natac.npz")
 
     if not os.path.exists(peak_npz_path):
-        raise FileNotFoundError("Peak file not found: {}".format(peak_npz_path))
+        raise FileNotFoundError(
+            "Peak file not found: {}".format(peak_npz_path))
 
-    target_npy_path = os.path.join(data_path, data_type, str(file_id) + ".exp.npy")
-    tssidx_npy_path = os.path.join(data_path, data_type, str(file_id) + ".tss.npy")
-    seq_path = os.path.join(data_path, data_type, str(file_id) + ".seq.zarr.zip")
+    target_npy_path = os.path.join(
+        data_path, data_type, str(file_id) + ".exp.npy")
+    tssidx_npy_path = os.path.join(
+        data_path, data_type, str(file_id) + ".tss.npy")
+    seq_path = os.path.join(data_path, data_type,
+                            str(file_id) + ".seq.zarr.zip")
     celltype_annot = os.path.join(data_path, data_type, str(file_id) + ".csv")
 
     paths_dict = {
@@ -69,7 +76,6 @@ def prepare_sequence_idx(celltype_annot: pd.DataFrame, slop: int = 100) -> pd.Da
     return celltype_annot
 
 
-
 def get_ctcf_pos(celltype_annot: pd.DataFrame, ctcf: pd.DataFrame) -> np.ndarray:
     """
     Segment the regions by CTCF binding sites
@@ -87,7 +93,8 @@ def get_ctcf_pos(celltype_annot: pd.DataFrame, ctcf: pd.DataFrame) -> np.ndarray
     try:
         assert len(ctcf_pos) == celltype_annot.shape[0]
     except AssertionError:
-        print(f"ctcf_pos length {len(ctcf_pos)} not equal to celltype_annot length {celltype_annot.shape[0]}")
+        print(
+            f"ctcf_pos length {len(ctcf_pos)} not equal to celltype_annot length {celltype_annot.shape[0]}")
     return np.array(ctcf_pos)
 
 

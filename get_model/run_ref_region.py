@@ -6,10 +6,10 @@ import torch
 import torch.utils.data
 from hydra.utils import instantiate
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger, CSVLogger
 from lightning.pytorch.plugins import MixedPrecision
 from omegaconf import MISSING, DictConfig, OmegaConf
-from run import GETDataModule, LitModel
+from get_model.run import GETDataModule, LitModel
 
 import wandb
 from get_model.config.config import *
@@ -31,7 +31,7 @@ class ReferenceRegionDataModule(GETDataModule):
         print(self.reference_region_motif)
 
     def build_from_zarr_dataset(self, zarr_dataset):
-        return ReferenceRegionDataset(self.reference_region_motif, zarr_dataset, use_natac=False)
+        return ReferenceRegionDataset(self.reference_region_motif, zarr_dataset, quantitative_atac=self.cfg.quantitative_atac)
 
     def setup(self, stage=None):
         super().setup(stage)
@@ -119,11 +119,11 @@ class RegionLitModel(LitModel):
             obs[key] = obs[key][tss_idx > 0].flatten()
 
         metrics = self.metrics(pred, obs)
-        if batch_idx == 0:
-            # log one example as scatter plot
-            self.logger.experiment.log({
-                "scatter": wandb.Image(sns.scatterplot(y=pred['exp'].detach().cpu().numpy().flatten(), x=obs['exp'].detach().cpu().numpy().flatten()))
-            })
+        # if batch_idx == 0:
+        #     # log one example as scatter plot
+        #     self.logger.experiment.log({
+        #         "scatter": wandb.Image(sns.scatterplot(y=pred['exp'].detach().cpu().numpy().flatten(), x=obs['exp'].detach().cpu().numpy().flatten()))
+        #     })
         self.log_dict(metrics, batch_size=self.cfg.machine.batch_size)
         self.log("val_loss", loss, batch_size=self.cfg.machine.batch_size)
 
@@ -157,8 +157,8 @@ def run(cfg: DictConfig):
         num_sanity_val_steps=0,
         strategy="auto",
         devices=cfg.machine.num_devices,
-        logger=[WandbLogger(project=cfg.wandb.project_name,
-                            name=cfg.wandb.run_name)],
+        logger=[
+            CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
                    LearningRateMonitor(logging_interval='epoch')],
         plugins=[MixedPrecision(precision='16-mixed', device="cuda")],

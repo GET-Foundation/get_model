@@ -1661,7 +1661,7 @@ class ReferenceRegionMotif(object):
         data_cutoff = self.get_cutoff(data)
         data = data * (data > data_cutoff)
         if normalize:
-            data = data / data.max(0) / 1
+            data = data / data.max(0) / 1.5
         return data, peaks
 
     def __repr__(self) -> str:
@@ -1672,14 +1672,14 @@ class ReferenceRegionDataset(Dataset):
     def __init__(self, reference_region_motif: ReferenceRegionMotif,
                  zarr_dataset: PretrainDataset,
                  transform=None,
-                 use_natac: bool = True,
+                 quantitative_atac: bool = True,
                  sampling_step: int = 900,
                  ) -> None:
         super().__init__()
         self.reference_region_motif = reference_region_motif
         self.zarr_dataset = zarr_dataset
         self.transform = transform
-        self.use_natac = use_natac
+        self.quantitative_atac = quantitative_atac
         self.sampling_step = sampling_step
         self.is_train = zarr_dataset.is_train
         self.num_region_per_sample = zarr_dataset.n_peaks_upper_bound
@@ -1707,7 +1707,7 @@ class ReferenceRegionDataset(Dataset):
                              "Expression_negative"]].values
         tssidx_data = peaks["TSS"].values
         atpm = peaks['aTPM'].values
-        if self.use_natac:
+        if not self.quantitative_atac:
             region_motif = np.concatenate(
                 [region_motif, np.zeros((region_motif.shape[0], 1))+1], axis=1)
         else:
@@ -1799,7 +1799,7 @@ class RegionDataset(Dataset):
         is_train: bool = True,
         leave_out_celltypes: str = "",
         leave_out_chromosomes: str = "",
-        use_natac: bool = True,
+        quantitative_atac: bool = False,
         sampling_step: int = 100,
     ) -> None:
         super().__init__()
@@ -1809,7 +1809,7 @@ class RegionDataset(Dataset):
         self.is_train = is_train
         self.leave_out_celltypes = leave_out_celltypes
         self.leave_out_chromosomes = leave_out_chromosomes
-        self.use_natac = use_natac
+        self.quantitative_atac = quantitative_atac
         self.sampling_step = sampling_step
 
         metadata_path = os.path.join(
@@ -1823,7 +1823,7 @@ class RegionDataset(Dataset):
             num_region_per_sample,
             leave_out_celltypes,
             leave_out_chromosomes,
-            use_natac,
+            quantitative_atac,
             is_train,
             sampling_step,
         )
@@ -1840,7 +1840,7 @@ class RegionDataset(Dataset):
 Total {'train' if self.is_train else 'test'} samples: {len(self.peaks)}
 Leave out celltypes: {self.leave_out_celltypes}
 Leave out chromosomes: {self.leave_out_chromosomes}
-Use natac: {self.use_natac}
+Use quantitative_atac: {self.quantitative_atac}
 Sampling step: {self.sampling_step}
         """
 
@@ -1940,8 +1940,7 @@ Sampling step: {self.sampling_step}
         return file_id_list, cell_dict, datatype_dict
 
     @staticmethod
-    @staticmethod
-    def _generate_paths(file_id: int, data_path: str, data_type: str, use_natac: bool = True) -> dict:
+    def _generate_paths(file_id: int, data_path: str, data_type: str, quantitative_atac: bool = False) -> dict:
         """
         Generate a dictionary of paths based on the given parameters.
 
@@ -1949,7 +1948,7 @@ Sampling step: {self.sampling_step}
             file_id (int): File ID.
             data_path (str): Path to the data directory.
             data_type (str): Data type.
-            use_natac (bool, optional): Specify if natac files should be used. Defaults to True.
+            quantitative_atac (bool, optional): Specify if quantitative atac files should be used. Defaults to False.
 
         Returns:
             dict: Dictionary of paths with file IDs as keys and corresponding paths as values.
@@ -1958,7 +1957,7 @@ Sampling step: {self.sampling_step}
             FileNotFoundError: If the peak file is not found.
         """
         peak_npz_path = os.path.join(
-            data_path, data_type, f"{file_id}.{'natac' if use_natac else 'watac'}.npz"
+            data_path, data_type, f"{file_id}.{'natac' if quantitative_atac else 'watac'}.npz"
         )
 
         if not os.path.exists(peak_npz_path):
@@ -1988,7 +1987,7 @@ Sampling step: {self.sampling_step}
         num_region_per_sample: int,
         leave_out_celltypes: str,
         leave_out_chromosomes: str,
-        use_natac: bool,
+        quantitative_atac: bool,
         is_train: bool,
         step: int = 200,
     ) -> Tuple[List[coo_matrix], List[coo_matrix], List[np.ndarray]]:
@@ -2003,7 +2002,7 @@ Sampling step: {self.sampling_step}
             num_region_per_sample (int): Number of regions per sample.
             leave_out_celltypes (str): String of comma-separated cell types to leave out.
             leave_out_chromosomes (str): String of comma-separated chromosomes to leave out.
-            use_natac (bool): Whether to use peak data with no ATAC count values.
+            quantitative_atac (bool): Whether to use peak data with no ATAC count values.
             is_train (bool): Whether it is a training dataset.
             step (int, optional): Step size for generating samples. Defaults to 200.
 
@@ -2030,7 +2029,7 @@ Sampling step: {self.sampling_step}
             data_type = datatype_dict[file_id]
             print(file_id, data_path, data_type)
             paths_dict = self._generate_paths(
-                file_id, data_path, data_type, use_natac=use_natac
+                file_id, data_path, data_type, quantitative_atac=quantitative_atac
             )
 
             celltype_peak_annot = pd.read_csv(

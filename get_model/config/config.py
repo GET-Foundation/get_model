@@ -42,7 +42,7 @@ class DatasetConfig:
     negative_peak_ratio: float = 0
     additional_peak_columns: list = field(default_factory=lambda: [
         'Expression_positive', 'Expression_negative', 'aTPM', 'TSS'])
-    random_shift_peak: int|None = None
+    random_shift_peak: int | None = None
 
     # insulation
     use_insulation: bool = False
@@ -82,7 +82,7 @@ class RegionDatasetConfig:
     data_type: str = 'fetal'
     leave_out_celltypes: str = 'Astrocytes'
     leave_out_chromosomes: str = 'chr4,chr14'
-    use_natac: bool = True
+    quantitative_atac: bool = False
     sampling_step: int = 100
 
 
@@ -147,6 +147,7 @@ class Config:
     machine: MachineConfig = field(default_factory=MachineConfig)
     dataset: DatasetConfig = field(
         default_factory=DatasetConfig)
+    quantitative_atac: bool = False
     training: TrainingConfig = field(default_factory=TrainingConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
@@ -160,6 +161,7 @@ class RegionConfig:
     stage: str = 'fit'
     assembly: str = 'hg38'
     model: Any = MISSING
+    quantitative_atac: bool = False
     machine: MachineConfig = field(default_factory=MachineConfig)
     dataset: RegionDatasetConfig = field(
         default_factory=RegionDatasetConfig)

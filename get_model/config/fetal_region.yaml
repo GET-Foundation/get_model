@@ -14,7 +14,7 @@ dataset:
     data_type: 'fetal'
     leave_out_celltypes: 'Astrocytes'
     leave_out_chromosomes: 'chr1,chr2,chr3,chr4,chr5'
-    use_natac: true
+    quantitative_atac: false
     sampling_step: 900
 
 training:

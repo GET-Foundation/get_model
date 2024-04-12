@@ -21,7 +21,7 @@ pretrain.__len__()
 
 
 # %%
-rrd = ReferenceRegionDataset(rrm, pretrain, use_natac=False)
+rrd = ReferenceRegionDataset(rrm, pretrain, quantitative_atac=False)
 # %%
 d = rrd.__getitem__(0)
 # %%
@@ -61,8 +61,9 @@ def get_cutoff(d):
         cutoffs.append(np.quantile(d[:, i], 0.9))
     return cutoffs
 
-d = d* (d>get_cutoff(d))
-#%%
+
+d = d * (d > get_cutoff(d))
+# %%
 d = d/d.max(0)
 # %%
 sns.scatterplot(x=d[0][0:282],
