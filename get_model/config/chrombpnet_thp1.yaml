@@ -36,6 +36,6 @@ wandb:
   run_name: "atac"
 
 finetune:
-  checkpoint: null
+  checkpoint: /home/xf2217/Projects/get_model/logs/chrombpnet_thp1_atac/version_8/checkpoints/last.ckpt
   model_prefix: "model."
   patterns_to_freeze: []

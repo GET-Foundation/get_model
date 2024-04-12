@@ -46,15 +46,21 @@ class LitModel(L.LightningModule):
     #     # norms = grad_norm(self.model, norm_type=2)
     #     # self.log_dict(norms)
 
+    @staticmethod
+    def rename_lit_checkpoints(checkpoint_model):
+        """remove the model. prefix in statedict"""
+        new_state_dict = {}
+        for key, value in checkpoint_model['state_dict'].items():
+            new_state_dict[key[6:]] = value
+        return new_state_dict
+
     def get_model(self):
         model = instantiate(self.cfg.model)
-        # if self.cfg.finetune.checkpoint is not None:
-        # checkpoint_model = load_checkpoint(
-        # self.cfg.finetune.checkpoint)
-        # state_dict = model.state_dict()
-        # remove_keys(checkpoint_model, state_dict)
-        # checkpoint_model = rename_keys(checkpoint_model)
-        # model.load_state_dict(checkpoint_model['model'], strict=True)
+        if self.cfg.finetune.checkpoint is not None:
+            checkpoint_model = load_checkpoint(
+                self.cfg.finetune.checkpoint)
+        checkpoint_model = self.rename_lit_checkpoints(checkpoint_model)
+        model.load_state_dict(checkpoint_model, strict=True)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         return model
@@ -419,10 +425,10 @@ def run(cfg: DictConfig):
 
 def run_downstream(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
-    if cfg.finetune.checkpoint is not None:
-        model = LitModel.load_from_checkpoint(cfg.finetune.checkpoint)
-    else:
-        model = LitModel(cfg)
+    # if cfg.finetune.checkpoint is not None:
+    # model = LitModel.load_from_checkpoint(cfg.finetune.checkpoint)
+    # else:
+    model = LitModel(cfg)
     # move the model to the gpu
     model.to('cuda')
     dm = GETDataModule(cfg)
@@ -472,13 +478,22 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel, output_key='atpm'):
     pred_change = (10**pred_mut - 10**pred_wt) / \
         (10**pred_wt - 1) * 100
     mutation['pred_change'] = pred_change.detach().cpu().numpy()
-    y = mutation.query('~Screen.str.contains("Pro")')[
+    y = mutation.query('`corrected p value`<=0.05').query('Screen.str.contains("Pro")').query('Screen.str.contains("Tiling")')[
         '% change to PPIF expression'].values
-    x = mutation.query('~Screen.str.contains("Pro")')['pred_change'].values
+    x = mutation.query('`corrected p value`<=0.05').query('Screen.str.contains("Pro")').query(
+        'Screen.str.contains("Tiling")')['pred_change'].values
     pearson = np.corrcoef(x, y)[0, 1]
     r2 = r2_score(y, x)
     spearman = spearmanr(x, y)[0]
     slope = LinearRegression().fit(x.reshape(-1, 1), y).coef_[0]
+    # save a scatterplot
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    sns.scatterplot(x=x, y=y)
+    plt.xlabel('Predicted change in PPIF expression')
+    plt.ylabel('Observed change in PPIF expression')
+    plt.savefig(
+        f'{lm.cfg.machine.output_dir}/ppif_scatterplot.png')
     return {
         'ppif_pearson': pearson,
         'ppif_spearman': spearman,

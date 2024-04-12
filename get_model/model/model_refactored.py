@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, field
 
 import torch
@@ -631,6 +632,8 @@ class GETChrombpNet(GETChrombpNetBias):
         atpm, aprofile = self.atac_attention(
             x, chunk_size, n_peaks, max_n_peaks)
         if not output_bias:
+            logging.info(
+                'output_bias is False, return atpm and aprofile for atac model only')
             return {'atpm': atpm, 'aprofile': aprofile}
         if self.with_bias:
             bias_output = self.bias_model(
