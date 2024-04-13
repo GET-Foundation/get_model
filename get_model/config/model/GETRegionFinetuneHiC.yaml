@@ -34,9 +34,8 @@ model:
     loss:
       components:
         hic:
-          _target_: torch.nn.PoissonNLLLoss
+          _target_: torch.nn.MSELoss
           reduction: "mean"
-          log_input: False
       weights:
         hic: 1.0
     metrics:

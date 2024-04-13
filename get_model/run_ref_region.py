@@ -6,10 +6,9 @@ import torch
 import torch.utils.data
 from hydra.utils import instantiate
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import WandbLogger, CSVLogger
+from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
 from omegaconf import MISSING, DictConfig, OmegaConf
-from get_model.run import GETDataModule, LitModel
 
 import wandb
 from get_model.config.config import *
@@ -18,6 +17,7 @@ from get_model.dataset.zarr_dataset import (ReferenceRegionDataset,
                                             ReferenceRegionMotifConfig)
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
+from get_model.run import GETDataModule, LitModel
 from get_model.utils import load_checkpoint, remove_keys
 
 
