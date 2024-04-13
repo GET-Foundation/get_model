@@ -10,7 +10,8 @@ from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig
 from torch.nn.init import trunc_normal_
 
-from get_model.model.modules import (ATACHead, ATACHeadConfig, ATACSplitPool,
+from get_model.model.modules import (ATACHead, ATACHeadConfig, HiCHead, HiCHeadConfig,
+                                     ATACSplitPool,
                                      ATACSplitPoolConfig, ATACSplitPoolMaxNorm,
                                      ATACSplitPoolMaxNormConfig, BaseConfig,
                                      BaseModule, ConvPool, ConvPoolConfig,
@@ -507,6 +508,48 @@ class GETRegionFinetune(BaseGETModel):
 
         pred = {'exp': output}
         obs = {'exp': batch['exp_label']}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+        }
+
+
+@dataclass
+class GETRegionFinetuneHiCModelConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_hic: HiCHeadConfig = field(
+        default_factory=HiCHeadConfig)
+
+
+class GETRegionFinetuneHiC(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneHiCModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_hic = HiCHead(cfg.head_hic)
+
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        return {
+            'region_motif': batch['region_motif'],
+        }
+
+    def forward(self, region_motif):
+
+        x = self.region_embed(region_motif)
+        x, _ = self.encoder(x)
+        exp = nn.Softplus()(self.head_hic(x))
+        return exp
+
+    def before_loss(self, output, batch):
+
+        pred = {'hic': output}
+        obs = {'hic': batch['hic_matrix']}
         return pred, obs
 
     def generate_dummy_data(self):

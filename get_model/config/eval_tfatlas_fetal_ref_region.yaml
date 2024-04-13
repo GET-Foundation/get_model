@@ -1,8 +1,8 @@
 defaults:
   - base_config
-  - model/GETRegionFinetune@_here_
+  - model/GETRegionFinetuneHiC@_here_
   - machine/pc
-  - dataset/tfatlas_eval@dataset
+  - dataset/k562_ref_eval@dataset
   - _self_
 
 assembly: "hg38"
@@ -15,7 +15,7 @@ training:
   clip_grad: null
   use_fp16: false
 
-quantitative_atac: false
+quantitative_atac: true
 
 optimizer:
   lr: 0.00005
@@ -30,6 +30,6 @@ wandb:
   run_name: "debug"
 
 finetune:
-  checkpoint: "/home/xf2217/Projects/geneformer_esc/Astrocytes_natac/checkpoint-best.pth"
+  checkpoint: "/home/xf2217/Projects/geneformer_esc/Astrocytes/checkpoint-best.pth"
   model_prefix: "model."
   patterns_to_freeze: []

@@ -1,34 +1,18 @@
 model:
-  _target_: get_model.model.model_refactored.GETFinetune
+  _target_: get_model.model.model_refactored.GETRegionFinetuneHiC
   cfg:
-    num_regions: 10
-    num_motif: 637
+    num_regions: 900
+    num_motif: 283
     embed_dim: 768
     num_layers: 12
     num_heads: 12
     dropout: 0.1
-    output_dim: 2
+    output_dim: 1
     flash_attn: false
     pool_method: "mean"
-    motif_scanner:
-      num_motif: ${model.cfg.num_motif}
-      include_reverse_complement: true
-      bidirectional_except_ctcf: true
-      motif_prior: true
-      learnable: false
-      has_bias: false
-    atac_attention:
-      motif_dim: 639 # 637 motifs + 2 ctcf
-      pool_method: "mean"
-      atac_kernel_num: 161
-      atac_kernel_size: 3
-      joint_kernel_num: 161
-      joint_kernel_size: 3
-      binary_atac: false
-      final_bn: false
     region_embed:
       num_regions: ${model.cfg.num_regions}
-      num_features: 800 # 639 + 161
+      num_features: ${model.cfg.num_motif} 
       embed_dim: ${model.cfg.embed_dim}
     encoder:
       num_heads: ${model.cfg.num_heads}
@@ -39,22 +23,22 @@ model:
       attn_drop_rate: ${model.cfg.dropout}
       use_mean_pooling: false
       flash_attn: ${model.cfg.flash_attn}
-    head_exp:
+    head_hic:
       embed_dim: ${model.cfg.embed_dim}
+      hidden_dim: 8
       output_dim: ${model.cfg.output_dim}
-      use_atac: false
 
     mask_token:
       embed_dim: ${model.cfg.embed_dim}
       std: 0.02
     loss:
       components:
-        exp:
+        hic:
           _target_: torch.nn.PoissonNLLLoss
           reduction: "mean"
           log_input: False
       weights:
-        exp: 1.0
+        hic: 1.0
     metrics:
       components:
-        exp: ["pearson", "spearman", "r2"]
+        hic: ["pearson", "spearman", "r2"]

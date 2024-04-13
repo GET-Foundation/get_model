@@ -15,8 +15,8 @@ pretrain = PretrainDataset(zarr_dirs=['/home/xf2217/Projects/get_data/joung_tfat
                                       ],
                            genome_seq_zarr='/home/xf2217/Projects/get_data/hg38.zarr',
                            genome_motif_zarr='/home/xf2217/Projects/get_data/hg38_motif_result.zarr', insulation_paths=[
-                           '/home/xf2217/Projects/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/home/xf2217/Projects/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_tissue_open_exp', preload_count=200, n_packs=1,
-                           max_peak_length=5000, center_expand_target=0, n_peaks_lower_bound=1, insulation_subsample_ratio=0.8, n_peaks_upper_bound=900, keep_celltypes='0.joung_tfatlas.shareseq.8192', leave_out_chromosomes=['chr4', 'chr14'], is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=10000, random_shift_peak=False)
+                           '/home/xf2217/Projects/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/home/xf2217/Projects/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='fetal_tfatlas_peaks_open_exp', preload_count=200, n_packs=1,
+                           max_peak_length=5000, center_expand_target=0, n_peaks_lower_bound=1, insulation_subsample_ratio=0.8, n_peaks_upper_bound=900, keep_celltypes='0.joung_tfatlas.shareseq.8192', leave_out_chromosomes=['chr4', 'chr14'], is_train=False, additional_peak_columns=['Expression_positive', 'Expression_negative', 'aTPM', 'TSS'], non_redundant=None, use_insulation=False, dataset_size=10000, random_shift_peak=False, hic_path='/home/xf2217/Projects/geneformer_nat/data/H1_ESC.hic')
 pretrain.__len__()
 
 

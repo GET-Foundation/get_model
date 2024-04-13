@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETRegionPretrain
+  _target_: get_model.model.model_refactored.GETPretrain
   cfg:
     num_regions: 10
     num_motif: 637
@@ -16,6 +16,7 @@ model:
       bidirectional_except_ctcf: true
       motif_prior: true
       learnable: false
+      has_bias: false
     atac_attention:
       motif_dim: 639 # 637 motifs + 2 ctcf
       pool_method: "mean"

@@ -197,7 +197,7 @@ class MotifScanner(BaseModule):
             x = x[:, :637, :] + x[:, 637:, :]
             # add ctcf/ctcf_rev score to the end
             x = torch.cat([x, ctcf.unsqueeze(1), ctcf_rev.unsqueeze(1)], dim=1)
-        if self.include_reverse_complement:
+        elif self.include_reverse_complement:
             x = x[:, :637, :] + x[:, 637:, :]  # output should be 637 dim
         x = x.permute(0, 2, 1)
         if motif_mean_std is not None:
@@ -276,6 +276,79 @@ class ATACHead(BaseModule):
         x = self.fc2(x)
         x = self.drop2(x)
         return x
+
+
+class OuterProductMean(nn.Module):
+    """
+    Implements a simplified version of the OuterProductMean.
+    """
+
+    def __init__(self, c_m, c_z, c_hidden, eps=1e-3):
+        """
+        Args:
+            c_m: region embedding channel dimension
+            c_z: Pair embedding channel dimension
+            c_hidden: Hidden channel dimension
+        """
+        super(OuterProductMean, self).__init__()
+        self.eps = eps
+        self.layer_norm = nn.LayerNorm(c_m)
+        self.linear_1 = nn.Linear(c_m, c_hidden)
+        self.linear_2 = nn.Linear(c_m, c_hidden)
+        self.linear_out = nn.Linear(c_hidden ** 2, c_z)
+
+    def forward(self, m: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Args:
+            m: [*, N_region, C_m] region embedding
+            mask: [*, N_region] MSA mask, if None, create a mask of ones
+        Returns:
+            [*, N_region, N_region, C_z] pair embedding update
+        """
+        if mask is None:
+            mask = m.new_ones(m.shape[:-1])
+
+        ln = self.layer_norm(m)
+        mask = mask.unsqueeze(-1)
+
+        a = self.linear_1(ln) * mask
+        b = self.linear_2(ln) * mask
+
+        # Calculate the outer product mean -> [batch, N, N, C, C]
+        outer = torch.einsum("...bc,...de->...bdce", a, b)
+        outer = outer.reshape(outer.shape[:-2] + (-1,))
+        outer = self.linear_out(outer)
+        norm = torch.einsum("...b,...d->...bd", mask, mask) + self.eps
+        outer = outer / norm
+
+        return outer
+
+
+@dataclass
+class HiCHeadConfig(BaseConfig):
+    """Configuration class for the HiC head.
+
+    Args:
+        embed_dim (int): Dimension of the embedding.
+        hidden_dim (int): Dimension of the hidden layer.
+        output_dim (int): Dimension of the output.
+        drop (float): Dropout rate. Defaults to 0.1."""
+    _target_: str = "get_model.model.modules.HiCHeadConfig"
+    embed_dim: int = 768
+    hidden_dim: int = 16
+    output_dim: int = 1
+
+
+class HiCHead(BaseModule):
+    """HiC head using OuterProductMean"""
+
+    def __init__(self, cfg: HiCHeadConfig):
+        super().__init__(cfg)
+        self.outer_product = OuterProductMean(
+            cfg.embed_dim, cfg.output_dim, cfg.hidden_dim)
+
+    def forward(self, x, mask=None):
+        return self.outer_product(x, mask)
 
 
 def pool(x, method='mean'):

@@ -1661,7 +1661,7 @@ class ReferenceRegionMotif(object):
         data_cutoff = self.get_cutoff(data)
         data = data * (data > data_cutoff)
         if normalize:
-            data = data / data.max(0) / 1.5
+            data = data / data.max(0)
         return data, peaks
 
     def __repr__(self) -> str:
@@ -1694,9 +1694,10 @@ class ReferenceRegionDataset(Dataset):
         ) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
 
     def extract_data_list(self, region_motif, peaks):
-        peak_list = []
+        region_motif_list = []
         target_list = []
         tssidx_list = []
+        hic_matrix_list = []
 
         all_chromosomes = peaks["Chromosome"].unique(
         ).tolist()
@@ -1723,35 +1724,46 @@ class ReferenceRegionDataset(Dataset):
                 start_index = max(0, i + shift)
                 end_index = start_index + self.num_region_per_sample
 
-                celltype_annot_i = peaks.iloc[start_index:end_index, :]
-                if celltype_annot_i.iloc[-1].End - celltype_annot_i.iloc[0].Start > 5000000:
-                    end_index = celltype_annot_i[celltype_annot_i.End -
-                                                 celltype_annot_i.Start < 5000000].index[-1]
-                if celltype_annot_i["Start"].min() < 0:
+                celltype_peak_annot_i = peaks.iloc[start_index:end_index, :]
+                if celltype_peak_annot_i.iloc[-1].End - celltype_peak_annot_i.iloc[0].Start > 5000000:
+                    end_index = celltype_peak_annot_i[celltype_peak_annot_i.End -
+                                                      celltype_peak_annot_i.Start < 5000000].index[-1]
+                if celltype_peak_annot_i["Start"].min() < 0:
                     continue
-                peak_data_i = coo_matrix(region_motif[start_index:end_index])
+
+                region_motif_i = coo_matrix(
+                    region_motif[start_index:end_index])
 
                 target_i = coo_matrix(
                     target_data[start_index:end_index])
                 tssidx_i = tssidx_data[start_index:end_index]
 
-                if peak_data_i.shape[0] == self.num_region_per_sample:
-                    peak_list.append(peak_data_i)
+                if region_motif_i.shape[0] == self.num_region_per_sample:
+                    region_motif_list.append(region_motif_i)
                     target_list.append(target_i)
                     tssidx_list.append(tssidx_i)
-        return peak_list, target_list, tssidx_list
+                    # get hic matrix for celltype_peak_annot_i
+                    if self.zarr_dataset.datapool.hic_obj is not None:
+                        hic_matrix_i = get_hic_from_idx(
+                            self.zarr_dataset.datapool.hic_obj, celltype_peak_annot_i)
+                        hic_matrix_list.append(hic_matrix_i)
+                    else:
+                        hic_matrix_list.append(0)
+        return region_motif_list, target_list, tssidx_list, hic_matrix_list
 
     def setup(self):
         self.peaks = []
         self.targets = []
         self.tssidxs = []
+        self.hic_matrices = []
 
         for data_key, (region_motif, peaks) in tqdm(self.data_dict.items()):
-            peak_list_i, target_list_i, tssidx_list_i = self.extract_data_list(
+            peak_list_i, target_list_i, tssidx_list_i, hic_matrix_list_i = self.extract_data_list(
                 region_motif, peaks)
             self.peaks.extend(peak_list_i)
             self.targets.extend(target_list_i)
             self.tssidxs.extend(tssidx_list_i)
+            self.hic_matrices.extend(hic_matrix_list_i)
 
     def __len__(self):
         return len(self.peaks)
@@ -1760,6 +1772,7 @@ class ReferenceRegionDataset(Dataset):
         peak = self.peaks[index]
         target = self.targets[index]
         tssidx = self.tssidxs[index]
+        hic_matrix = self.hic_matrices[index]
         mask = tssidx
         if self.transform is not None:
             peak, mask, target = self.transform(peak, tssidx, target)
@@ -1767,7 +1780,8 @@ class ReferenceRegionDataset(Dataset):
             peak = peak.squeeze(0)
         return {'region_motif': peak.toarray().astype(np.float32),
                 'mask': mask,
-                'exp_label': target.toarray().astype(np.float32)}
+                'exp_label': target.toarray().astype(np.float32),
+                'hic_matrix': hic_matrix}
 
 
 class RegionDataset(Dataset):
