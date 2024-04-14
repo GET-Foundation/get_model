@@ -381,6 +381,56 @@ def rename_keys(checkpoint_model):
     return new_dict
 
 
+def rename_lit_state_dict(state_dict):
+    new_state_dict = {}
+    for key in state_dict.keys():
+        new_key = key.replace("model.", "")
+        new_state_dict[new_key] = state_dict[key]
+        if "cls" in new_key:
+            del new_state_dict[new_key]
+    return new_state_dict
+
+
+def rename_v1_pretrain_keys(state_dict):
+    """
+    Rename the keys in the state dictionary.
+    """
+    new_state_dict = {}
+    for key in state_dict.keys():
+        new_key = key.replace("encoder.head.", "head_mask.")
+        new_key = new_key.replace(
+            "encoder.region_embed", "region_embed")
+        new_key = new_key.replace(
+            "region_embed.proj.", "region_embed.embed.")
+        new_key = new_key.replace(
+            "encoder.cls_token", "cls_token")
+
+        new_state_dict[new_key] = state_dict[key]
+    return new_state_dict
+
+
+def rename_v1_finetune_keys(state_dict):
+    """
+    Rename the keys in the state dictionary.
+    """
+    new_state_dict = {}
+    for key in state_dict.keys():
+        new_key = key.replace("blocks.", "encoder.blocks.")
+        new_key = new_key.replace("fc_norm.", "encoder.norm.")
+        new_key = new_key.replace("encoder.head.", "head_mask.")
+        new_key = new_key.replace(
+            "encoder.region_embed", "region_embed")
+        new_key = new_key.replace(
+            "region_embed.proj.", "region_embed.embed.")
+        new_key = new_key.replace(
+            "encoder.cls_token", "cls_token")
+        new_key = new_key.replace(
+            "head.", "head_exp.head.")
+
+        new_state_dict[new_key] = state_dict[key]
+    return new_state_dict
+
+
 def freeze_layers(model, freeze_last_layer=False, freeze_atac_attention=False):
     if freeze_last_layer:
         for name, param in model.named_parameters():

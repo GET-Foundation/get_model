@@ -4,7 +4,7 @@ import torch
 import torch.utils.data
 from hydra.utils import instantiate
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger, CSVLogger
 from omegaconf import MISSING, DictConfig, OmegaConf
 
 import wandb
@@ -13,7 +13,7 @@ from get_model.dataset.zarr_dataset import RegionDataset
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.run import LitModel
-from get_model.utils import load_checkpoint, remove_keys
+from get_model.utils import load_checkpoint, remove_keys, rename_lit_state_dict, rename_v1_finetune_keys, rename_v1_pretrain_keys
 
 
 class RegionDataModule(L.LightningDataModule):
@@ -81,39 +81,21 @@ class RegionLitModel(LitModel):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
 
-    def rename_keys(self, state_dict):
-        """
-        Rename the keys in the state dictionary.
-        """
-        new_state_dict = {}
-        for key in state_dict.keys():
-            # Adjust keys according to the new model architecture
-            new_key = key.replace("blocks.", "encoder.blocks.")
-            new_key = new_key.replace("fc_norm.", "encoder.norm.")
-            new_key = new_key.replace("head.", "head_exp.head.")
-            new_key = new_key.replace(
-                "region_embed.proj.", "region_embed.embed.")
-
-            new_state_dict[new_key] = state_dict[key]
-            # drop cls token
-            if "cls" in new_key:
-                del new_state_dict[new_key]
-        # Adjust the weight dimensions if needed
-        # Uncomment the next line if the weight dimension needs to be changed
-        # new_state_dict['region_embed.embed.weight'] = new_state_dict['region_embed.embed.weight'].unsqueeze(2)
-        return new_state_dict
-
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, tss_only=True, log_image=False):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='val')
-        tss_idx = batch['mask'].unsqueeze(-1)
-        for key in pred:
-            pred[key] = (pred[key] * tss_idx)
-            obs[key] = (obs[key] * tss_idx)
-            tss_idx = torch.cat([tss_idx]*2, dim=-1)
-            pred[key] = pred[key][tss_idx > 0].flatten()
-            obs[key] = obs[key][tss_idx > 0].flatten()
+        # print(pred['exp'].detach().cpu().numpy().flatten().max(),
+        #       obs['exp'].detach().cpu().numpy().flatten().max())
+
+        if tss_only:
+            tss_idx = batch['mask']
+            for key in pred:
+                pred[key] = (pred[key] * tss_idx)
+                obs[key] = (obs[key] * tss_idx)
+                pred[key] = pred[key][tss_idx > 0].flatten()
+                obs[key] = obs[key][tss_idx > 0].flatten()
+
         metrics = self.metrics(pred, obs)
-        if batch_idx == 0:
+        if batch_idx == 0 and log_image:
             # log one example as scatter plot
             self.logger.experiment.log({
                 "scatter": wandb.Image(sns.scatterplot(y=pred['exp'].detach().cpu().numpy().flatten(), x=obs['exp'].detach().cpu().numpy().flatten()))
@@ -130,8 +112,8 @@ class RegionLitModel(LitModel):
             remove_keys(checkpoint_model, state_dict)
             if 'model' in checkpoint_model:
                 checkpoint_model = checkpoint_model['model']
-            checkpoint_model = self.rename_keys(checkpoint_model)
-            model.load_state_dict(checkpoint_model, strict=True)
+            checkpoint_model = rename_v1_pretrain_keys(checkpoint_model)
+            model.load_state_dict(checkpoint_model, strict=False)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         return model
@@ -151,8 +133,8 @@ def run(cfg: DictConfig):
         num_sanity_val_steps=0,
         strategy="auto",
         devices=cfg.machine.num_devices,
-        logger=[WandbLogger(project=cfg.wandb.project_name,
-                            name=cfg.wandb.run_name)],
+        logger=[
+            CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
                    LearningRateMonitor(logging_interval='epoch')],
         # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],

@@ -35,7 +35,7 @@ def _chromosome_splitter(all_chromosomes: list, leave_out_chromosomes: str, is_t
     else:
         leave_out_chromosomes = [leave_out_chromosomes]
 
-    if is_train:
+    if is_train or leave_out_chromosomes == [""]:
         input_chromosomes = [
             chrom for chrom in input_chromosomes if chrom not in leave_out_chromosomes]
     else:
@@ -1600,7 +1600,8 @@ class PerturbationInferenceDataset(Dataset):
 
 @dataclass
 class ReferenceRegionMotifConfig:
-    data: str = '/home/xf2217/Projects/get_data/fetal_union_peak_motif_v1.hg38.zarr'
+    data: str = '/home/xf2217/Projects/get_data/fetal_tfatlas_peaks_motif.hg38.zarr'
+    refdata: str = '/home/xf2217/Projects/get_data/fetal_union_peak_motif_v1.hg38.zarr'
     assembly: str = 'hg38'
 
 
@@ -1611,6 +1612,9 @@ class ReferenceRegionMotif(object):
         self.data = self.dataset['data'][:]
         self.peak_names = self.dataset['peak_names'][:]
         self.motif_names = self.dataset['motif_names'][:]
+        self.refdataset = zarr.open_group(cfg.refdata, mode='r')
+        self.refdata = self.refdataset['data'][:]
+        self.refpeak_names = self.refdataset['peak_names'][:]
 
     @property
     def num_peaks(self):
@@ -1630,7 +1634,21 @@ class ReferenceRegionMotif(object):
             lambda x: x.split(':')[1].split('-')[0])
         df['End'] = df['peak_names'].apply(
             lambda x: x.split(':')[1].split('-')[1])
-        return df.reset_index()
+        df = pr(df.reset_index()).sort().df
+        return df
+
+    @property
+    def refpeaks(self):
+        df = pd.DataFrame(self.refpeak_names[:])
+        # split chr:start-end into chr, start, end
+        df.columns = ['peak_names']
+        df['Chromosome'] = df['peak_names'].apply(lambda x: x.split(':')[0])
+        df['Start'] = df['peak_names'].apply(
+            lambda x: x.split(':')[1].split('-')[0])
+        df['End'] = df['peak_names'].apply(
+            lambda x: x.split(':')[1].split('-')[1])
+        df = pr(df.reset_index()).sort().df
+        return df
 
     @property
     def peak_names_to_index(self):
@@ -1654,14 +1672,21 @@ class ReferenceRegionMotif(object):
         if isinstance(peaks, list) or isinstance(peaks, np.ndarray):
             peaks = self.peaks.query('peak_names.isin(@peaks)')
         elif isinstance(peaks, pd.DataFrame) and 'Chromosome' in peaks.columns and 'Start' in peaks.columns and 'End' in peaks.columns:
-            peaks = pr(self.peaks).join(pr(peaks), suffix='_input').df
+            refpeaks = pr(self.refpeaks).join(
+                pr(peaks).sort(), suffix='_input').df
+            peaks = pr(self.peaks).join(pr(peaks).sort(), suffix='_input').df
+
         print(peaks)
         peak_indices = peaks['index'].values
         data = self.data[peak_indices]
-        data_cutoff = self.get_cutoff(data)
-        data = data * (data > data_cutoff)
+        refpeak_indices = refpeaks['index'].values
+        refdata = self.refdata[refpeak_indices]
+        refdata_cutoff = self.get_cutoff(refdata)
+        data = data * (data > refdata_cutoff)
+        refdata = refdata * (refdata > refdata_cutoff)
         if normalize:
-            data = data / data.max(0)
+            data = data / refdata.max(0) / 1.2
+            data[data > 1] = 1
         return data, peaks
 
     def __repr__(self) -> str:
@@ -1673,7 +1698,7 @@ class ReferenceRegionDataset(Dataset):
                  zarr_dataset: PretrainDataset,
                  transform=None,
                  quantitative_atac: bool = True,
-                 sampling_step: int = 900,
+                 sampling_step: int = 50,
                  ) -> None:
         super().__init__()
         self.reference_region_motif = reference_region_motif
@@ -1681,6 +1706,7 @@ class ReferenceRegionDataset(Dataset):
         self.transform = transform
         self.quantitative_atac = quantitative_atac
         self.sampling_step = sampling_step
+        self.mask_ratio = zarr_dataset.mask_ratio
         self.is_train = zarr_dataset.is_train
         self.num_region_per_sample = zarr_dataset.n_peaks_upper_bound
         self.leave_out_celltypes = zarr_dataset.leave_out_celltypes
@@ -1728,7 +1754,7 @@ class ReferenceRegionDataset(Dataset):
                 if celltype_peak_annot_i.iloc[-1].End - celltype_peak_annot_i.iloc[0].Start > 5000000:
                     end_index = celltype_peak_annot_i[celltype_peak_annot_i.End -
                                                       celltype_peak_annot_i.Start < 5000000].index[-1]
-                if celltype_peak_annot_i["Start"].min() < 0:
+                if celltype_peak_annot_i["Start"].min() < 0 or celltype_peak_annot_i.shape[0] != self.num_region_per_sample:
                     continue
 
                 region_motif_i = coo_matrix(
@@ -1739,16 +1765,21 @@ class ReferenceRegionDataset(Dataset):
                 tssidx_i = tssidx_data[start_index:end_index]
 
                 if region_motif_i.shape[0] == self.num_region_per_sample:
-                    region_motif_list.append(region_motif_i)
-                    target_list.append(target_i)
-                    tssidx_list.append(tssidx_i)
+
                     # get hic matrix for celltype_peak_annot_i
                     if self.zarr_dataset.datapool.hic_obj is not None:
                         hic_matrix_i = get_hic_from_idx(
                             self.zarr_dataset.datapool.hic_obj, celltype_peak_annot_i)
-                        hic_matrix_list.append(hic_matrix_i)
+                        if hic_matrix_i is None:
+                            continue
+                        else:
+                            hic_matrix_list.append(hic_matrix_i)
                     else:
                         hic_matrix_list.append(0)
+
+                    region_motif_list.append(region_motif_i)
+                    target_list.append(target_i)
+                    tssidx_list.append(tssidx_i)
         return region_motif_list, target_list, tssidx_list, hic_matrix_list
 
     def setup(self):
@@ -1773,7 +1804,17 @@ class ReferenceRegionDataset(Dataset):
         target = self.targets[index]
         tssidx = self.tssidxs[index]
         hic_matrix = self.hic_matrices[index]
-        mask = tssidx
+        if self.mask_ratio > 0:
+            mask = np.hstack(
+                [
+                    np.zeros(int(self.num_region_per_sample -
+                                 self.num_region_per_sample*self.mask_ratio)),
+                    np.ones(int(self.num_region_per_sample*self.mask_ratio)),
+                ]
+            )
+            np.random.shuffle(mask)
+        else:
+            mask = tssidx
         if self.transform is not None:
             peak, mask, target = self.transform(peak, tssidx, target)
         if peak.shape[0] == 1:
@@ -1916,10 +1957,19 @@ Sampling step: {self.sampling_step}
 
         celltype_list = sorted(celltype_metadata["celltype"].unique().tolist())
         if is_train:
-            celltype_list = [
-                cell for cell in celltype_list if cell not in leave_out_celltypes]
-            print(f"Train cell types list: {celltype_list}")
-            print(f"Train data types list: {datatypes}")
+            # TODO: revert this
+            # celltype_list = [
+            #     cell for cell in celltype_list if cell not in leave_out_celltypes]
+            # print(f"Train cell types list: {celltype_list}")
+            # print(f"Train data types list: {datatypes}")
+
+            celltype_list = leave_out_celltypes if leave_out_celltypes != [
+                ""] else celltype_list
+            print(
+                f"Using validation cell type for training!!! cell types list: {celltype_list}")
+            print(
+                f"Using validation cell type for training!!! data types list: {datatypes}")
+
         else:
             celltype_list = leave_out_celltypes if leave_out_celltypes != [
                 ""] else celltype_list
@@ -2072,7 +2122,6 @@ Sampling step: {self.sampling_step}
                 )
                 idx_peak_start = idx_peak_list[0]
                 idx_peak_end = idx_peak_list[-1]
-                print(idx_peak_end)
                 for i in range(idx_peak_start, idx_peak_end, step):
                     shift = np.random.randint(-step // 2, step // 2)
                     start_index = max(0, i + shift)

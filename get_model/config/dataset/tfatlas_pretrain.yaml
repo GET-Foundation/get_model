@@ -19,5 +19,5 @@ preload_count: 10
 pin_mem: True
 n_packs: 1
 padding: 0
-mask_ratio: 0
+mask_ratio: 0.5
 insulation_subsample_ratio: 1

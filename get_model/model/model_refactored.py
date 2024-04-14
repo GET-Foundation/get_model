@@ -475,6 +475,62 @@ class GETFinetuneMaxNorm(GETFinetune):
 
 
 @dataclass
+class GETRegionPretrainModelConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_mask: dict = field(default_factory=lambda: {
+                            'in_features': 768, 'out_features': 283})
+    mask_token: dict = field(default_factory=lambda: {
+                             'embed_dim': 768, 'std': 0.02})
+
+
+class GETRegionPretrain(BaseGETModel):
+    def __init__(self, cfg: GETRegionPretrainModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_mask = nn.Linear(**cfg.head_mask)
+        self.mask_token = nn.Parameter(
+            torch.zeros(1, 1, cfg.mask_token.embed_dim))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        trunc_normal_(self.mask_token, std=cfg.mask_token.std)
+
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        return {
+            'region_motif': batch['region_motif'],
+            'mask': batch['mask'].unsqueeze(-1).bool()
+        }
+
+    def forward(self, region_motif, mask):
+        x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        mask_token = self.mask_token.expand(B, N, -1)
+        w = mask.type_as(mask_token)
+        x = x * (1 - w) + mask_token * w
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, _ = self.encoder(x)
+        x = x[:, 1:][mask.squeeze()].reshape(B, -1, C)
+        x_masked = self.head_mask(x)
+        return x_masked, region_motif, mask
+
+    def before_loss(self, output, batch):
+        x_masked, x_original, loss_mask = output
+        B, _, C = x_original.shape
+        pred = {'masked': x_masked}
+        obs = {'masked': x_original[loss_mask.squeeze()].reshape(B, -1, C)}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+        }
+
+
+@dataclass
 class GETRegionFinetuneModelConfig(BaseGETModelConfig):
     region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
@@ -489,7 +545,7 @@ class GETRegionFinetune(BaseGETModel):
         self.region_embed = RegionEmbed(cfg.region_embed)
         self.encoder = GETTransformer(**cfg.encoder)
         self.head_exp = ExpressionHead(cfg.head_exp)
-
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
         self.apply(self._init_weights)
 
     def get_input(self, batch):
@@ -500,7 +556,11 @@ class GETRegionFinetune(BaseGETModel):
     def forward(self, region_motif):
 
         x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
         x, _ = self.encoder(x)
+        x = x[:, 1:]
         exp = nn.Softplus()(self.head_exp(x))
         return exp
 
@@ -542,14 +602,15 @@ class GETRegionFinetuneHiC(BaseGETModel):
     def forward(self, region_motif):
 
         x = self.region_embed(region_motif)
+
         x, _ = self.encoder(x)
-        exp = nn.Softplus()(self.head_hic(x))
-        return exp
+        hic = self.head_hic(x)
+        return hic
 
     def before_loss(self, output, batch):
 
-        pred = {'hic': output}
-        obs = {'hic': batch['hic_matrix']}
+        pred = {'hic': output.squeeze(-1)}
+        obs = {'hic': batch['hic_matrix'].float()}
         return pred, obs
 
     def generate_dummy_data(self):

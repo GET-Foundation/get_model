@@ -323,6 +323,10 @@ class OuterProductMean(nn.Module):
 
         return outer
 
+class OuterSum(nn.Module):
+    """
+    from 
+    """
 
 @dataclass
 class HiCHeadConfig(BaseConfig):

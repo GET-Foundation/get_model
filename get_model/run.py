@@ -24,7 +24,7 @@ from get_model.dataset.zarr_dataset import (InferenceDataset,
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import create_optimizer
-from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys
+from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys, rename_lit_state_dict
 
 logging.disable(logging.WARN)
 
@@ -46,20 +46,12 @@ class LitModel(L.LightningModule):
     #     # norms = grad_norm(self.model, norm_type=2)
     #     # self.log_dict(norms)
 
-    @staticmethod
-    def rename_lit_checkpoints(checkpoint_model):
-        """remove the model. prefix in statedict"""
-        new_state_dict = {}
-        for key, value in checkpoint_model['state_dict'].items():
-            new_state_dict[key[6:]] = value
-        return new_state_dict
-
     def get_model(self):
         model = instantiate(self.cfg.model)
         if self.cfg.finetune.checkpoint is not None:
             checkpoint_model = load_checkpoint(
                 self.cfg.finetune.checkpoint)
-        checkpoint_model = self.rename_lit_checkpoints(checkpoint_model)
+        checkpoint_model = rename_lit_state_dict(checkpoint_model)
         model.load_state_dict(checkpoint_model, strict=True)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
