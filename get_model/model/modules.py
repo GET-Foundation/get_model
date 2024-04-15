@@ -19,6 +19,14 @@ def dict_to_device(dict, device):
     return dict
 
 
+def dict_to_item(dict):
+    """Convert singleton tensor to floats in dict."""
+    for key, value in dict.items():
+        if isinstance(value, torch.Tensor) and value.numel() == 1:
+            dict[key] = value.item()
+    return dict
+
+
 @dataclass
 class BaseConfig:
     """Dummy configuration class with arbitrary generated values.
@@ -323,10 +331,12 @@ class OuterProductMean(nn.Module):
 
         return outer
 
+
 class OuterSum(nn.Module):
     """
     from 
     """
+
 
 @dataclass
 class HiCHeadConfig(BaseConfig):
