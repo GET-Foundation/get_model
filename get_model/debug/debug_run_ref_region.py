@@ -1,4 +1,7 @@
 import hydra
+import sys
+import gc
+import torch
 from get_model.run_ref_region import run
 
 from get_model.config.config import *
@@ -11,3 +14,6 @@ def main(cfg: Config):
 
 if __name__ == "__main__":
     main()
+    gc.collect()
+    torch.cuda.empty_cache()
+    sys.exit()
