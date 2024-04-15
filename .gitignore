@@ -28,3 +28,4 @@ data/resources_core.tar.gz
 outputs/
 *.ckpt
 logs
+multirun

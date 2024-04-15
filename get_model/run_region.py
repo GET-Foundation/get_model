@@ -4,7 +4,7 @@ import torch
 import torch.utils.data
 from hydra.utils import instantiate
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import WandbLogger, CSVLogger
+from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from omegaconf import MISSING, DictConfig, OmegaConf
 
 import wandb
@@ -13,7 +13,9 @@ from get_model.dataset.zarr_dataset import RegionDataset
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.run import LitModel
-from get_model.utils import load_checkpoint, remove_keys, rename_lit_state_dict, rename_v1_finetune_keys, rename_v1_pretrain_keys
+from get_model.utils import (load_checkpoint, remove_keys,
+                             rename_lit_state_dict, rename_v1_finetune_keys,
+                             rename_v1_pretrain_keys)
 
 
 class RegionDataModule(L.LightningDataModule):
