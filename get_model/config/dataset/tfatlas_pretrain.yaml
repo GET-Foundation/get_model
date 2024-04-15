@@ -21,3 +21,8 @@ n_packs: 1
 padding: 0
 mask_ratio: 0.5
 insulation_subsample_ratio: 1
+reference_region_motif:
+  data: 'fetal_tfatlas_peaks_motif.hg38.zarr'
+  refdata: 'fetal_union_peak_motif_v1.hg38.zarr'
+  count_filter: 0
+  motif_scaler: 1

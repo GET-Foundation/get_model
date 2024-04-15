@@ -18,8 +18,6 @@ from scipy.sparse import coo_matrix, csr_matrix, load_npz, vstack
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from get_model.config.config import DatasetConfig
-
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -1600,21 +1598,27 @@ class PerturbationInferenceDataset(Dataset):
 
 @dataclass
 class ReferenceRegionMotifConfig:
-    data: str = '/home/xf2217/Projects/get_data/fetal_tfatlas_peaks_motif.hg38.zarr'
-    refdata: str = '/home/xf2217/Projects/get_data/fetal_union_peak_motif_v1.hg38.zarr'
-    assembly: str = 'hg38'
+    root: str = '/home/xf2217/Projects/get_data'
+    data: str = 'fetal_tfatlas_peaks_motif.hg38.zarr'
+    refdata: str = 'fetal_union_peak_motif_v1.hg38.zarr'
+    count_filter: int = 0
+    motif_scaler: float = 1.0
 
 
 class ReferenceRegionMotif(object):
     def __init__(self, cfg: ReferenceRegionMotifConfig) -> None:
         self.cfg = cfg
-        self.dataset = zarr.open_group(cfg.data, mode='r')
+        self.dataset = zarr.open_group(
+            os.path.join(cfg.root, cfg.data), mode='r')
         self.data = self.dataset['data'][:]
         self.peak_names = self.dataset['peak_names'][:]
         self.motif_names = self.dataset['motif_names'][:]
-        self.refdataset = zarr.open_group(cfg.refdata, mode='r')
+        self.refdataset = zarr.open_group(
+            os.path.join(cfg.root, cfg.refdata), mode='r')
         self.refdata = self.refdataset['data'][:]
         self.refpeak_names = self.refdataset['peak_names'][:]
+        self.count_fileter = cfg.count_filter
+        self.motif_scaler = cfg.motif_scaler
 
     @property
     def num_peaks(self):
@@ -1685,7 +1689,7 @@ class ReferenceRegionMotif(object):
         data = data * (data > refdata_cutoff)
         refdata = refdata * (refdata > refdata_cutoff)
         if normalize:
-            data = data / refdata.max(0) / 1.2
+            data = data / refdata.max(0) / self.motif_scaler
             data[data > 1] = 1
         return data, peaks
 
@@ -1711,12 +1715,14 @@ class ReferenceRegionDataset(Dataset):
         self.num_region_per_sample = zarr_dataset.n_peaks_upper_bound
         self.leave_out_celltypes = zarr_dataset.leave_out_celltypes
         self.leave_out_chromosomes = zarr_dataset.leave_out_chromosomes
+
+        self.count_fileter = reference_region_motif.count_fileter
         self.setup()
 
     @property
     def data_dict(self):
         return {data_key: self.reference_region_motif.map_peaks_to_motifs(
-            peaks.query('Count>0')
+            peaks.query('Count>@self.count_fileter')
         ) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
 
     def extract_data_list(self, region_motif, peaks):

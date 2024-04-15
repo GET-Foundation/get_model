@@ -5,7 +5,7 @@ from typing import Any, Generic, TypeVar
 from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
 
-from get_model.model.model_refactored import BaseGETModelConfig, GETChrombpNetBiasModelConfig
+from get_model.dataset.zarr_dataset import ReferenceRegionMotifConfig
 from typing import Optional
 
 T = TypeVar("T")
@@ -71,6 +71,12 @@ class DatasetConfig:
     # Dataset size
     dataset_size: int = 40960
     eval_dataset_size: int = 4096
+
+
+@dataclass
+class ReferenceRegionDatasetConfig(DatasetConfig):
+    reference_region_motif: ReferenceRegionMotifConfig = field(
+        default_factory=ReferenceRegionMotifConfig)
 
 
 @dataclass
@@ -157,6 +163,12 @@ class Config:
 
 
 @dataclass
+class ReferenceRegionConfig(Config):
+    dataset: ReferenceRegionDatasetConfig = field(
+        default_factory=ReferenceRegionDatasetConfig)
+
+
+@dataclass
 class RegionConfig:
     stage: str = 'fit'
     assembly: str = 'hg38'
@@ -175,6 +187,9 @@ class RegionConfig:
 
 cs = ConfigStore.instance()
 cs.store(name="base_config", node=Config)
+
+csrr = ConfigStore.instance()
+csrr.store(name="base_ref_region_config", node=ReferenceRegionConfig)
 
 csr = ConfigStore.instance()
 csr.store(name="base_region_config", node=RegionConfig)

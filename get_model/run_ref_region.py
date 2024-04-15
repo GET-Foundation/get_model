@@ -25,7 +25,9 @@ class ReferenceRegionDataModule(GETDataModule):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
         logging.info("Init ReferenceRegionDataModule")
-        self.reference_region_motif_cfg = ReferenceRegionMotifConfig()
+        cfg.dataset.reference_region_motif['root'] = self.cfg.machine.data_path
+        self.reference_region_motif_cfg = ReferenceRegionMotifConfig(
+            **cfg.dataset.reference_region_motif)
         self.reference_region_motif = ReferenceRegionMotif(
             self.reference_region_motif_cfg)
         print(self.reference_region_motif)
@@ -117,8 +119,8 @@ class RegionLitModel(LitModel):
             elif 'state_dict' in checkpoint_model:
                 checkpoint_model = checkpoint_model['state_dict']
                 checkpoint_model = rename_lit_state_dict(checkpoint_model)
-            checkpoint_model = rename_v1_pretrain_keys(checkpoint_model)
-            model.load_state_dict(checkpoint_model, strict=False)
+            checkpoint_model = rename_v1_finetune_keys(checkpoint_model)
+            model.load_state_dict(checkpoint_model, strict=True)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         return model
