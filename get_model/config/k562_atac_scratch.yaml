@@ -1,0 +1,47 @@
+defaults:
+  - base_region_config
+  - model/GETRegionFinetuneATAC@_here_
+  - machine/pc_region_v2
+  - _self_
+
+assembly: "hg38"
+log_image: true
+model:
+  cfg:
+    num_regions: 200
+dataset:
+    root: ${machine.data_path}
+    metadata_path: 'data/k562_atac_finetune.csv'
+    num_region_per_sample: 200
+    transform: null
+    data_type: 'k562'
+    leave_out_celltypes: 'k562_bulk_count_10,k562_bulk_cut0.03,k562_bulk_cut0.05,k562_bulk_cut0.07,k562_count_10,k562_cut0.03,k562_cut0.05,k562_cut0.07,Fetal Astrocyte 1'
+    leave_out_chromosomes: "chr11"
+    quantitative_atac: true
+    sampling_step: 100
+    mask_ratio: 0
+
+training:
+  save_ckpt_freq: 1
+  epochs: 100
+  warmup_epochs: 5
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: false
+
+optimizer:
+  lr: 0.001
+  min_lr: 0.000001
+  weight_decay: 0.05
+  opt: "adamw"
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.999]
+
+wandb:
+  project_name: "GETRegionFinetuneATAC"
+  run_name: "k562_and_astrocyte_from_scratch"
+
+finetune:
+  checkpoint: null
+  model_prefix: "model."
+  patterns_to_freeze: []

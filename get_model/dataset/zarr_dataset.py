@@ -1862,6 +1862,7 @@ class RegionDataset(Dataset):
         leave_out_chromosomes: str = "",
         quantitative_atac: bool = False,
         sampling_step: int = 100,
+        mask_ratio: float = 0.0,
     ) -> None:
         super().__init__()
 
@@ -1872,7 +1873,8 @@ class RegionDataset(Dataset):
         self.leave_out_chromosomes = leave_out_chromosomes
         self.quantitative_atac = quantitative_atac
         self.sampling_step = sampling_step
-
+        self.num_region_per_sample = num_region_per_sample
+        self.mask_ratio = mask_ratio
         metadata_path = os.path.join(
             self.root, metadata_path
         )
@@ -1918,7 +1920,17 @@ Sampling step: {self.sampling_step}
         peak = self.peaks[index]
         target = self.targets[index]
         tssidx = self.tssidxs[index]
-        mask = tssidx
+        if self.mask_ratio > 0:
+            mask = np.hstack(
+                [
+                    np.zeros(int(self.num_region_per_sample -
+                                 self.num_region_per_sample*self.mask_ratio)),
+                    np.ones(int(self.num_region_per_sample*self.mask_ratio)),
+                ]
+            )
+            np.random.shuffle(mask)
+        else:
+            mask = tssidx
         if self.transform is not None:
             peak, mask, target = self.transform(peak, tssidx, target)
         if peak.shape[0] == 1:
@@ -1985,7 +1997,6 @@ Sampling step: {self.sampling_step}
         file_id_list = []
         datatype_dict = {}
         cell_dict = {}
-
         for cell in celltype_list:
             celltype_metadata_of_cell = celltype_metadata[celltype_metadata["celltype"] == cell]
             for file, cluster, datatype, expression in zip(
@@ -2027,7 +2038,7 @@ Sampling step: {self.sampling_step}
             FileNotFoundError: If the peak file is not found.
         """
         peak_npz_path = os.path.join(
-            data_path, data_type, f"{file_id}.{'natac' if quantitative_atac else 'watac'}.npz"
+            data_path, data_type, f"{file_id}.watac.npz"
         )
 
         if not os.path.exists(peak_npz_path):
@@ -2038,7 +2049,7 @@ Sampling step: {self.sampling_step}
         tssidx_npy_path = os.path.join(
             data_path, data_type, f"{file_id}.tss.npy")
         celltype_annot = os.path.join(
-            data_path, data_type, f"{file_id}.csv.gz")
+            data_path, data_type, f"{file_id}.csv")
 
         return {
             "file_id": file_id,
@@ -2116,6 +2127,12 @@ Sampling step: {self.sampling_step}
                 target_data = np.load(paths_dict["target_npy"])
                 tssidx_data = np.load(paths_dict["tssidx_npy"])
                 print(f"Target shape: {target_data.shape}")
+                atac_cutoff = 1 - \
+                    (peak_data[:, 282] >= 0.2).toarray().flatten()
+                target_data[atac_cutoff, :] = 0
+
+            if quantitative_atac is False:
+                peak_data[:, 282] = 1
 
             all_chromosomes = celltype_peak_annot["Chromosome"].unique(
             ).tolist()
@@ -2130,13 +2147,15 @@ Sampling step: {self.sampling_step}
                 idx_peak_end = idx_peak_list[-1]
                 for i in range(idx_peak_start, idx_peak_end, step):
                     shift = np.random.randint(-step // 2, step // 2)
-                    start_index = max(0, i + shift)
+                    start_index = i  # max(0, i + shift)
                     end_index = start_index + num_region_per_sample
 
                     celltype_annot_i = celltype_peak_annot.iloc[start_index:end_index, :]
-                    if celltype_annot_i.iloc[-1].End - celltype_annot_i.iloc[0].Start > 5000000:
-                        end_index = celltype_annot_i[celltype_annot_i.End -
-                                                     celltype_annot_i.Start < 5000000].index[-1]
+                    if celltype_annot_i.shape[0] < num_region_per_sample:
+                        continue
+                    # if celltype_annot_i.iloc[-1].End - celltype_annot_i.iloc[0].Start > 5000000:
+                    #     end_index = celltype_annot_i[celltype_annot_i.End -
+                    #                                  celltype_annot_i.Start < 5000000].index[-1]
                     if celltype_annot_i["Start"].min() < 0:
                         continue
                     peak_data_i = coo_matrix(peak_data[start_index:end_index])

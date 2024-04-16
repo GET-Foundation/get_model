@@ -598,7 +598,6 @@ def cosine_scheduler(
     if warmup_epochs > 0:
         warmup_schedule = np.linspace(
             start_warmup_value, base_value, warmup_iters)
-
     iters = np.arange(epochs * niter_per_ep - warmup_iters)
     schedule = np.array(
         [
@@ -609,7 +608,6 @@ def cosine_scheduler(
             for i in iters
         ]
     )
-
     schedule = np.concatenate((warmup_schedule, schedule))
 
     assert len(schedule) == epochs * niter_per_ep

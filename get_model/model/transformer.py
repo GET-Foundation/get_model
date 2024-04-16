@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
-from timm.models.layers import DropPath
+from timm.models.layers import DropPath, trunc_normal_
 try:
     from flash_attn import flash_attn_qkvpacked_func
 except ImportError:
@@ -160,7 +160,7 @@ class Mlp(nn.Module):
         hidden_features=None,
         out_features=None,
         act_layer=nn.GELU,
-        drop=0.1,
+        drop=0.,
     ):
         super().__init__()
         out_features = out_features or in_features
@@ -174,7 +174,7 @@ class Mlp(nn.Module):
     def forward(self, x):
         x = self.fc1(x)
         x = self.act(x)
-        x = self.drop1(x)
+        # x = self.drop1(x)
         x = self.fc2(x)
         x = self.drop2(x)
         return x
@@ -188,10 +188,10 @@ class Block(nn.Module):
         mlp_ratio=4.0,
         qkv_bias=False,
         qk_scale=None,
-        drop=0.1,
-        attn_drop=0.1,
+        drop=0,
+        attn_drop=0,
         drop_path=0.1,
-        init_values=0,
+        init_values=0.001,
         act_layer=nn.GELU,
         norm_layer=nn.LayerNorm,
         attn_head_dim=None,
@@ -266,8 +266,8 @@ class GETTransformer(nn.Module):
         mlp_ratio=4,
         qkv_bias=True,
         qk_scale=None,
-        drop_rate=0.1,
-        attn_drop_rate=0.1,
+        drop_rate=0,
+        attn_drop_rate=0,
         drop_path_rate=0.1,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
         init_values=0,
@@ -301,6 +301,17 @@ class GETTransformer(nn.Module):
         self.norm = nn.Identity() if use_mean_pooling else norm_layer(embed_dim)
         self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
 
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
     def forward(self, x, mask=None, return_attns=False, bias=None):
         attn_output = [] if return_attns else None
         for blk in self.blocks:
@@ -311,4 +322,3 @@ class GETTransformer(nn.Module):
         if self.fc_norm is not None:
             x = self.fc_norm(x.mean(1))
         return x, attn_output
-

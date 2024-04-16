@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from get_model.model.motif import parse_meme_file
+from torch.nn.init import trunc_normal_
 
 
 def dict_to_device(dict, device):
@@ -243,6 +244,11 @@ class ExpressionHead(BaseModule):
             self.head = nn.Linear(cfg.embed_dim + 1, cfg.output_dim)
         else:
             self.head = nn.Linear(cfg.embed_dim, cfg.output_dim)
+
+        trunc_normal_(self.head.weight, std=.02)
+
+        self.head.weight.data.mul_(0.001)
+        self.head.bias.data.mul_(0.001)
 
     def forward(self, x, atac=None):
         if self.use_atac:

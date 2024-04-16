@@ -277,6 +277,10 @@ class BaseGETModel(BaseModule):
     def get_layer_names(self):
         return list(self._modules.keys())
 
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {'pos_embed', 'cls_token'}
+
 
 @dataclass
 class GETPretrainModelConfig(BaseGETModelConfig):
@@ -568,6 +572,54 @@ class GETRegionFinetune(BaseGETModel):
 
         pred = {'exp': output}
         obs = {'exp': batch['exp_label']}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+        }
+
+
+@dataclass
+class GETRegionFinetuneATACModelConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+
+
+class GETRegionFinetuneATAC(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        input = batch['region_motif'].clone()
+        input[:, :, -1] = 1
+        return {
+            'region_motif': input,
+        }
+
+    def forward(self, region_motif):
+
+        x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, _ = self.encoder(x)
+        x = x[:, 1:]
+        atpm = nn.Softplus()(self.head_exp(x))
+        return atpm
+
+    def before_loss(self, output, batch):
+
+        pred = {'atpm': output}
+        obs = {'atpm': batch['region_motif'][:, :, -1].unsqueeze(-1)}
         return pred, obs
 
     def generate_dummy_data(self):

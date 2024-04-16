@@ -33,12 +33,15 @@ except ImportError:
 def get_num_layer_for_vit(var_name, num_max_layer):
     if var_name in ("cls_token", "mask_token", "pos_embed"):
         return 0
-    elif var_name.startswith("patch_embed"):
+    elif var_name.startswith("region_embed"):
         return 0
     elif var_name.startswith("rel_pos_bias"):
         return num_max_layer - 1
     elif var_name.startswith("blocks"):
         layer_id = int(var_name.split(".")[1])
+        return layer_id + 1
+    elif var_name.startswith("encoder.blocks"):
+        layer_id = int(var_name.split(".")[2])
         return layer_id + 1
     else:
         return num_max_layer - 1
@@ -158,7 +161,8 @@ def create_optimizer(
     elif opt_lower == "adamp":
         optimizer = AdamP(parameters, wd_ratio=0.01, nesterov=True, **opt_args)
     elif opt_lower == "sgdp":
-        optimizer = SGDP(parameters, momentum=args.momentum, nesterov=True, **opt_args)
+        optimizer = SGDP(parameters, momentum=args.momentum,
+                         nesterov=True, **opt_args)
     elif opt_lower == "adadelta":
         optimizer = optim.Adadelta(parameters, **opt_args)
     elif opt_lower == "adafactor":
@@ -172,7 +176,8 @@ def create_optimizer(
             parameters, alpha=0.9, momentum=args.momentum, **opt_args
         )
     elif opt_lower == "rmsproptf":
-        optimizer = RMSpropTF(parameters, alpha=0.9, momentum=args.momentum, **opt_args)
+        optimizer = RMSpropTF(parameters, alpha=0.9,
+                              momentum=args.momentum, **opt_args)
     elif opt_lower == "novograd":
         optimizer = NovoGrad(parameters, **opt_args)
     elif opt_lower == "nvnovograd":
