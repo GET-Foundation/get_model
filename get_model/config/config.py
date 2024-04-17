@@ -1,5 +1,6 @@
 from ast import Dict
 from dataclasses import dataclass, field
+from email.policy import strict
 from typing import Any, Generic, TypeVar
 
 from hydra.core.config_store import ConfigStore
@@ -124,7 +125,9 @@ class WandbConfig:
 
 @dataclass
 class FinetuneConfig:
+    pretrain_checkpoint: bool = False
     checkpoint: str | None = None
+    strict: bool = True
     model_prefix: str = "model."
     patterns_to_freeze: list = field(default_factory=lambda: [
         "motif_scanner"])

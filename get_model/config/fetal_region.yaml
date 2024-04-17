@@ -38,6 +38,7 @@ wandb:
   run_name: "debug"
 
 finetune:
+  pretrain_checkpoint: false
   checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
   model_prefix: "model."
   patterns_to_freeze: []

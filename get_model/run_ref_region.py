@@ -119,12 +119,22 @@ class RegionLitModel(LitModel):
                 self.cfg.finetune.checkpoint)
             state_dict = model.state_dict()
             remove_keys(checkpoint_model, state_dict)
+            strict = self.cfg.finetune.strict
             if 'model' in checkpoint_model:
                 checkpoint_model = checkpoint_model['model']
             if 'state_dict' in checkpoint_model:
                 checkpoint_model = checkpoint_model['state_dict']
-            checkpoint_model = rename_v1_pretrain_keys(checkpoint_model)
-            model.load_state_dict(checkpoint_model, strict=False)
+                checkpoint_model = rename_lit_state_dict(checkpoint_model)
+                model.load_state_dict(checkpoint_model, strict=strict)
+            else:
+                if self.cfg.finetune.pretrain_checkpoint:
+                    checkpoint_model = rename_v1_pretrain_keys(
+                        checkpoint_model)
+                    model.load_state_dict(checkpoint_model, strict=strict)
+                else:
+                    checkpoint_model = rename_v1_finetune_keys(
+                        checkpoint_model)
+                    model.load_state_dict(checkpoint_model, strict=strict)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         print("Model = %s" % str(model))
