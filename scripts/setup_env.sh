@@ -25,7 +25,7 @@ git checkout refactor_with_hydra
 mamba env create -f ${CODEBASE_DIR}/environment.yml -p ${ROOT_DIR}/mambaforge/get_started
 
 # Activate the newly created mamba environment
-mamba activate ${ROOT_DIR}/mambaforge/get_started
+source activate ${ROOT_DIR}/mambaforge/get_started
 
 # Copy data from a specified location to the project directory
 cp -r $DATA_DIR ${ROOT_DIR}/get_data
