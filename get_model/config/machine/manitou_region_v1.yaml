@@ -1,6 +1,6 @@
 data_path: "/manitou/pmg/users/xf2217/backup/new_finetune_data_all"
 codebase: "/pmglocal/xf2217/GET_STARTED/get_model/"
 output_dir: "/pmglocal/xf2217/output"
-num_devices: 1
+num_devices: 6
 num_workers: 0
 batch_size: 16
