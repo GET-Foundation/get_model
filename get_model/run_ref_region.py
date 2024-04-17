@@ -196,6 +196,8 @@ def run(cfg: DictConfig):
         strategy='ddp_spawn',
         devices=cfg.machine.num_devices,
         logger=[
+            WandbLogger(name=cfg.wandb.run_name,
+                        project=cfg.wandb.project_name),
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(
             monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
@@ -203,6 +205,7 @@ def run(cfg: DictConfig):
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         log_every_n_steps=4,
+        val_check_interval=0.1,
         default_root_dir=cfg.machine.output_dir,
     )
     if cfg.stage == 'fit':

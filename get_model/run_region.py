@@ -192,7 +192,7 @@ def run(cfg: DictConfig):
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(
             monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
-        # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         default_root_dir=cfg.machine.output_dir,

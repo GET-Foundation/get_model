@@ -2050,6 +2050,10 @@ Sampling step: {self.sampling_step}
             data_path, data_type, f"{file_id}.tss.npy")
         celltype_annot = os.path.join(
             data_path, data_type, f"{file_id}.csv")
+        # if celltype_annot is not exist, check csv.gz
+        if not os.path.exists(celltype_annot):
+            celltype_annot = os.path.join(
+                data_path, data_type, f"{file_id}.csv.gz")
 
         return {
             "file_id": file_id,
