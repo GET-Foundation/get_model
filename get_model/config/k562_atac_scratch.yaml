@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 assembly: "hg38"
-log_image: true
+
 model:
   cfg:
     num_regions: 200
@@ -30,7 +30,7 @@ training:
   use_fp16: false
 
 optimizer:
-  lr: 0.001
+  lr: 0.0005
   min_lr: 0.000001
   weight_decay: 0.05
   opt: "adamw"
@@ -45,3 +45,6 @@ finetune:
   checkpoint: null
   model_prefix: "model."
   patterns_to_freeze: []
+
+eval_tss: false
+log_image: true

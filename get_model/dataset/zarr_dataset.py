@@ -1617,7 +1617,7 @@ class ReferenceRegionMotif(object):
             os.path.join(cfg.root, cfg.refdata), mode='r')
         self.refdata = self.refdataset['data'][:]
         self.refpeak_names = self.refdataset['peak_names'][:]
-        self.count_fileter = cfg.count_filter
+        self.count_filter = cfg.count_filter
         self.motif_scaler = cfg.motif_scaler
 
     @property
@@ -1716,13 +1716,13 @@ class ReferenceRegionDataset(Dataset):
         self.leave_out_celltypes = zarr_dataset.leave_out_celltypes
         self.leave_out_chromosomes = zarr_dataset.leave_out_chromosomes
 
-        self.count_fileter = reference_region_motif.count_fileter
+        self.count_filter = reference_region_motif.count_filter
         self.setup()
 
     @property
     def data_dict(self):
         return {data_key: self.reference_region_motif.map_peaks_to_motifs(
-            peaks.query('Count>@self.count_fileter')
+            peaks.query('Count>@self.count_filter')
         ) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
 
     def extract_data_list(self, region_motif, peaks):
@@ -2146,7 +2146,7 @@ Sampling step: {self.sampling_step}
                 idx_peak_start = idx_peak_list[0]
                 idx_peak_end = idx_peak_list[-1]
                 for i in range(idx_peak_start, idx_peak_end, step):
-                    shift = np.random.randint(-step // 2, step // 2)
+                    # shift = np.random.randint(-step // 2, step // 2)
                     start_index = i  # max(0, i + shift)
                     end_index = start_index + num_region_per_sample
 

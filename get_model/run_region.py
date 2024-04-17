@@ -89,11 +89,6 @@ class RegionLitModel(LitModel):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
 
-    def training_step(self, batch, batch_idx):
-        loss, pred, obs = self._shared_step(batch, batch_idx, stage='train')
-        self.log("train_loss", loss, batch_size=self.cfg.machine.batch_size)
-        return loss
-
     def optimizer_step(self, epoch: int, batch_idx: int, optimizer: Optimizer | LightningOptimizer, optimizer_closure: Callable[[], Any] | None = None) -> None:
         self.lr_schedulers().step()
         return super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)

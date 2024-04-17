@@ -1,6 +1,3 @@
-[submodule "modules/proscope"]
-	path = modules/proscope
-	url = git@github.com:fuxialexander/proscope.git
 [submodule "modules/caesar"]
 	path = modules/caesar
 	url = git@github.com:fuxialexander/caesar.git

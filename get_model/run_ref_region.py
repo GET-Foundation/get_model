@@ -17,8 +17,11 @@ from get_model.dataset.zarr_dataset import (ReferenceRegionDataset,
                                             ReferenceRegionMotifConfig)
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
+from get_model.optim import LayerDecayValueAssigner, create_optimizer
 from get_model.run import GETDataModule, LitModel
-from get_model.utils import load_checkpoint, remove_keys, rename_lit_state_dict, rename_v1_finetune_keys, rename_v1_pretrain_keys
+from get_model.utils import (cosine_scheduler, load_checkpoint, remove_keys,
+                             rename_lit_state_dict, rename_v1_finetune_keys,
+                             rename_v1_pretrain_keys)
 
 
 class ReferenceRegionDataModule(GETDataModule):
@@ -33,7 +36,7 @@ class ReferenceRegionDataModule(GETDataModule):
         print(self.reference_region_motif)
 
     def build_from_zarr_dataset(self, zarr_dataset):
-        return ReferenceRegionDataset(self.reference_region_motif, zarr_dataset, quantitative_atac=self.cfg.quantitative_atac)
+        return ReferenceRegionDataset(self.reference_region_motif, zarr_dataset, quantitative_atac=self.cfg.dataset.quantitative_atac, sampling_step=self.cfg.dataset.sampling_step)
 
     def setup(self, stage=None):
         super().setup(stage)
@@ -53,6 +56,7 @@ class ReferenceRegionDataModule(GETDataModule):
             batch_size=self.cfg.machine.batch_size,
             num_workers=self.cfg.machine.num_workers,
             drop_last=True,
+            shuffle=True,
         )
 
     def val_dataloader(self):
@@ -84,26 +88,27 @@ class RegionLitModel(LitModel):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
 
-    def validation_step(self, batch, batch_idx, tss_only=True, log_image=False):
+    def validation_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='val')
         # print(pred['exp'].detach().cpu().numpy().flatten().max(),
         #       obs['exp'].detach().cpu().numpy().flatten().max())
 
-        if tss_only:
-            tss_idx = batch['mask'].unsqueeze(-1)
+        if self.cfg.eval_tss:
+            tss_idx = batch['mask']
             for key in pred:
-                pred[key] = (pred[key] * tss_idx)
-                obs[key] = (obs[key] * tss_idx)
-                tss_idx = torch.cat([tss_idx]*2, dim=-1)
+                # pred[key] = (pred[key] * tss_idx)
+                # obs[key] = (obs[key] * tss_idx)
                 pred[key] = pred[key][tss_idx > 0].flatten()
                 obs[key] = obs[key][tss_idx > 0].flatten()
 
         metrics = self.metrics(pred, obs)
-        if batch_idx == 0 and log_image:
+        if batch_idx == 0 and self.cfg.log_image:
             # log one example as scatter plot
-            self.logger.experiment.log({
-                "scatter": wandb.Image(sns.scatterplot(y=pred['exp'].detach().cpu().numpy().flatten(), x=obs['exp'].detach().cpu().numpy().flatten()))
-            })
+            for key in pred:
+                self.logger.experiment.log({
+                    f"scatter_{key}": wandb.Image(sns.scatterplot(y=pred[key].detach().cpu().numpy().flatten(), x=obs[key].detach().cpu().numpy().flatten()))
+                })
+
         self.log_dict(metrics, batch_size=self.cfg.machine.batch_size)
         self.log("val_loss", loss, batch_size=self.cfg.machine.batch_size)
 
@@ -116,13 +121,13 @@ class RegionLitModel(LitModel):
             remove_keys(checkpoint_model, state_dict)
             if 'model' in checkpoint_model:
                 checkpoint_model = checkpoint_model['model']
-            elif 'state_dict' in checkpoint_model:
+            if 'state_dict' in checkpoint_model:
                 checkpoint_model = checkpoint_model['state_dict']
-                checkpoint_model = rename_lit_state_dict(checkpoint_model)
             checkpoint_model = rename_v1_finetune_keys(checkpoint_model)
             model.load_state_dict(checkpoint_model, strict=True)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
+        print("Model = %s" % str(model))
         return model
 
     def on_validation_epoch_end(self):
@@ -142,6 +147,42 @@ class RegionLitModel(LitModel):
             df.to_csv(f"{self.cfg.machine.output_dir}/val_metrics.csv",
                       mode='a', header=False, index=False)
 
+    def configure_optimizers(self):
+        num_layers = self.model.cfg.encoder.num_layers
+        assigner = LayerDecayValueAssigner(
+            list(0.75 ** (num_layers + 1 - i) for i in range(num_layers + 2)))
+
+        if assigner is not None:
+            print("Assigned values = %s" % str(assigner.values))
+        skip_weight_decay_list = self.model.no_weight_decay()
+        print("Skip weight decay list: ", skip_weight_decay_list)
+
+        optimizer = create_optimizer(self.cfg.optimizer, self.model,
+                                     skip_list=skip_weight_decay_list,
+                                     get_num_layer=assigner.get_layer_id if assigner is not None else None,
+                                     get_layer_scale=assigner.get_scale if assigner is not None else None
+                                     )
+
+        data_size = len(self.dm.dataset_train)
+        num_training_steps_per_epoch = (
+            data_size // self.cfg.machine.batch_size // self.cfg.machine.num_devices
+        )
+        schedule = cosine_scheduler(
+            base_value=self.cfg.optimizer.lr,
+            final_value=self.cfg.optimizer.min_lr,
+            epochs=self.cfg.training.epochs,
+            niter_per_ep=num_training_steps_per_epoch,
+            warmup_epochs=self.cfg.training.warmup_epochs,
+            start_warmup_value=self.cfg.optimizer.min_lr,
+            warmup_steps=-1
+        )
+        # step based lr scheduler
+        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer,
+            lr_lambda=lambda step: schedule[step]/self.cfg.optimizer.lr,
+        )
+        return [optimizer], [lr_scheduler]
+
 
 def run(cfg: DictConfig):
     model = RegionLitModel(cfg)
@@ -156,9 +197,9 @@ def run(cfg: DictConfig):
         devices=cfg.machine.num_devices,
         logger=[
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
-        callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
-                   LearningRateMonitor(logging_interval='epoch')],
-        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+        callbacks=[ModelCheckpoint(
+            monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
+        # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         log_every_n_steps=4,

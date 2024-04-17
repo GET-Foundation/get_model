@@ -77,6 +77,9 @@ class DatasetConfig:
 class ReferenceRegionDatasetConfig(DatasetConfig):
     reference_region_motif: ReferenceRegionMotifConfig = field(
         default_factory=ReferenceRegionMotifConfig)
+    quantitative_atac: bool = False
+    sampling_step: int = 100
+    mask_ratio: float = 0
 
 
 @dataclass
@@ -165,6 +168,8 @@ class Config:
 
 @dataclass
 class ReferenceRegionConfig(Config):
+    eval_tss: bool = False
+    log_image: bool = False
     dataset: ReferenceRegionDatasetConfig = field(
         default_factory=ReferenceRegionDatasetConfig)
 
