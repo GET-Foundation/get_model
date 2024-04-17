@@ -193,8 +193,8 @@ def run(cfg: DictConfig):
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator="gpu",
-        num_sanity_val_steps=0,
-        strategy="auto",
+        num_sanity_val_steps=10,
+        strategy="ddp_spawn",
         devices=cfg.machine.num_devices,
         logger=[
             WandbLogger(name=cfg.wandb.run_name,

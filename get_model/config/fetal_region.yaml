@@ -15,7 +15,7 @@ dataset:
     leave_out_celltypes: 'Astrocytes'
     leave_out_chromosomes: 'chr11'
     quantitative_atac: false
-    sampling_step: 100
+    sampling_step: 5
 
 training:
   save_ckpt_freq: 1
@@ -34,8 +34,8 @@ optimizer:
   opt_betas: [0.9, 0.95]
 
 wandb:
-  project_name: "debug"
-  run_name: "debug"
+  project_name: "GETRegionFinetuneV1"
+  run_name: "Astrocyte"
 
 finetune:
   pretrain_checkpoint: false
