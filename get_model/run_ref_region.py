@@ -123,8 +123,8 @@ class RegionLitModel(LitModel):
                 checkpoint_model = checkpoint_model['model']
             if 'state_dict' in checkpoint_model:
                 checkpoint_model = checkpoint_model['state_dict']
-            checkpoint_model = rename_v1_finetune_keys(checkpoint_model)
-            model.load_state_dict(checkpoint_model, strict=True)
+            checkpoint_model = rename_v1_pretrain_keys(checkpoint_model)
+            model.load_state_dict(checkpoint_model, strict=False)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         print("Model = %s" % str(model))
@@ -193,13 +193,13 @@ def run(cfg: DictConfig):
         max_epochs=cfg.training.epochs,
         accelerator="gpu",
         num_sanity_val_steps=0,
-        strategy="auto",
+        strategy='ddp_spawn',
         devices=cfg.machine.num_devices,
         logger=[
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(
             monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
-        # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         log_every_n_steps=4,
