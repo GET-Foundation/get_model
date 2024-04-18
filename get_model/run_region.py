@@ -195,9 +195,9 @@ def run(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     dm = RegionDataModule(cfg)
     model.dm = dm
-    wandb = WandbLogger(name=cfg.wandb.run_name,
-                        project=cfg.wandb.project_name)
-    wandb.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+    wandb_logger = WandbLogger(name=cfg.wandb.run_name,
+                               project=cfg.wandb.project_name)
+    wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator="gpu",
@@ -205,7 +205,7 @@ def run(cfg: DictConfig):
         strategy="ddp_spawn",
         devices=cfg.machine.num_devices,
         logger=[
-            wandb,
+            wandb_logger,
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(
             monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],

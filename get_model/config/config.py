@@ -159,7 +159,6 @@ class Config:
     machine: MachineConfig = field(default_factory=MachineConfig)
     dataset: DatasetConfig = field(
         default_factory=DatasetConfig)
-    quantitative_atac: bool = False
     training: TrainingConfig = field(default_factory=TrainingConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
@@ -183,7 +182,6 @@ class RegionConfig:
     eval_tss: bool = False
     log_image: bool = False
     model: Any = MISSING
-    quantitative_atac: bool = False
     machine: MachineConfig = field(default_factory=MachineConfig)
     dataset: RegionDatasetConfig = field(
         default_factory=RegionDatasetConfig)

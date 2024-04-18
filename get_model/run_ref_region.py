@@ -150,7 +150,7 @@ class RegionLitModel(LitModel):
         metric_dict = dict_to_item(self.trainer.callback_metrics)
         metric_dict['count_filter'] = self.cfg.dataset.reference_region_motif.count_filter
         metric_dict['motif_scaler'] = self.cfg.dataset.reference_region_motif.motif_scaler
-        metric_dict['quantitative_atac'] = self.cfg.quantitative_atac
+        metric_dict['quantitative_atac'] = self.cfg.dataset.quantitative_atac
         # as dataframe
         import pandas as pd
         df = pd.DataFrame(metric_dict, index=[0])
@@ -204,16 +204,16 @@ def run(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     dm = ReferenceRegionDataModule(cfg)
     model.dm = dm
-    wandb = WandbLogger(name=cfg.wandb.run_name,
-                        project=cfg.wandb.project_name)
-    wandb.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+    wandb_logger = WandbLogger(name=cfg.wandb.run_name,
+                               project=cfg.wandb.project_name)
+    wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator="gpu",
         num_sanity_val_steps=0,
         strategy='ddp_spawn',
         devices=cfg.machine.num_devices,
-        logger=[wandb,
+        logger=[wandb_logger,
                 CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(
             monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
