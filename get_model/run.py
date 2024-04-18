@@ -389,7 +389,7 @@ def run(cfg: DictConfig):
     model.dm = dm
     wandb = WandbLogger(name=cfg.wandb.run_name,
                         project=cfg.wandb.project_name)
-    wandb.config.update(cfg)
+    wandb.log_hyperparams(dict(cfg))
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator="gpu",
