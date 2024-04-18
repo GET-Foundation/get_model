@@ -190,6 +190,9 @@ def run(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     dm = RegionDataModule(cfg)
     model.dm = dm
+    wandb = WandbLogger(name=cfg.wandb.run_name,
+                        project=cfg.wandb.project_name)
+    wandb.config.update(cfg)
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator="gpu",
@@ -197,12 +200,11 @@ def run(cfg: DictConfig):
         strategy="ddp_spawn",
         devices=cfg.machine.num_devices,
         logger=[
-            WandbLogger(name=cfg.wandb.run_name,
-                        project=cfg.wandb.project_name),
+            wandb,
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(
             monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
-        #plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+        # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         default_root_dir=cfg.machine.output_dir,

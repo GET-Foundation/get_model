@@ -387,6 +387,9 @@ def run(cfg: DictConfig):
     model = LitModel(cfg)
     dm = GETDataModule(cfg)
     model.dm = dm
+    wandb = WandbLogger(name=cfg.wandb.run_name,
+                        project=cfg.wandb.project_name)
+    wandb.config.update(cfg)
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator="gpu",
@@ -395,8 +398,8 @@ def run(cfg: DictConfig):
         devices=cfg.machine.num_devices,
         # callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
         #            LearningRateMonitor(logging_interval='epoch')],
-        logger=[
-            CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
+        logger=[wandb,
+                CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(
             monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
         plugins=[MixedPrecision(precision='16-mixed', device="cuda")],

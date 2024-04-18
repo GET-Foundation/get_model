@@ -199,16 +199,17 @@ def run(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     dm = ReferenceRegionDataModule(cfg)
     model.dm = dm
+    wandb = WandbLogger(name=cfg.wandb.run_name,
+                        project=cfg.wandb.project_name)
+    wandb.config.update(cfg)
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator="gpu",
         num_sanity_val_steps=0,
         strategy='ddp_spawn',
         devices=cfg.machine.num_devices,
-        logger=[
-            WandbLogger(name=cfg.wandb.run_name,
-                        project=cfg.wandb.project_name),
-            CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
+        logger=[wandb,
+                CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(
             monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
         plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
