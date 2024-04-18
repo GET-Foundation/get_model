@@ -216,7 +216,7 @@ def run(cfg: DictConfig):
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         log_every_n_steps=4,
-        val_check_interval=0.1,
+        val_check_interval=0.5,
         default_root_dir=cfg.machine.output_dir,
     )
     if cfg.stage == 'fit':
