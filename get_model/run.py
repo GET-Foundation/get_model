@@ -2,6 +2,7 @@ import logging
 
 import lightning as L
 import pandas as pd
+import seaborn as sns
 import torch
 import torch.utils.data
 from hydra.utils import instantiate
@@ -11,9 +12,11 @@ from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
 from lightning.pytorch.tuner import Tuner
 from lightning.pytorch.utilities import grad_norm
+from matplotlib import pyplot as plt
 from omegaconf import MISSING, DictConfig, OmegaConf
 from tqdm import tqdm
 
+import wandb
 from get_model.config.config import *
 from get_model.dataset.collate import (get_perturb_collate_fn,
                                        get_rev_collate_fn)
@@ -24,7 +27,8 @@ from get_model.dataset.zarr_dataset import (InferenceDataset,
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import create_optimizer
-from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys, rename_lit_state_dict
+from get_model.utils import (cosine_scheduler, load_checkpoint, remove_keys,
+                             rename_lit_state_dict)
 
 logging.disable(logging.WARN)
 
@@ -88,6 +92,13 @@ class LitModel(L.LightningModule):
                       sync_dist=self.cfg.machine.num_devices > 1)
         self.log("val_loss", loss, batch_size=self.cfg.machine.batch_size,
                  sync_dist=self.cfg.machine.num_devices > 1)
+        if batch_idx == 0 and self.cfg.log_image:
+            # log one example as scatter plot
+            for key in pred:
+                plt.clf()
+                self.logger.experiment.log({
+                    f"scatter_{key}": wandb.Image(sns.scatterplot(y=pred[key].detach().cpu().numpy().flatten(), x=obs[key].detach().cpu().numpy().flatten()))
+                })
 
     def test_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='test')
@@ -489,8 +500,8 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel, output_key='atpm'):
     spearman = spearmanr(x, y)[0]
     slope = LinearRegression().fit(x.reshape(-1, 1), y).coef_[0]
     # save a scatterplot
-    import seaborn as sns
     import matplotlib.pyplot as plt
+    import seaborn as sns
     sns.scatterplot(x=x, y=y)
     plt.xlabel('Predicted change in PPIF expression')
     plt.ylabel('Observed change in PPIF expression')

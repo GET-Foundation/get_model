@@ -8,6 +8,7 @@ from hydra.utils import instantiate
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
+from matplotlib import pyplot as plt
 from omegaconf import MISSING, DictConfig, OmegaConf
 
 import wandb
@@ -105,13 +106,16 @@ class RegionLitModel(LitModel):
         if batch_idx == 0 and self.cfg.log_image:
             # log one example as scatter plot
             for key in pred:
+                plt.clf()
                 self.logger.experiment.log({
                     f"scatter_{key}": wandb.Image(sns.scatterplot(y=pred[key].detach().cpu().numpy().flatten(), x=obs[key].detach().cpu().numpy().flatten()))
                 })
         # if distributed, set sync_dist=True
         distributed = self.cfg.machine.num_devices > 1
-        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
-        self.log("val_loss", loss, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
+        self.log_dict(
+            metrics, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
+        self.log("val_loss", loss,
+                 batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
 
     def get_model(self):
         model = instantiate(self.cfg.model)
