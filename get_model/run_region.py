@@ -192,7 +192,7 @@ def run(cfg: DictConfig):
     model.dm = dm
     wandb = WandbLogger(name=cfg.wandb.run_name,
                         project=cfg.wandb.project_name)
-    wandb.log_hyperparams(dict(cfg))
+    wandb.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator="gpu",
