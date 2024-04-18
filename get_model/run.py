@@ -66,29 +66,36 @@ class LitModel(L.LightningModule):
         pred, obs = self.model.before_loss(output, batch)
         loss = self.loss(pred, obs)
         # if loss is a dict, rename the keys with the stage prefix
+        distributed = self.cfg.machine.num_devices > 1
         if isinstance(loss, dict):
             loss = {f"{stage}_{key}": value for key,
                     value in loss.items()}
-            self.log_dict(loss, batch_size=self.cfg.machine.batch_size)
+            self.log_dict(
+                loss, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
         loss = self.model.after_loss(loss)
         return loss, pred, obs
 
     def training_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='train')
-        self.log("train_loss", loss, batch_size=self.cfg.machine.batch_size)
+        self.log("train_loss", loss, batch_size=self.cfg.machine.batch_size,
+                 sync_dist=self.cfg.machine.num_devices > 1)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='val')
         metrics = self.metrics(pred, obs)
-        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size)
-        self.log("val_loss", loss, batch_size=self.cfg.machine.batch_size)
+        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size,
+                      sync_dist=self.cfg.machine.num_devices > 1)
+        self.log("val_loss", loss, batch_size=self.cfg.machine.batch_size,
+                 sync_dist=self.cfg.machine.num_devices > 1)
 
     def test_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='test')
         metrics = self.metrics(pred, obs)
-        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size)
-        self.log("test_loss", loss, batch_size=self.cfg.machine.batch_size)
+        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size,
+                      sync_dist=self.cfg.machine.num_devices > 1)
+        self.log("test_loss", loss, batch_size=self.cfg.machine.batch_size,
+                 sync_dist=self.cfg.machine.num_devices > 1)
         return pred, obs
 
     def predict_step(self, batch, batch_idx, *args, **kwargs):

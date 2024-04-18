@@ -108,9 +108,10 @@ class RegionLitModel(LitModel):
                 self.logger.experiment.log({
                     f"scatter_{key}": wandb.Image(sns.scatterplot(y=pred[key].detach().cpu().numpy().flatten(), x=obs[key].detach().cpu().numpy().flatten()))
                 })
-
-        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size)
-        self.log("val_loss", loss, batch_size=self.cfg.machine.batch_size)
+        # if distributed, set sync_dist=True
+        distributed = self.cfg.machine.num_devices > 1
+        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
+        self.log("val_loss", loss, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
 
     def get_model(self):
         model = instantiate(self.cfg.model)
