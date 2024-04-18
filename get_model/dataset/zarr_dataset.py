@@ -1740,6 +1740,7 @@ class ReferenceRegionDataset(Dataset):
                              "Expression_negative"]].values
         tssidx_data = peaks["TSS"].values
         atpm = peaks['aTPM'].values
+        target_data[atpm<0.2,:]=0
         if not self.quantitative_atac:
             region_motif = np.concatenate(
                 [region_motif, np.zeros((region_motif.shape[0], 1))+1], axis=1)
