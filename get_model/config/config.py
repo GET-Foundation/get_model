@@ -154,7 +154,6 @@ class TaskConfig:
 @dataclass
 class Config:
     stage: str = 'fit'
-    dataset_name: str = MISSING
     assembly: str = 'hg38'
     model: Any = MISSING
     machine: MachineConfig = field(default_factory=MachineConfig)

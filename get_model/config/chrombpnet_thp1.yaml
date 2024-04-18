@@ -12,7 +12,6 @@ task:
     - "PPIF"
   mutations: "/home/xf2217/Projects/get_data/prepared_data.tsv"
 
-dataset_name: finetune_thp1
 assembly: "hg38"
 
 training:

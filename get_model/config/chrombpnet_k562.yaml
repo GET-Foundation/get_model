@@ -5,7 +5,6 @@ defaults:
   - machine/pc
   - _self_
 
-dataset_name: finetune_k562
 assembly: "hg38"
 dataset:
   center_expand_target: 2000

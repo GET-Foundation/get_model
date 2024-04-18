@@ -12,7 +12,6 @@ task:
     - "PPIF"
   mutations: "/burg/pmg/users/xf2217/get_revision/PPIF/prepared_data.tsv"
 
-dataset_name: finetune_monocyte
 assembly: "hg38"
 dataset:
   center_expand_target: 1000

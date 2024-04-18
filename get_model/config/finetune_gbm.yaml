@@ -5,7 +5,6 @@ defaults:
   - dataset/gbm@dataset
   - _self_
 
-dataset_name: pretrain_gbm_eval
 assembly: "hg38"
 dataset:
   data_set: "Pretrain.GBM_eval"

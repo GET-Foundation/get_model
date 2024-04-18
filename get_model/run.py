@@ -224,12 +224,12 @@ class LitModel(L.LightningModule):
     #     )
     #     return [optimizer], [lr_scheduler]
 
-    def on_validation_epoch_end(self):
-        if self.cfg.dataset_name != 'bias_thp1':
-            trainer = self.trainer
-            metric = run_ppif_task(trainer, self)
-            step = trainer.global_step
-            self.logger.log_metrics(metric, step)
+    # def on_validation_epoch_end(self):
+    #     if self.cfg.dataset_name != 'bias_thp1':
+    #         trainer = self.trainer
+    #         metric = run_ppif_task(trainer, self)
+    #         step = trainer.global_step
+    #         self.logger.log_metrics(metric, step)
 
     # def on_validation_end(self):
     #     # Perform inference on the mutations
