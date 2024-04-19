@@ -1338,7 +1338,7 @@ class InferenceDataset(PretrainDataset):
 
     def __init__(self, assembly, gencode_obj, gene_list=None, **kwargs):
         super().__init__(**kwargs)
-        self.gencode_obj = gencode_obj[assembly]
+        self.gencode_obj = gencode_obj  # [assembly]
         self.gene_list = gene_list if gene_list is not None else self.gencode_obj.gtf['gene_name'].unique(
         )
         self.tss_chunk_idx = self._generate_tss_chunk_idx()
@@ -1427,17 +1427,6 @@ class InferenceDataset(PretrainDataset):
 
         return self._get_item_for_gene_in_celltype(mutations, peak_inactivation, track_start, track_end, gene_info, info)
 
-    def get_item_for_tss_in_celltype(self, tss_idx, celltype, track_start=None, track_end=None, mutations=None, peak_inactivation=None):
-        data_key = self.datapool.data_keys[0]
-        info = self._get_window_idx_for_tss_and_celltype(
-            data_key, celltype, tss_idx)
-        window_idx = info['window_idx']
-        gene_name = info['gene_name']
-        gene_info = self._get_gene_info_from_window_idx(
-            window_idx[0]).query('gene_name==@gene_name')
-
-        return self._get_item_for_gene_in_celltype(mutations, peak_inactivation, track_start, track_end, gene_info, info)
-
     def _get_item_for_gene_in_celltype(self, mutations, peak_inactivation, track_start, track_end, gene_info, info):
         celltype_id = info['celltype_id']
         chr_name = info['chr_name']
@@ -1482,15 +1471,15 @@ class InferenceDataset(PretrainDataset):
             celltype_id, chr_name, tss_coord)
 
         # get the absolute peak positions
-        gene_df, tss_peak = self._get_absolute_tss_peak(
+        gene_df, tss_peak, all_tss_peak = self._get_absolute_tss_peak(
             gene_info, peaks_in_locus, gene_name)
-
+        relative_all_tss_peak = all_tss_peak - tss_peak
         # get the relative peak positions and track bounds if not provided
         peaks_in_locus, track_start, track_end, tss_peak, peak_start = self._get_relative_coord_and_idx(
             peaks_in_locus, track_start, track_end, gene_name, gene_df, tss_peak)
-
+        all_tss_peak = relative_all_tss_peak + tss_peak
         info.update({'track_start': track_start, 'track_end': track_end,
-                     'tss_peak': tss_peak, 'peak_start': peak_start})
+                     'tss_peak': tss_peak, 'all_tss_peak': all_tss_peak, 'peak_start': peak_start})
         return info, peaks_in_locus, track_start, track_end
 
     def _get_relative_coord_and_idx(self, peaks_in_locus, track_start, track_end, gene_name, gene_df, tss_peak):
@@ -1532,8 +1521,10 @@ class InferenceDataset(PretrainDataset):
         if gene_df.shape[0] == 0:
             raise ValueError(
                 f"Gene {gene_name} not found in the peak information.")
-        tss_peak = gene_df.index.values[0]
-        return gene_df, tss_peak
+        strand = gene_df.Strand.values[0]
+        all_tss_peak = gene_df.index.values
+        tss_peak = all_tss_peak[0] if strand == '+' else all_tss_peak[-1]
+        return gene_df, tss_peak, all_tss_peak
 
     def get_peaks_around_pos(self, celltype_id, chr_name, pos):
         """
@@ -1740,7 +1731,7 @@ class ReferenceRegionDataset(Dataset):
                              "Expression_negative"]].values
         tssidx_data = peaks["TSS"].values
         atpm = peaks['aTPM'].values
-        target_data[atpm<0.2,:]=0
+        target_data[atpm < 0.2, :] = 0
         if not self.quantitative_atac:
             region_motif = np.concatenate(
                 [region_motif, np.zeros((region_motif.shape[0], 1))+1], axis=1)

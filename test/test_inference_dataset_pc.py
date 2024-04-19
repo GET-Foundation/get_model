@@ -43,7 +43,8 @@ dataset_config = {
 # %%
 hg38 = DenseZarrIO('/home/xf2217/Projects/get_data/hg38.zarr')
 gencode = Gencode(**gencode_config)
-dataset = InferenceDataset(gencode_obj=gencode, **dataset_config)
+dataset = InferenceDataset(
+    assembly='hg38', gencode_obj=gencode, return_all_tss=True, **dataset_config)
 # %%
 data = dataset.__getitem__(10535)
 # %%
