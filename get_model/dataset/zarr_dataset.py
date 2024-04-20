@@ -271,6 +271,16 @@ class ZarrDataPool(object):
         self.calculate_metadata()
         logging.info('ZarrDataPool initialized')
 
+    @property
+    def celltype_to_data_key(self):
+        if not hasattr(self, '_celltype_to_data_key'):
+            celltype_to_data_key = {}
+            for data_key, cdz in self.zarr_dict.items():
+                for celltype_id in cdz.ids:
+                    celltype_to_data_key[celltype_id] = data_key
+            self._celltype_to_data_key = celltype_to_data_key
+        return self._celltype_to_data_key
+
     def initialize_datasets(self):
         """
         Initialize the zarr datasets and load peaks and insulation data.
@@ -1343,6 +1353,25 @@ class InferenceDataset(PretrainDataset):
         )
         self.tss_chunk_idx = self._generate_tss_chunk_idx()
 
+    @property
+    def accessible_genes(self):
+        """Find overlap between self.tss_chunk_idx and self.datapool.peaks_dict"""
+        if not hasattr(self, '_accessible_genes'):
+            self._accessible_genes = {key: pr(self.tss_chunk_idx).join(
+                pr(peak)).df['gene_name'].unique() for key, peak in self.datapool.peaks_dict.items()}
+        return self._accessible_genes
+
+    @property
+    def gene_celltype_pair(self):
+        """get pairs of accessible genes and celltype as a list"""
+        if not hasattr(self, '_gene_celltype_pair'):
+            gene_celltype_pair = []
+            for data_key, genes in self.accessible_genes.items():
+                for gene in genes:
+                    gene_celltype_pair.append((data_key, gene))
+            self._gene_celltype_pair = gene_celltype_pair
+        return self._gene_celltype_pair
+
     def _generate_tss_chunk_idx(self):
         """Determine the windows to extract for each gene"""
         if os.path.exists(self.gencode_obj.feather_file.replace('.feather', '_tss_chunk_idx.feather')):
@@ -1409,13 +1438,11 @@ class InferenceDataset(PretrainDataset):
         return gene_df
 
     def __len__(self):
-        return len(self.gene_list) * self.datapool.n_celltypes
+        return len(self.gene_celltype_pair)
 
     def __getitem__(self, idx):
-        celltype_id = idx // len(self.gene_list)
-        gene_idx = idx % len(self.gene_list)
-        gene_name = self.gene_list[gene_idx]
-        data_key, celltype_id = self.datapool._get_celltype(celltype_id)
+        celltype_id, gene_name = self.gene_celltype_pair[idx]
+        data_key = self.datapool.celltype_to_data_key[celltype_id]
         return self.get_item_for_gene_in_celltype(data_key, celltype_id, gene_name, self.mutations, self.peak_inactivation)
 
     def get_item_for_gene_in_celltype(self, data_key, celltype_id, gene_name, track_start=None, track_end=None, mutations=None, peak_inactivation=None):
@@ -1477,7 +1504,7 @@ class InferenceDataset(PretrainDataset):
         # get the relative peak positions and track bounds if not provided
         peaks_in_locus, track_start, track_end, tss_peak, peak_start = self._get_relative_coord_and_idx(
             peaks_in_locus, track_start, track_end, gene_name, gene_df, tss_peak)
-        all_tss_peak = relative_all_tss_peak + tss_peak
+        all_tss_peak = np.unique(relative_all_tss_peak + tss_peak)
         info.update({'track_start': track_start, 'track_end': track_end,
                      'tss_peak': tss_peak, 'all_tss_peak': all_tss_peak, 'peak_start': peak_start})
         return info, peaks_in_locus, track_start, track_end
@@ -1488,8 +1515,8 @@ class InferenceDataset(PretrainDataset):
         """
         if track_start is None or track_end is None:
             # Get the peak start and end positions based on n_peaks_upper_bound
-            peak_start, peak_end = tss_peak - self.n_peaks_upper_bound // 2, tss_peak - \
-                self.n_peaks_upper_bound // 2 + self.n_peaks_upper_bound
+            peak_start = max(0, tss_peak - self.n_peaks_upper_bound // 2)
+            peak_end = peak_start + self.n_peaks_upper_bound
             tss_peak = tss_peak - peak_start
             track_start = peaks_in_locus.iloc[peak_start].Start-self.padding
             track_end = peaks_in_locus.iloc[peak_end-1].End+self.padding
@@ -1520,7 +1547,8 @@ class InferenceDataset(PretrainDataset):
         gene_df = df.query('gene_name==@gene_name')
         if gene_df.shape[0] == 0:
             raise ValueError(
-                f"Gene {gene_name} not found in the peak information.")
+                f"Gene {gene_name} not found in the peak information, removing and skipping it.")
+
         strand = gene_df.Strand.values[0]
         all_tss_peak = gene_df.index.values
         tss_peak = all_tss_peak[0] if strand == '+' else all_tss_peak[-1]
@@ -1712,9 +1740,10 @@ class ReferenceRegionDataset(Dataset):
 
     @property
     def data_dict(self):
-        return {data_key: self.reference_region_motif.map_peaks_to_motifs(
-            peaks.query('Count>@self.count_filter')
-        ) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
+        if not hasattr(self, '_data_dict'):
+            self._data_dict = {data_key: self.reference_region_motif.map_peaks_to_motifs(peaks.query(
+                'Count>@self.count_filter')) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
+        return self._data_dict
 
     def extract_data_list(self, region_motif, peaks):
         region_motif_list = []
@@ -1821,6 +1850,48 @@ class ReferenceRegionDataset(Dataset):
                 'mask': mask,
                 'exp_label': target.toarray().astype(np.float32),
                 'hic_matrix': hic_matrix}
+
+
+class InferenceReferenceRegionDataset(Dataset):
+    def __init__(self, reference_region_motif: ReferenceRegionMotif,
+                 inference_dataset: InferenceDataset,
+                 transform=None,
+                 quantitative_atac: bool = True,
+                 sampling_step: int = 50,
+                 ) -> None:
+        super().__init__()
+        self.reference_region_dataset = ReferenceRegionDataset(
+            reference_region_motif, inference_dataset, transform, quantitative_atac, sampling_step)
+        self.inference_dataset = inference_dataset
+
+    @property
+    def data_dict(self):
+        return self.reference_region_dataset.data_dict
+
+    def __len__(self):
+        return len(self.inference_dataset)
+
+    def __getitem__(self, index):
+        sample = self.inference_dataset[index]
+        peak_start = sample['metadata']['peak_start']
+        celltype_id = sample['metadata']['celltype_id']
+        peak_end = peak_start + self.reference_region_dataset.num_region_per_sample
+        region_motif, peaks = self.data_dict[celltype_id]
+        region_motif = region_motif[peak_start:peak_end]
+        target = peaks[["Expression_positive",
+                        "Expression_negative"]].values[peak_start:peak_end]
+        tssidx = peaks["TSS"].values[peak_start:peak_end]
+        hic_matrix = sample['hic_matrix']
+        mask = tssidx
+        if self.reference_region_dataset.transform is not None:
+            region_motif, mask, target = self.reference_region_dataset.transform(
+                region_motif, tssidx, target)
+        return {'region_motif': region_motif,
+                'mask': mask,
+                'exp_label': target,
+                'hic_matrix': hic_matrix,
+                'tss_peak': sample['metadata']['tss_peak'],
+                'all_tss_peak': sample['metadata']['all_tss_peak']}
 
 
 class RegionDataset(Dataset):
