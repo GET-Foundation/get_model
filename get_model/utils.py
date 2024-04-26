@@ -386,8 +386,8 @@ def rename_lit_state_dict(state_dict):
     for key in state_dict.keys():
         new_key = key.replace("model.", "")
         new_state_dict[new_key] = state_dict[key]
-        if "cls" in new_key:
-            del new_state_dict[new_key]
+        # if "cls" in new_key:
+        # del new_state_dict[new_key]
     return new_state_dict
 
 
