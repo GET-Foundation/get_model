@@ -71,12 +71,13 @@ class LitModel(L.LightningModule):
         loss = self.loss(pred, obs)
         # if loss is a dict, rename the keys with the stage prefix
         distributed = self.cfg.machine.num_devices > 1
-        if isinstance(loss, dict):
-            loss = {f"{stage}_{key}": value for key,
-                    value in loss.items()}
-            self.log_dict(
-                loss, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
-        loss = self.model.after_loss(loss)
+        if stage != 'predict':
+            if isinstance(loss, dict):
+                loss = {f"{stage}_{key}": value for key,
+                        value in loss.items()}
+                self.log_dict(
+                    loss, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
+            loss = self.model.after_loss(loss)
         return loss, pred, obs
 
     def training_step(self, batch, batch_idx):
@@ -306,17 +307,17 @@ class GETDataModule(L.LightningDataModule):
     def build_inference_dataset(self, sequence_obj, gene_list=None):
         config, sequence_obj, gencode_obj = self._shared_build_dataset(
             is_train=False, sequence_obj=sequence_obj)
-        if self.mutations is not None:
+        if hasattr(self, 'mutations') and self.mutations is not None:
             # remove from config
             config.pop('mutations')
         # no need to leave out chromosomes or celltypes in inference
-        config['leave_out_chromosomes'] = None
+        # config['leave_out_chromosomes'] = ""
         config['random_shift_peak'] = None
         dataset = InferenceDataset(
             is_train=False,
             assembly=self.cfg.assembly,
             gencode_obj=gencode_obj,
-            gene_list=gene_list,
+            gene_list=self.cfg.task.gene_list if gene_list is None else gene_list,
             mutations=self.mutations,
             sequence_obj=sequence_obj,
             **config
@@ -346,7 +347,8 @@ class GETDataModule(L.LightningDataModule):
             if self.cfg.task.test_mode == 'predict':
                 self.dataset_predict = self.build_training_dataset(
                     sequence_obj=sequence_obj, is_train=False)
-            elif self.cfg.task.test_mode == 'interpret':
+            elif self.cfg.task.test_mode == 'interpret' or self.cfg.task.test_mode == 'inference':
+                self.mutations = None,
                 self.dataset_predict = self.build_inference_dataset(
                     sequence_obj=sequence_obj)
             elif 'perturb' in self.cfg.task.test_mode:
@@ -406,7 +408,7 @@ def run(cfg: DictConfig):
     dm = GETDataModule(cfg)
     model.dm = dm
     wandb_logger = WandbLogger(name=cfg.wandb.run_name,
-                        project=cfg.wandb.project_name)
+                               project=cfg.wandb.project_name)
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
