@@ -26,14 +26,16 @@ logging.basicConfig(level=logging.INFO,
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
-def _chromosome_splitter(all_chromosomes: list, leave_out_chromosomes: str, is_train=True):
+def _chromosome_splitter(all_chromosomes: list, leave_out_chromosomes: str | None, is_train=True):
     input_chromosomes = all_chromosomes.copy()
-    if ',' in leave_out_chromosomes:
+    if leave_out_chromosomes is None:
+        leave_out_chromosomes = []
+    elif ',' in leave_out_chromosomes:
         leave_out_chromosomes = leave_out_chromosomes.split(",")
     else:
         leave_out_chromosomes = [leave_out_chromosomes]
 
-    if is_train or leave_out_chromosomes == [""]:
+    if is_train or leave_out_chromosomes == [""] or leave_out_chromosomes == []:
         input_chromosomes = [
             chrom for chrom in input_chromosomes if chrom not in leave_out_chromosomes]
     else:
@@ -444,7 +446,7 @@ class ZarrDataPool(object):
         """Return a list of peak names for a celltype, use glob peaks*"""
         return [key for key in self.zarr_dict[data_key].dataset[celltype_id].keys() if 'peaks' in key]
 
-    def _load_peaks(self, peak_name=None):
+    def _load_peaks(self, peak_name=None, count_filter=1):
         """
         Load peaks data which is a dictionary of pandas dataframe feather
         """
@@ -491,7 +493,8 @@ class ZarrDataPool(object):
                 upper_count_threshold = peak['Count'].quantile(0.9999)
                 peak = peak.query(
                     'Count>@lower_count_threshold and Count<@upper_count_threshold').reset_index(drop=True)
-                peaks_dict[celltype_id] = peak
+                peaks_dict[celltype_id] = pr(peak.query(
+                    'Count>@count_filter').reset_index(drop=True)).sort().df
 
         return peaks_dict
 
@@ -1348,7 +1351,12 @@ class InferenceDataset(PretrainDataset):
 
     def __init__(self, assembly, gencode_obj, gene_list=None, **kwargs):
         super().__init__(**kwargs)
-        self.gencode_obj = gencode_obj  # [assembly]
+        self.gencode_obj = gencode_obj[assembly]
+        if isinstance(gene_list, str):
+            if ',' in gene_list:
+                gene_list = gene_list.split(',')
+            elif os.path.exists(gene_list):
+                gene_list = np.loadtxt(gene_list, dtype=str)
         self.gene_list = gene_list if gene_list is not None else self.gencode_obj.gtf['gene_name'].unique(
         )
         self.tss_chunk_idx = self._generate_tss_chunk_idx()
@@ -1357,8 +1365,12 @@ class InferenceDataset(PretrainDataset):
     def accessible_genes(self):
         """Find overlap between self.tss_chunk_idx and self.datapool.peaks_dict"""
         if not hasattr(self, '_accessible_genes'):
-            self._accessible_genes = {key: pr(self.tss_chunk_idx).join(
+            _accessible_genes = {key: pr(self.tss_chunk_idx).join(
                 pr(peak)).df['gene_name'].unique() for key, peak in self.datapool.peaks_dict.items()}
+            if self.gene_list is not None:
+                _accessible_genes = {key: np.intersect1d(
+                    genes, self.gene_list) for key, genes in _accessible_genes.items()}
+            self._accessible_genes = _accessible_genes
         return self._accessible_genes
 
     @property
@@ -1374,10 +1386,10 @@ class InferenceDataset(PretrainDataset):
 
     def _generate_tss_chunk_idx(self):
         """Determine the windows to extract for each gene"""
-        if os.path.exists(self.gencode_obj.feather_file.replace('.feather', '_tss_chunk_idx.feather')):
-            self.tss_chunk_idx = pd.read_feather(
-                self.gencode_obj.feather_file.replace('.feather', '_tss_chunk_idx.feather'))
-            return self.tss_chunk_idx
+        # if os.path.exists(self.gencode_obj.feather_file.replace('.feather', '_tss_chunk_idx.feather')):
+        #     self.tss_chunk_idx = pd.read_feather(
+        #         self.gencode_obj.feather_file.replace('.feather', '_tss_chunk_idx.feather'))
+        #     return self.tss_chunk_idx
 
         self.tss_chunk_idx = self.gencode_obj.gtf.query(
             'gene_name in @self.gene_list').copy()
@@ -1432,7 +1444,8 @@ class InferenceDataset(PretrainDataset):
             'strand': strand}
 
     def _get_gene_info_from_window_idx(self, window_idx):
-        chunk_idx = window_idx % self.datapool.genome_chunk_length
+        # TODO: genome_chunk_length is affected by leave out chromosome by tss_chunk_idx is not
+        chunk_idx = window_idx % self.tss_chunk_idx.chunk_idx.max()
         gene_df = self.tss_chunk_idx.query(
             'chunk_idx==@chunk_idx or chunk_idx==@chunk_idx+1')
         return gene_df
@@ -1451,7 +1464,6 @@ class InferenceDataset(PretrainDataset):
         window_idx = info['window_idx'][0]
         gene_info = self._get_gene_info_from_window_idx(
             window_idx).query('gene_name==@gene_name')
-
         return self._get_item_for_gene_in_celltype(mutations, peak_inactivation, track_start, track_end, gene_info, info)
 
     def _get_item_for_gene_in_celltype(self, mutations, peak_inactivation, track_start, track_end, gene_info, info):
@@ -1502,11 +1514,11 @@ class InferenceDataset(PretrainDataset):
             gene_info, peaks_in_locus, gene_name)
         relative_all_tss_peak = all_tss_peak - tss_peak
         # get the relative peak positions and track bounds if not provided
-        peaks_in_locus, track_start, track_end, tss_peak, peak_start = self._get_relative_coord_and_idx(
+        peaks_in_locus, track_start, track_end, tss_peak, peak_start, original_peak_start = self._get_relative_coord_and_idx(
             peaks_in_locus, track_start, track_end, gene_name, gene_df, tss_peak)
         all_tss_peak = np.unique(relative_all_tss_peak + tss_peak)
         info.update({'track_start': track_start, 'track_end': track_end,
-                     'tss_peak': tss_peak, 'all_tss_peak': all_tss_peak, 'peak_start': peak_start})
+                     'tss_peak': tss_peak, 'all_tss_peak': all_tss_peak, 'peak_start': peak_start, 'original_peak_start': original_peak_start})
         return info, peaks_in_locus, track_start, track_end
 
     def _get_relative_coord_and_idx(self, peaks_in_locus, track_start, track_end, gene_name, gene_df, tss_peak):
@@ -1517,9 +1529,14 @@ class InferenceDataset(PretrainDataset):
             # Get the peak start and end positions based on n_peaks_upper_bound
             peak_start = max(0, tss_peak - self.n_peaks_upper_bound // 2)
             peak_end = peak_start + self.n_peaks_upper_bound
+            if peak_end > peaks_in_locus.shape[0]:
+                peak_end = peaks_in_locus.shape[0]
+                peak_start = max(0, peak_end - self.n_peaks_upper_bound)
             tss_peak = tss_peak - peak_start
+            print(peak_start, peak_end, peaks_in_locus.shape[0])
             track_start = peaks_in_locus.iloc[peak_start].Start-self.padding
             track_end = peaks_in_locus.iloc[peak_end-1].End+self.padding
+            original_peak_start = peaks_in_locus.iloc[peak_start].original_peak_index
         else:
             peaks_in_locus_subset = peaks_in_locus.query(
                 'Chromosome==@chr_name').query('Start>=@track_start & End<=@track_end')
@@ -1532,7 +1549,8 @@ class InferenceDataset(PretrainDataset):
                 pr(gene_df)).df['index'].values
             tss_peak = tss_peak - peak_start
             peaks_in_locus = peaks_in_locus_subset
-        return peaks_in_locus, track_start, track_end, tss_peak, peak_start
+            original_peak_start = peaks_in_locus.iloc[peak_start].original_peak_index
+        return peaks_in_locus, track_start, track_end, tss_peak, peak_start, original_peak_start
 
     def _get_absolute_tss_peak(self, gene_info, peaks_in_locus, gene_name):
         """
@@ -1542,9 +1560,13 @@ class InferenceDataset(PretrainDataset):
                               'End',  'gene_name', 'Strand', 'chunk_idx']
         if self.additional_peak_columns is not None:
             columns_to_include += self.additional_peak_columns
-        df = pr(peaks_in_locus.copy().reset_index()).join(pr(gene_info.copy().query('gene_name==@gene_name')[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates(
+        gene_info_copy = gene_info.copy().query('gene_name==@gene_name')
+        if gene_info_copy.shape[0] == 0:
+            raise ValueError(
+                f"Gene {gene_name} not found in the gene information, removing and skipping it.")
+        gene_df = pr(peaks_in_locus.copy().reset_index()).join(pr(gene_info_copy[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates(
         )).extend(self.PROMOTER_EXTEND), suffix="_gene", how='left', apply_strand_suffix=False).df[columns_to_include].set_index('index')
-        gene_df = df.query('gene_name==@gene_name')
+        # gene_df = df.query('gene_name==@gene_name')
         if gene_df.shape[0] == 0:
             raise ValueError(
                 f"Gene {gene_name} not found in the peak information, removing and skipping it.")
@@ -1559,7 +1581,7 @@ class InferenceDataset(PretrainDataset):
         Get the peaks around a specific position with a maximum distance of MAX_CONTEXT_DISTANCE.
         """
         return self.datapool._query_peaks(
-            celltype_id, chr_name, pos - self.MAX_CONTEXT_DISTANCE, pos + self.MAX_CONTEXT_DISTANCE).reset_index(drop=True).reset_index()
+            celltype_id, chr_name, pos - self.MAX_CONTEXT_DISTANCE, pos + self.MAX_CONTEXT_DISTANCE).reset_index().rename(columns={'index': 'original_peak_index'}).reset_index()
 
 
 class PerturbationInferenceDataset(Dataset):
@@ -1638,6 +1660,13 @@ class ReferenceRegionMotif(object):
         self.refpeak_names = self.refdataset['peak_names'][:]
         self.count_filter = cfg.count_filter
         self.motif_scaler = cfg.motif_scaler
+        # reorder data to match sorted peak order
+        print(self.peaks['index'].values)
+        self.data = self.data[self.peaks['index'].values]
+        self.refdata = self.refdata[self.refpeaks['index'].values]
+        # drop 'index' column in peaks
+        self._peaks = self._peaks.drop('index', axis=1).reset_index()
+        self._refpeaks = self._refpeaks.drop('index', axis=1).reset_index()
 
     @property
     def num_peaks(self):
@@ -1649,29 +1678,35 @@ class ReferenceRegionMotif(object):
 
     @property
     def peaks(self):
-        df = pd.DataFrame(self.peak_names[:])
-        # split chr:start-end into chr, start, end
-        df.columns = ['peak_names']
-        df['Chromosome'] = df['peak_names'].apply(lambda x: x.split(':')[0])
-        df['Start'] = df['peak_names'].apply(
-            lambda x: x.split(':')[1].split('-')[0])
-        df['End'] = df['peak_names'].apply(
-            lambda x: x.split(':')[1].split('-')[1])
-        df = pr(df.reset_index()).sort().df
-        return df
+        if not hasattr(self, '_peaks'):
+            df = pd.DataFrame(self.peak_names[:])
+            # split chr:start-end into chr, start, end
+            df.columns = ['peak_names']
+            df['Chromosome'] = df['peak_names'].apply(
+                lambda x: x.split(':')[0])
+            df['Start'] = df['peak_names'].apply(
+                lambda x: x.split(':')[1].split('-')[0])
+            df['End'] = df['peak_names'].apply(
+                lambda x: x.split(':')[1].split('-')[1])
+            df = pr(df.reset_index()).sort().df
+            self._peaks = df
+        return self._peaks
 
     @property
     def refpeaks(self):
-        df = pd.DataFrame(self.refpeak_names[:])
-        # split chr:start-end into chr, start, end
-        df.columns = ['peak_names']
-        df['Chromosome'] = df['peak_names'].apply(lambda x: x.split(':')[0])
-        df['Start'] = df['peak_names'].apply(
-            lambda x: x.split(':')[1].split('-')[0])
-        df['End'] = df['peak_names'].apply(
-            lambda x: x.split(':')[1].split('-')[1])
-        df = pr(df.reset_index()).sort().df
-        return df
+        if not hasattr(self, '_refpeaks'):
+            df = pd.DataFrame(self.refpeak_names[:])
+            # split chr:start-end into chr, start, end
+            df.columns = ['peak_names']
+            df['Chromosome'] = df['peak_names'].apply(
+                lambda x: x.split(':')[0])
+            df['Start'] = df['peak_names'].apply(
+                lambda x: x.split(':')[1].split('-')[0])
+            df['End'] = df['peak_names'].apply(
+                lambda x: x.split(':')[1].split('-')[1])
+            df = pr(df.reset_index()).sort().df
+            self._refpeaks = df
+        return self._refpeaks
 
     @property
     def peak_names_to_index(self):
@@ -1692,12 +1727,16 @@ class ReferenceRegionMotif(object):
         Args:
             peak_names: List of peak names.
         """
+
         if isinstance(peaks, list) or isinstance(peaks, np.ndarray):
             peaks = self.peaks.query('peak_names.isin(@peaks)')
         elif isinstance(peaks, pd.DataFrame) and 'Chromosome' in peaks.columns and 'Start' in peaks.columns and 'End' in peaks.columns:
+            if 'index' not in peaks.columns:
+                peaks = peaks.reset_index()
             refpeaks = pr(self.refpeaks).join(
                 pr(peaks).sort(), suffix='_input').df
-            peaks = pr(self.peaks).join(pr(peaks).sort(), suffix='_input').df
+            peaks = pr(self.peaks).join(pr(peaks).sort(), suffix='_input').df.query(
+                'Start==Start_input & End==End_input').reset_index(drop=True)
 
         print(peaks)
         peak_indices = peaks['index'].values
@@ -1736,13 +1775,14 @@ class ReferenceRegionDataset(Dataset):
         self.leave_out_chromosomes = zarr_dataset.leave_out_chromosomes
 
         self.count_filter = reference_region_motif.count_filter
+        self.peak_names = reference_region_motif.peak_names
         self.setup()
 
     @property
     def data_dict(self):
         if not hasattr(self, '_data_dict'):
-            self._data_dict = {data_key: self.reference_region_motif.map_peaks_to_motifs(peaks.query(
-                'Count>@self.count_filter')) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
+            self._data_dict = {data_key: self.reference_region_motif.map_peaks_to_motifs(
+                peaks) for data_key, peaks in self.zarr_dataset.datapool._load_peaks(self.zarr_dataset.datapool.peak_name, self.count_filter).items()}
         return self._data_dict
 
     def extract_data_list(self, region_motif, peaks):
@@ -1760,7 +1800,7 @@ class ReferenceRegionDataset(Dataset):
                              "Expression_negative"]].values
         tssidx_data = peaks["TSS"].values
         atpm = peaks['aTPM'].values
-        target_data[atpm < 0.2, :] = 0
+        target_data[atpm < 0.05, :] = 0
         if not self.quantitative_atac:
             region_motif = np.concatenate(
                 [region_motif, np.zeros((region_motif.shape[0], 1))+1], axis=1)
@@ -1873,23 +1913,34 @@ class InferenceReferenceRegionDataset(Dataset):
 
     def __getitem__(self, index):
         sample = self.inference_dataset[index]
-        peak_start = sample['metadata']['peak_start']
+        peak_start = sample['metadata']['original_peak_start']
         celltype_id = sample['metadata']['celltype_id']
+        strand = sample['metadata']['strand']
+        gene_name = sample['metadata']['gene_name']
         peak_end = peak_start + self.reference_region_dataset.num_region_per_sample
         region_motif, peaks = self.data_dict[celltype_id]
         region_motif = region_motif[peak_start:peak_end]
-        target = peaks[["Expression_positive",
-                        "Expression_negative"]].values[peak_start:peak_end]
-        tssidx = peaks["TSS"].values[peak_start:peak_end]
+        atpm = peaks['aTPM'].values[peak_start:peak_end]
+        # append binary or quantitative atac signal
+        if not self.reference_region_dataset.quantitative_atac:
+            region_motif = np.concatenate(
+                [region_motif, np.zeros((region_motif.shape[0], 1))+1], axis=1)
+        else:
+            region_motif = np.concatenate(
+                [region_motif, atpm.reshape(-1, 1)/atpm.reshape(-1, 1).max()], axis=1)
+        target = sample['additional_peak_features'][:, 0:2]
+        tssidx = sample['additional_peak_features'][:, 3]
         hic_matrix = sample['hic_matrix']
         mask = tssidx
         if self.reference_region_dataset.transform is not None:
             region_motif, mask, target = self.reference_region_dataset.transform(
                 region_motif, tssidx, target)
-        return {'region_motif': region_motif,
+        return {'region_motif': region_motif.astype(np.float32),
                 'mask': mask,
-                'exp_label': target,
+                'exp_label': target.astype(np.float32),
                 'hic_matrix': hic_matrix,
+                'strand': strand,
+                'gene_name': gene_name,
                 'tss_peak': sample['metadata']['tss_peak'],
                 'all_tss_peak': sample['metadata']['all_tss_peak']}
 
@@ -2195,7 +2246,7 @@ Sampling step: {self.sampling_step}
                 tssidx_data = np.load(paths_dict["tssidx_npy"])
                 print(f"Target shape: {target_data.shape}")
                 atac_cutoff = 1 - \
-                    (peak_data[:, 282] >= 0.2).toarray().flatten()
+                    (peak_data[:, 282] >= 0.05).toarray().flatten()
                 target_data[atac_cutoff, :] = 0
 
             if quantitative_atac is False:
