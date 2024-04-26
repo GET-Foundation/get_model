@@ -2,7 +2,7 @@ zarr_dirs:
   - "joung_tfatlas_dense.zarr"
 keep_celltypes: "0.joung_tfatlas.shareseq.8192"
 leave_out_celltypes: null
-leave_out_chromosomes: "chr10,chr11"
+leave_out_chromosomes: null
 peak_name: "fetal_tfatlas_peaks_open_exp"
 dataset_size: 40960
 eval_dataset_size: 512

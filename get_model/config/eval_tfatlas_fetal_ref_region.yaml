@@ -16,7 +16,7 @@ training:
   use_fp16: false
 
 dataset:
-  quantitative_atac: true
+  quantitative_atac: false
   sampling_step: 100
   mask_ratio: 0
 
@@ -33,11 +33,11 @@ wandb:
   run_name: "TFAtlas"
 
 finetune:
-  pretrain_checkpoint: true
-  strict: false
-  checkpoint: "/burg/pmg/users/xf2217/get_checkpoints/output_e800_r900_mask0.5_adult_watac/checkpoint-799.pth"
+  pretrain_checkpoint: false
+  strict: true
+  checkpoint: "/home/xf2217/Projects/get_revision/TFAtlas_fetal_compare/best0.05.ckpt"
   model_prefix: "model."
   patterns_to_freeze: []
 
 eval_tss: true
-log_image: true
+log_image: false
