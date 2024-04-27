@@ -1378,9 +1378,19 @@ class InferenceDataset(PretrainDataset):
         """get pairs of accessible genes and celltype as a list"""
         if not hasattr(self, '_gene_celltype_pair'):
             gene_celltype_pair = []
-            for data_key, genes in self.accessible_genes.items():
+            for celltype_id, genes in self.accessible_genes.items():
                 for gene in genes:
-                    gene_celltype_pair.append((data_key, gene))
+                    # validate gene in celltype
+                    data_key = self.datapool.celltype_to_data_key[celltype_id]
+                    info = self._get_window_idx_for_gene_and_celltype(
+                        data_key, celltype_id, gene)
+                    window_idx = info['window_idx'][0]
+                    gene_info = self._get_gene_info_from_window_idx(
+                        window_idx).query('gene_name==@gene')
+                    if gene_info.shape[0] == 0:
+                        continue
+                    gene_celltype_pair.append((celltype_id, gene))
+
             self._gene_celltype_pair = gene_celltype_pair
         return self._gene_celltype_pair
 
