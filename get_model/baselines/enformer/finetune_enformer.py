@@ -14,8 +14,10 @@ from timm.data.mixup import Mixup
 from timm.models import create_model
 from timm.utils import ModelEma
 import wandb
+import pandas as pd 
+from scipy.sparse import load_npz
 
-from enformer_pytorch import from_pretrained, Enformer, GenomeIntervalDataset
+from enformer_pytorch import from_pretrained
 from enformer_pytorch.finetune import HeadAdapterWrapper
 from enformer_pytorch.data import FastaInterval, identity
 
@@ -32,7 +34,7 @@ from get_model.optim import (
 
 torch.autograd.set_detect_anomaly(True)
 
-hg38_path = "/pmglocal/alb2281/get_data/get_resources/hg38.ml.fa"
+hg38_path = "/pmglocal/alb2281/get/hg38.ml.fa"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class GenomeIntervalFinetuneDataset(Dataset):
@@ -77,14 +79,14 @@ class GenomeIntervalFinetuneDataset(Dataset):
         return self.fasta(chr_name, start, end, return_augs = self.return_augs), interval[3]
 
 
-def split_data_by_chr(base_dir, leaveout_chr):    
-    bed_df = pd.read_csv(atac_data, index_col="index")
-    labels = np.array(load_npz(labels_path).todense()[:,-1].reshape(-1))[0]
+def split_data_by_chr(args):    
+    bed_df = pd.read_csv(args.atac_data, index_col="index")
+    labels = np.array(load_npz(args.labels_path).todense()[:,-1].reshape(-1))[0]
     bed_df["target"] = labels
-    train_df = bed_df[bed_df["Chromosome"] != leaveout_chr]
-    val_df = bed_df[bed_df["Chromosome"] == leaveout_chr]
-    train_path = f"{base_dir}/train.bed"
-    val_path = f"{base_dir}/val.bed"
+    train_df = bed_df[bed_df["Chromosome"] != args.leave_out_chromosome]
+    val_df = bed_df[bed_df["Chromosome"] == args.leave_out_chromosome]
+    train_path = f"{args.base_dir}/train.bed"
+    val_path = f"{args.base_dir}/val.bed"
     train_df.to_csv(train_path, sep="\t", header=False, index=False)
     val_df.to_csv(val_path, sep="\t", header=False, index=False)
     return train_path, val_path
@@ -95,12 +97,12 @@ def train_enformer(args):
 
     print(args)
 
-    if utils.is_main_process(): # Log metrics only on main process
-        wandb.login()
-        run = wandb.init(
-            project=args.wandb_project_name,
-            name=args.wandb_run_name,
-        )
+    # if utils.is_main_process(): # Log metrics only on main process
+        # wandb.login()
+        # run = wandb.init(
+        #     project=args.wandb_project_name,
+        #     name=args.wandb_run_name,
+        # )
 
     device = torch.device(args.device)
 
@@ -110,11 +112,12 @@ def train_enformer(args):
     np.random.seed(seed)
     cudnn.benchmark = True
 
-    base_dir = f"/pmglocal/alb2281/get_data/k562_count_10/splits/{args.leave_out_chromosomes}"
+    base_dir = f"/pmglocal/alb2281/get_data/k562_count_10/splits/leave_out_{args.leave_out_chromosome}"
+    args.base_dir = base_dir
 
-    if not os.path.exists(base_dir):
-        os.makedirs(base_dir)
-        train_path, val_path = split_data_by_chr(base_dir, args.leave_out_chromosomes)
+    if not os.path.exists(f"{base_dir}/train.bed"):
+        os.makedirs(base_dir, exist_ok=True)
+        train_path, val_path = split_data_by_chr(args)
     else:
         train_path = f"{base_dir}/train.bed"
         val_path = f"{base_dir}/val.bed"
@@ -376,8 +379,8 @@ def train_enformer(args):
                 "n_parameters": n_parameters,
             }
         
-        if utils.is_main_process():
-            wandb.log(log_stats)
+        # if utils.is_main_process():
+            # wandb.log(log_stats)
         
         if args.output_dir and utils.is_main_process():
             if log_writer is not None:
@@ -569,6 +572,6 @@ if __name__=="__main__":
     parser.add_argument("--target_type", default="Log", type=str)
     parser.add_argument("--target_thresh", default=32, type=int)
 
-    parser.add_argument("--leave_out_chromosomes", default="chr4", type=str)
+    parser.add_argument("--leave_out_chromosome", default="chr4", type=str)
     args = parser.parse_args()
     train_enformer(args)
