@@ -2,7 +2,7 @@ zarr_dirs:
   - "htan_gbm_dense.zarr"
 leave_out_celltypes: null
 leave_out_chromosomes: "chr10,chr11"
-peak_name: "peaks_p0.01"
+peak_name: "fetal_gbm_peaks_open_exp"
 dataset_size: 40960
 eval_dataset_size: 512
 additional_peak_columns: ['Expression_positive', 'Expression_negative', 'aTPM', 'TSS']
@@ -21,7 +21,7 @@ padding: 0
 mask_ratio: 0
 insulation_subsample_ratio: 1
 reference_region_motif:
-#  data: 'fetal_tfatlas_peaks_motif.hg38.zarr'
-#  refdata: 'fetal_union_peak_motif_v1.hg38.zarr'
+  data: 'fetal_gbm_peak_motif_v1.hg38.zarr'
+  refdata: 'fetal_union_peak_motif_v1.hg38.zarr'
   count_filter: 0
   motif_scaler: 1
