@@ -2178,13 +2178,16 @@ Sampling step: {self.sampling_step}
         if not os.path.exists(celltype_annot):
             celltype_annot = os.path.join(
                 data_path, data_type, f"{file_id}.csv.gz")
-
+        exp_feather = os.path.join(
+            data_path, data_type, f"{file_id}.exp.feather"
+        )
         return {
             "file_id": file_id,
             "peak_npz": peak_npz_path,
             "target_npy": target_npy_path,
             "tssidx_npy": tssidx_npy_path,
             "celltype_annot_csv": celltype_annot,
+            "exp_feather": exp_feather,
         }
 
     def _make_dataset(
@@ -2301,3 +2304,251 @@ Sampling step: {self.sampling_step}
                             tssidx_list.append(tssidx_i)
 
         return peak_list, target_list, tssidx_list
+
+
+class InferenceRegionDataset(RegionDataset):
+    """Same as RegionDataset but load the exp.feather to get gene index in peaks
+
+    Args:
+        root (str): Root directory path.
+        metadata_path (str): Path to the metadata file.
+        num_region_per_sample (int): Number of regions for each sample.
+        transform (Optional[Callable], optional): Transform function. Defaults to None.
+        data_type (str, optional): Data type. Defaults to "fetal".
+        is_train (bool, optional): Specify if the dataset is for training. Defaults to True.
+        leave_out_celltypes (str, optional): Comma-separated string of cell types to leave out. Defaults to "".
+        leave_out_chromosomes (str, optional): Comma-separated string of chromosomes to leave out. Defaults to "".
+        quantitative_atac (bool, optional): Specify if quantitative ATAC data should be used. Defaults to False.
+        sampling_step (int, optional): Sampling step. Defaults to 100.
+        mask_ratio (float, optional): Mask ratio. Defaults to 0.0.
+        gene_list ([type], optional): Gene list. Defaults to None.
+        gencode_obj ([type], optional): Gencode object. Defaults to None.
+    """
+
+    def __init__(
+        self,
+        root: str,
+        metadata_path: str,
+        num_region_per_sample: int,
+        transform: Optional[Callable] = None,
+        data_type: str = "fetal",
+        is_train: bool = True,
+        leave_out_celltypes: str = "",
+        leave_out_chromosomes: str = "",
+        quantitative_atac: bool = False,
+        sampling_step: int = 100,
+        mask_ratio: float = 0.0,
+        gene_list=None,
+        gencode_obj=None,
+
+    ) -> None:
+        self.root = root
+        self.transform = transform
+        self.is_train = is_train
+        self.leave_out_celltypes = leave_out_celltypes
+        self.leave_out_chromosomes = leave_out_chromosomes
+        self.quantitative_atac = quantitative_atac
+        self.sampling_step = sampling_step
+        self.num_region_per_sample = num_region_per_sample
+        self.mask_ratio = mask_ratio
+        metadata_path = os.path.join(
+            self.root, metadata_path
+        )
+        if isinstance(gene_list, str):
+            if ',' in gene_list:
+                gene_list = gene_list.split(',')
+            elif os.path.exists(gene_list):
+                gene_list = np.loadtxt(gene_list, dtype=str)
+        self.gene_list = gene_list if gene_list is not None else []
+        self.gencode_obj = gencode_obj
+        peaks, targets, tssidx, gene_names, strands, tss_peaks = self._make_dataset(
+            False,
+            data_type,
+            self.root,
+            metadata_path,
+            num_region_per_sample,
+            leave_out_celltypes,
+            leave_out_chromosomes,
+            quantitative_atac,
+            is_train,
+            sampling_step,
+        )
+
+        if len(peaks) == 0:
+            raise RuntimeError(f"Found 0 files in subfolders of: {self.root}")
+
+        self.peaks = peaks
+        self.targets = targets
+        self.tssidxs = np.array(tssidx)
+        self.gene_names = gene_names
+        self.strands = strands
+        self.tss_peaks = tss_peaks
+
+    def _make_dataset(
+        self,
+        is_pretrain: bool,
+        datatypes: str,
+        data_path: str,
+        celltype_metadata_path: str,
+        num_region_per_sample: int,
+        leave_out_celltypes: str,
+        leave_out_chromosomes: str,
+        quantitative_atac: bool,
+        is_train: bool,
+        step: int = 200,
+    ) -> Tuple[List[coo_matrix], List[coo_matrix], List[np.ndarray]]:
+        """
+        Generate a dataset for training or testing.
+
+        Args:
+            is_pretrain (bool): Whether it is a pretraining dataset.
+            datatypes (str): String of comma-separated data types.
+            data_path (str): Path to the data.
+            celltype_metadata_path (str): Path to the celltype metadata file.
+            num_region_per_sample (int): Number of regions per sample.
+            leave_out_celltypes (str): String of comma-separated cell types to leave out.
+            leave_out_chromosomes (str): String of comma-separated chromosomes to leave out.
+            quantitative_atac (bool): Whether to use peak data with no ATAC count values.
+            is_train (bool): Whether it is a training dataset.
+            step (int, optional): Step size for generating samples. Defaults to 200.
+
+        Returns:
+            Tuple[List[coo_matrix], List[str], List[coo_matrix], List[np.ndarray]]: Tuple containing the generated peak data,
+            cell labels, target data, and TSS indices.
+        """
+        celltype_metadata = pd.read_csv(
+            celltype_metadata_path, sep=",", dtype=str)
+        file_id_list, cell_dict, datatype_dict = self._cell_splitter(
+            celltype_metadata,
+            leave_out_celltypes,
+            datatypes,
+            is_train=is_train,
+            is_pretrain=is_pretrain,
+        )
+        peak_list = []
+        cell_list = []
+        target_list = [] if not is_pretrain else None
+        tssidx_list = [] if not is_pretrain else None
+        gene_list = []
+        strand_list = []
+        tss_peak_list = []
+        for file_id in file_id_list:
+            cell_label = cell_dict[file_id]
+            data_type = datatype_dict[file_id]
+            print(file_id, data_path, data_type)
+            paths_dict = self._generate_paths(
+                file_id, data_path, data_type, quantitative_atac=quantitative_atac
+            )
+
+            celltype_peak_annot = pd.read_csv(
+                paths_dict["celltype_annot_csv"], sep=",")
+
+            try:
+                peak_data = load_npz(paths_dict["peak_npz"])
+                print(f"Feature shape: {peak_data.shape}")
+            except FileNotFoundError:
+                print(f"File not found - FILE ID: {file_id}")
+                continue
+
+            if os.path.exists(paths_dict["exp_feather"]):
+                exp_df = pd.read_feather(paths_dict["exp_feather"])
+            else:
+                # construct exp_df from gencode_obj and save it to feather
+                exp_df = self.gencode_obj.get_exp_feather(
+                    celltype_peak_annot.drop('index', axis=1).reset_index())
+                exp_df.to_feather(paths_dict["exp_feather"])
+
+            if not is_pretrain:
+                target_data = np.load(paths_dict["target_npy"])
+                tssidx_data = np.load(paths_dict["tssidx_npy"])
+                print(f"Target shape: {target_data.shape}")
+                atac_cutoff = 1 - \
+                    (peak_data[:, 282] >= 0.05).toarray().flatten()
+                target_data[atac_cutoff, :] = 0
+
+            if quantitative_atac is False:
+                peak_data[:, 282] = 1
+
+            all_chromosomes = celltype_peak_annot["Chromosome"].unique(
+            ).tolist()
+            input_chromosomes = _chromosome_splitter(
+                all_chromosomes, leave_out_chromosomes, is_train=is_train
+            )
+
+            exp_df = exp_df.query(
+                'gene_name.isin(@self.gene_list) & Chromosome.isin(@input_chromosomes)')
+
+            # instead of loop over chromosome, loop over gene
+            for gene, gene_df in exp_df.groupby('gene_name'):
+                gene_name = gene_df['gene_name'].values[0]
+                tss_peak = gene_df['index'].values
+                strand = 0 if gene_df['Strand'].values[0] == '+' else 1
+                idx = gene_df['index'].values[0] if strand == 0 else gene_df['index'].values[-1]
+
+                start_idx = idx-num_region_per_sample//2
+                end_idx = idx+num_region_per_sample//2
+                if start_idx < 0 or end_idx >= peak_data.shape[0]:
+                    continue
+                celltype_annot_i = celltype_peak_annot.iloc[start_idx:end_idx, :]
+                if celltype_annot_i.shape[0] < num_region_per_sample:
+                    continue
+                peak_data_i = coo_matrix(peak_data[start_idx:end_idx])
+
+                if not is_pretrain:
+                    target_i = coo_matrix(
+                        target_data[start_idx:end_idx])
+                    tssidx_i = tssidx_data[start_idx:end_idx]
+
+                if peak_data_i.shape[0] == num_region_per_sample:
+                    peak_list.append(peak_data_i)
+                    cell_list.append(cell_label)
+                    if not is_pretrain:
+                        target_list.append(target_i)
+                        tssidx_list.append(tssidx_i)
+                    gene_list.append(gene_name)
+                    strand_list.append(strand)
+                    tss_peak = tss_peak-start_idx
+                    tss_peak = tss_peak[tss_peak < num_region_per_sample]
+                    tss_peak_list.append(tss_peak)
+
+        return peak_list, target_list, tssidx_list, gene_list, strand_list, tss_peak_list
+
+    def __getitem__(self, index: int):
+        """
+        Get an item from the dataset.
+
+        Args:
+            index (int): Index of the item.
+
+        Returns:
+            Tuple[coo_matrix, np.ndarray, np.ndarray]: Tuple containing peak data, mask, and target data.
+        """
+        peak = self.peaks[index]
+        target = self.targets[index]
+        tssidx = self.tssidxs[index]
+        gene_name = self.gene_names[index]
+        strand = self.strands[index]
+        tss_peak = self.tss_peaks[index]
+        tss_peak_mask = np.zeros(self.num_region_per_sample)
+        tss_peak_mask[tss_peak] = 1
+        if self.mask_ratio > 0:
+            mask = np.hstack(
+                [
+                    np.zeros(int(self.num_region_per_sample -
+                                 self.num_region_per_sample*self.mask_ratio)),
+                    np.ones(int(self.num_region_per_sample*self.mask_ratio)),
+                ]
+            )
+            np.random.shuffle(mask)
+        else:
+            mask = tssidx
+        if self.transform is not None:
+            peak, mask, target = self.transform(peak, tssidx, target)
+        if peak.shape[0] == 1:
+            peak = peak.squeeze(0)
+        return {'region_motif': peak.toarray().astype(np.float32),
+                'mask': mask,
+                'gene_name': gene_name,
+                'tss_peak': tss_peak_mask,
+                'strand': strand,
+                'exp_label': target.toarray().astype(np.float32)}

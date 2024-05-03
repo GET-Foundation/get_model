@@ -136,7 +136,7 @@ class RegionLitModel(LitModel):
                     pred[key] = pred[key][0][:, strand][goi_idx].max()
                     obs[key] = obs[key][0][:, strand][goi_idx].mean()
                     # save key, pred[key], obs[key] to a csv
-                    with open(f"{self.cfg.machine.output_dir}/predictions.csv", "a") as f:
+                    with open(f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", "a") as f:
                         f.write(
                             f"{gene_name},{key},{pred[key]},{obs[key]}\n")
             except Exception as e:

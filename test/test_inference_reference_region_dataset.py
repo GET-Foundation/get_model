@@ -1,4 +1,5 @@
 # %%
+import seaborn as sns
 import torch.utils
 from get_model.run_ref_region import *
 import random
@@ -75,7 +76,7 @@ rrd.data_dict['0.joung_tfatlas.shareseq.8192'][0][485395+450]
 # %%
 rrm.data[485395+450]
 # %%
-import seaborn as sns
-sns.scatterplot(x=rrd.data_dict['0.joung_tfatlas.shareseq.8192'][0][485395+450])
+sns.scatterplot(
+    x=rrd.data_dict['0.joung_tfatlas.shareseq.8192'][0][485395+450])
 # %%
 # %%

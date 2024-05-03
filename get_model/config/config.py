@@ -90,8 +90,8 @@ class RegionDatasetConfig:
     num_region_per_sample: int = 900
     transform: Optional[Any] = None
     data_type: str = 'fetal'
-    leave_out_celltypes: str = 'Astrocytes'
-    leave_out_chromosomes: str = 'chr4,chr14'
+    leave_out_celltypes: str | None = 'Astrocytes'
+    leave_out_chromosomes: str | None = 'chr4,chr14'
     quantitative_atac: bool = False
     sampling_step: int = 100
     mask_ratio: float = 0
