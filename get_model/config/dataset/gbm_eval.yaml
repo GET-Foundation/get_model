@@ -1,7 +1,8 @@
 zarr_dirs:
   - "htan_gbm_dense.zarr"
+keep_celltypes: "Tumor.htan_gbm.C3L-03968_CPT0228220004_snATAC_GBM_Tumor.2048"
 leave_out_celltypes: null
-leave_out_chromosomes: "chr10,chr11"
+leave_out_chromosomes: null
 peak_name: "fetal_gbm_peaks_open_exp"
 dataset_size: 40960
 eval_dataset_size: 512

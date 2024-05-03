@@ -9,14 +9,14 @@ assembly: "hg38"
 
 training:
   save_ckpt_freq: 1
-  epochs: 100
+  epochs: 20
   warmup_epochs: 1
   accumulate_grad_batches: 1
   clip_grad: null
   use_fp16: false
 
 dataset:
-  quantitative_atac: true
+  quantitative_atac: false
   sampling_step: 100
   mask_ratio: 0
 
@@ -33,8 +33,8 @@ wandb:
   run_name: "GBM"
 
 finetune:
-  pretrain_checkpoint: true
-  strict: false
+  pretrain_checkpoint: false
+  strict: true
   checkpoint: "/burg/pmg/users/xf2217/get_checkpoints/output_e800_r900_mask0.5_adult_watac/checkpoint-799.pth"
   model_prefix: "model."
   patterns_to_freeze: []

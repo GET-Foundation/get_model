@@ -1639,8 +1639,8 @@ class PerturbationInferenceDataset(Dataset):
 
 @dataclass
 class ReferenceRegionMotifConfig:
-    root: str = '/home/xf2217/Projects/get_data'
-    data: str = 'fetal_tfatlas_peaks_motif.hg38.zarr'
+    root: str = '/pmglocal/alb2281/get/get_data'
+    data: str = 'fetal_gbm_peak_motif_v1.hg38.zarr'
     refdata: str = 'fetal_union_peak_motif_v1.hg38.zarr'
     count_filter: int = 0
     motif_scaler: float = 1.0
