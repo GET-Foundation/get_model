@@ -1,9 +1,9 @@
 zarr_dirs:
   - "joung_tfatlas_dense.zarr"
-keep_celltypes: "0.joung_tfatlas.shareseq.8192"
-leave_out_celltypes: null
+keep_celltypes: null
+leave_out_celltypes: "6_0.joung_tfatlas.L10M"
 leave_out_chromosomes: null
-peak_name: "fetal_tfatlas_peaks_open_exp"
+peak_name: "fetal_tfatlas_peaks_tissue_open_exp"
 dataset_size: 40960
 eval_dataset_size: 512
 additional_peak_columns: ['Expression_positive', 'Expression_negative', 'aTPM', 'TSS']

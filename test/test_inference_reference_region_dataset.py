@@ -30,7 +30,7 @@ dataset_config = {
         "/home/xf2217/Projects/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather",
         "/home/xf2217/Projects/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather"
     ],
-    "peak_name": "fetal_tfatlas_peaks_open_exp",
+    "peak_name": "fetal_tfatlas_peaks_tissue_open_exp",
     "leave_out_chromosomes": "",
     "additional_peak_columns": ["Expression_positive", "Expression_negative", "aTPM", "TSS"],
     "n_peaks_upper_bound": 900,

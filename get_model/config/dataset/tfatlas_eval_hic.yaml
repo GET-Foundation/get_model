@@ -3,7 +3,7 @@ zarr_dirs:
 keep_celltypes: "0.joung_tfatlas.shareseq.8192"
 leave_out_celltypes: null
 leave_out_chromosomes: "chr10,chr11"
-peak_name: "fetal_tfatlas_peaks_open_exp"
+peak_name: "fetal_tfatlas_peaks_tissue_open_exp"
 dataset_size: 40960
 eval_dataset_size: 512
 additional_peak_columns: ['Expression_positive', 'Expression_negative', 'aTPM', 'TSS']

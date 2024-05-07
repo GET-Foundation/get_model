@@ -1828,6 +1828,8 @@ class ReferenceRegionDataset(Dataset):
                 end_index = start_index + self.num_region_per_sample
 
                 celltype_peak_annot_i = peaks.iloc[start_index:end_index, :]
+                if celltype_peak_annot_i.shape[0] == 0:
+                    continue
                 if celltype_peak_annot_i.iloc[-1].End - celltype_peak_annot_i.iloc[0].Start > 5000000:
                     end_index = celltype_peak_annot_i[celltype_peak_annot_i.End -
                                                       celltype_peak_annot_i.Start < 5000000].index[-1]
