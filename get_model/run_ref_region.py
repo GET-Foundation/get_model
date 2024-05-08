@@ -110,7 +110,6 @@ class RegionLitModel(LitModel):
                 obs[key] = obs[key][tss_idx > 0].flatten()
 
         metrics = self.metrics(pred, obs)
-        breakpoint()
         if batch_idx == 0 and self.cfg.log_image:
             # log one example as scatter plot
             for key in pred:
@@ -142,6 +141,10 @@ class RegionLitModel(LitModel):
                             f"{gene_name},{key},{pred[key]},{obs[key]}\n")
             except Exception as e:
                 print(e)
+        elif self.cfg.task.test_mode == 'interpret':
+            # assume focus is the center peaks in the input sample
+            with torch.enable_grad():
+                return self.interpret_step(batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=self.cfg.dataset.n_peaks_upper_bound//2)
 
     def get_model(self):
         model = instantiate(self.cfg.model)
@@ -231,7 +234,9 @@ def run(cfg: DictConfig):
     dm = ReferenceRegionDataModule(cfg)
     model.dm = dm
     wandb_logger = WandbLogger(name=cfg.wandb.run_name,
-                               project=cfg.wandb.project_name)
+                               project=cfg.wandb.project_name,
+                               entity="get-v3"
+                               )
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
@@ -240,7 +245,7 @@ def run(cfg: DictConfig):
         strategy='auto',
         devices=cfg.machine.num_devices,
         logger=[
-            # wandb_logger,
+            wandb_logger,
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(
             monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],

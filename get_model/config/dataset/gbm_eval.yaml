@@ -1,6 +1,6 @@
 zarr_dirs:
   - "htan_gbm_dense.zarr"
-keep_celltypes: "Tumor.htan_gbm.C3L-03968_CPT0228220004_snATAC_GBM_Tumor.2048"
+keep_celltypes: "Tumor.htan_gbm.C3L-03405_CPT0224600013_snATAC_GBM_Tumor.4096"
 leave_out_celltypes: null
 leave_out_chromosomes: null
 peak_name: "fetal_gbm_peaks_open_exp"
@@ -26,3 +26,4 @@ reference_region_motif:
   refdata: 'fetal_union_peak_motif_v1.hg38.zarr'
   count_filter: 0
   motif_scaler: 1
+

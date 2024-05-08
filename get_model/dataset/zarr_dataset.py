@@ -1800,7 +1800,7 @@ class ReferenceRegionDataset(Dataset):
                              "Expression_negative"]].values
         tssidx_data = peaks["TSS"].values
         atpm = peaks['aTPM'].values
-        target_data[atpm < 0.05, :] = 0
+        target_data[atpm < 0.1, :] = 0
         if not self.quantitative_atac:
             region_motif = np.concatenate(
                 [region_motif, np.zeros((region_motif.shape[0], 1))+1], axis=1)
@@ -1812,15 +1812,17 @@ class ReferenceRegionDataset(Dataset):
             idx_peak_start = idx_peak_list[0]
             idx_peak_end = idx_peak_list[-1]
             for i in range(idx_peak_start, idx_peak_end, self.sampling_step):
-                shift = np.random.randint(-self.sampling_step //
-                                          2, self.sampling_step // 2)
-                start_index = max(0, i + shift)
+                # shift = np.random.randint(-self.sampling_step //
+                #                           2, self.sampling_step // 2)
+                # start_index = max(0, i + shift)
+                start_index = max(0, i)
                 end_index = start_index + self.num_region_per_sample
-
                 celltype_peak_annot_i = peaks.iloc[start_index:end_index, :]
+
                 if celltype_peak_annot_i.iloc[-1].End - celltype_peak_annot_i.iloc[0].Start > 5000000:
                     end_index = celltype_peak_annot_i[celltype_peak_annot_i.End -
                                                       celltype_peak_annot_i.Start < 5000000].index[-1]
+                    
                 if celltype_peak_annot_i["Start"].min() < 0 or celltype_peak_annot_i.shape[0] != self.num_region_per_sample:
                     continue
 
@@ -2246,7 +2248,7 @@ Sampling step: {self.sampling_step}
                 tssidx_data = np.load(paths_dict["tssidx_npy"])
                 print(f"Target shape: {target_data.shape}")
                 atac_cutoff = 1 - \
-                    (peak_data[:, 282] >= 0.05).toarray().flatten()
+                    (peak_data[:, 282] >= 0.1).toarray().flatten()
                 target_data[atac_cutoff, :] = 0
 
             if quantitative_atac is False:
