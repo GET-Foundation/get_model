@@ -6,14 +6,15 @@ import argparse
 from enformer_pytorch import from_pretrained
 from enformer_pytorch.finetune import HeadAdapterWrapper
 
-from utils import *
+from baselines.utils import *
 
 
-device = "cuda"
+device = "cuda:0"
 hg38_path = "/pmglocal/alb2281/get/get_data/hg38.ml.fa"
 
 
 def main(args):
+    breakpoint()
     train_path, val_path = split_data_by_chr(args)
     enformer = from_pretrained('EleutherAI/enformer-official-rough', target_length=2, use_tf_gamma=False) # target_length=1 throws error
     model = HeadAdapterWrapper(

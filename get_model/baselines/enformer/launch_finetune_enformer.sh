@@ -5,7 +5,7 @@ LEAVEOUT_CHR="chr10,chr11"
 FINETUNE_EXP_NAME="enformer_finetune_atac_leaveout_$LEAVEOUT_CHR"
 
 # batch_size can be adjusted according to the graphics card
-CUDA_VISIBLE_DEVICES=1 python /pmglocal/alb2281/get/get_rebuttal/baselines/enformer/finetune_enformer.py \
+CUDA_VISIBLE_DEVICES=0 python /pmglocal/alb2281/repos/get_model/baselines/enformer/finetune_enformer.py \
     --atac_data ${ATAC_DATA} \
     --labels_path ${LABELS_PATH} \
     --batch_size 4 \
