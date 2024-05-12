@@ -448,12 +448,22 @@ def run_downstream(cfg: DictConfig):
     model.to('cuda')
     dm = GETDataModule(cfg)
     model.dm = dm
+    if cfg.machine.num_devices > 0:
+        strategy = 'auto'
+        accelerator = 'gpu'
+        device = cfg.machine.num_devices
+        if cfg.machine.num_devices > 1:
+            strategy = 'ddp_spawn'
+    else:
+        strategy = 'auto'
+        accelerator = 'cpu'
+        device = 'auto'
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="gpu",
+        accelerator=accelerator,
         num_sanity_val_steps=10,
-        strategy="auto",
-        devices=cfg.machine.num_devices,
+        strategy=strategy,
+        devices=device,
         # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,

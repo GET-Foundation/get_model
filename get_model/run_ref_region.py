@@ -232,12 +232,22 @@ def run(cfg: DictConfig):
     wandb_logger = WandbLogger(name=cfg.wandb.run_name,
                                project=cfg.wandb.project_name)
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+    if cfg.machine.num_devices > 0:
+        strategy = 'auto'
+        accelerator = 'gpu'
+        device = cfg.machine.num_devices
+        if cfg.machine.num_devices > 1:
+            strategy = 'ddp_spawn'
+    else:
+        strategy = 'auto'
+        accelerator = 'cpu'
+        device = 'auto'
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="gpu",
+        accelerator=accelerator,
         num_sanity_val_steps=0,
-        strategy='auto',
-        devices=cfg.machine.num_devices,
+        strategy=strategy,
+        devices=device,
         logger=[
             wandb_logger,
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
