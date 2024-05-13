@@ -1,4 +1,4 @@
-data_path: "/pmglocal/xf2217/GET_STARTED/get_data/"
+data_path: "/pmglocal/xf2217/get_data/"
 codebase: "/pmglocal/xf2217/GET_STARTED/get_model/"
 output_dir: "/pmglocal/xf2217/output"
 num_devices: 6
