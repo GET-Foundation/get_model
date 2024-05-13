@@ -49,12 +49,10 @@ class RegionDataModule(L.LightningDataModule):
             self.dataset_val = self.build_training_dataset(is_train=False)
         if stage == 'predict':
             if self.cfg.task.test_mode == 'predict':
-                self.dataset_predict = self.build_inference_dataset(
+                self.dataset_predict = self.build_training_dataset(
                     is_train=False)
-            elif self.cfg.task.test_mode == 'interpret':
-                self.dataset_predict = self.build_inference_dataset()
-
-            elif self.cfg.task.test_mode == 'inference':
+            elif self.cfg.task.test_mode == 'interpret' or self.cfg.task.test_mode == 'inference':
+                self.mutations = None
                 self.dataset_predict = self.build_inference_dataset()
 
         if stage == 'validate':
@@ -148,6 +146,7 @@ class RegionLitModel(LitModel):
                     f'Saved to {self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv')
             # except Exception as e:
             #     print(e)
+        # elif self.cfg.task.test_mode == 'interpret':
 
     def get_model(self):
         model = instantiate(self.cfg.model)

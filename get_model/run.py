@@ -348,7 +348,7 @@ class GETDataModule(L.LightningDataModule):
                 self.dataset_predict = self.build_training_dataset(
                     sequence_obj=sequence_obj, is_train=False)
             elif self.cfg.task.test_mode == 'interpret' or self.cfg.task.test_mode == 'inference':
-                self.mutations = None,
+                self.mutations = None
                 self.dataset_predict = self.build_inference_dataset(
                     sequence_obj=sequence_obj)
             elif 'perturb' in self.cfg.task.test_mode:

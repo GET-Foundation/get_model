@@ -582,6 +582,32 @@ class GETRegionFinetune(BaseGETModel):
 
 
 @dataclass
+class MLPRegionFinetuneModelConfig(BaseGETModelConfig):
+    use_atac: bool = False
+    input_dim: int = 283
+    output_dim: int = 2
+
+
+class MLPRegionFinetune(GETRegionFinetune):
+    def __init__(self, cfg: MLPRegionFinetuneModelConfig):
+        super(GETRegionFinetune, self).__init__(cfg)
+        self.linear1 = torch.nn.Linear(cfg.input_dim, 512)
+        self.relu1 = torch.nn.ReLU()
+        self.linear2 = torch.nn.Linear(512, 256)
+        self.relu2 = torch.nn.ReLU()
+        self.linear3 = torch.nn.Linear(256, cfg.output_dim)
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.relu1(x)
+        x = self.linear2(x)
+        x = self.relu2(x)
+        x = self.linear3(x)
+        x = torch.nn.Softplus()(x)
+        return x
+
+
+@dataclass
 class GETRegionFinetuneATACModelConfig(BaseGETModelConfig):
     region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
