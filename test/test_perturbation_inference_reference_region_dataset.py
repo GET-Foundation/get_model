@@ -1,4 +1,5 @@
 # %%
+import pandas as pd
 import seaborn as sns
 import torch.utils
 from get_model.run_ref_region import *
@@ -9,6 +10,7 @@ from caesar.io.zarr_io import DenseZarrIO
 import numpy as np
 from get_model.dataset.zarr_dataset import (InferenceDataset,
                                             InferenceReferenceRegionDataset,
+                                            PerturbationInferenceReferenceRegionDataset,
                                             ReferenceRegionMotif,
                                             ReferenceRegionMotifConfig)
 
@@ -31,7 +33,7 @@ dataset_config = {
         "/home/xf2217/Projects/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather"
     ],
     "peak_name": "fetal_tfatlas_peaks_tissue_open_exp",
-    "leave_out_chromosomes": "",
+    "keep_celltypes": "0.joung_tfatlas.L10M",
     "additional_peak_columns": ["Expression_positive", "Expression_negative", "aTPM", "TSS"],
     "n_peaks_upper_bound": 900,
     "center_expand_target": 0,
@@ -52,4 +54,28 @@ rrm = ReferenceRegionMotif(cfg)
 # %%
 rrd = InferenceReferenceRegionDataset(
     rrm, dataset, quantitative_atac=True, sampling_step=450)
+# %%
+
+# chr1: 29200-29505
+inactivated_peaks = pd.DataFrame({
+    'Chromosome': ['chr4'],
+    'Start': [1309046+1980],
+    'End': [1309046+1150980],
+    'Strand': ['+'],
+})
+# %%
+pirrd = PerturbationInferenceReferenceRegionDataset(
+    inference_dataset=rrd, perturbations=inactivated_peaks, mode='peak_inactivation')
+
+# %%
+item = pirrd[2]
+
+# %%
+# Verify that the specified peaks are inactivated (set to 0) in the MUT sample
+mut_region_motif = item['MUT']['region_motif']
+wt_region_motif = item['WT']['region_motif']
+print("Region Motif WT:\n", wt_region_motif)
+print("Region Motif MUT:\n", mut_region_motif)
+# %%
+sns.heatmap(mut_region_motif-wt_region_motif)
 # %%

@@ -1990,6 +1990,11 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
         ).df.query('gene_name in @self.gene_list').drop(
             ['index', 'Start_b', 'End_b', 'Strand'], axis=1
         )
+        # if empty, raise error
+        if self.perturbations_gene_overlap.shape[0] == 0:
+            raise ValueError(
+                "No perturbations found in the gene list, please check the gene list and perturbations."
+            )
 
     def __len__(self):
         return len(self.perturbations_gene_overlap) * self.inference_dataset.reference_region_dataset.zarr_dataset.datapool.n_celltypes
@@ -2022,8 +2027,13 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
             self.inference_dataset.reference_region_dataset.num_region_per_sample
 
         region_motif, peaks = self.inference_dataset.data_dict[celltype_id]
-        region_motif = region_motif[peak_start:peak_end]
         atpm = peaks['aTPM'].values[peak_start:peak_end]
+
+        if self.mode == 'peak_inactivation' and perturbation is not None:
+            region_motif, atpm = self._apply_peak_inactivation(
+                region_motif, perturbation, peaks, atpm)
+
+        region_motif = region_motif[peak_start:peak_end]
 
         if not self.inference_dataset.reference_region_dataset.quantitative_atac:
             region_motif = np.concatenate(
@@ -2054,6 +2064,24 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
             'tss_peak': sample['metadata']['tss_peak'],
             'all_tss_peak': sample['metadata']['all_tss_peak']
         }
+
+    def _apply_peak_inactivation(self, region_motif, perturbation, peaks, atpm):
+        """Apply peak inactivation by setting the corresponding peak/region in region_motif to 0."""
+        from pyranges import PyRanges as pr
+        perturbed_region_motif = region_motif.copy()
+        peaks_df = pr(peaks[['Chromosome', 'Start', 'End']].reset_index())
+        perturbation_df = pr(perturbation)
+
+        overlap = peaks_df.join(perturbation_df, suffix='_perturb').df
+        overlap_indices = overlap['index'].values
+
+        for idx in overlap_indices:
+            if idx < region_motif.shape[0]:  # Ensure index is within bounds
+                perturbed_region_motif[idx] = 0
+                atpm[overlap_indices] = 0
+            else:
+                raise (f"Index {idx} out of bounds for region_motif.")
+        return perturbed_region_motif, atpm
 
 
 class RegionDataset(Dataset):
