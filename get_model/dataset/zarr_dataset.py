@@ -1957,6 +1957,105 @@ class InferenceReferenceRegionDataset(Dataset):
                 'all_tss_peak': sample['metadata']['all_tss_peak']}
 
 
+class PerturbationInferenceReferenceRegionDataset(Dataset):
+    """
+    Wrapper around InferenceReferenceRegionDataset to allow for parallel processing for different mutations.
+
+    Args:
+        inference_dataset (InferenceReferenceRegionDataset): The InferenceReferenceRegionDataset to use for generating samples.
+        perturbations (pandas.DataFrame): A pandas DataFrame containing the perturbations to apply.
+        mode (str): The mode of perturbation to apply. Can be 'mutation' or 'peak_inactivation'.
+    """
+
+    def __init__(self, inference_dataset, perturbations, mode='mutation') -> None:
+        super().__init__()
+        self.inference_dataset = inference_dataset
+        self.perturbations = perturbations
+        self.gene_list = inference_dataset.inference_dataset.gene_list
+        self.gencode_obj = inference_dataset.inference_dataset.gencode_obj
+        self.mode = mode
+        self._calculate_mutation_per_gene()
+        print(
+            f"n_celltype: {self.inference_dataset.reference_region_dataset.zarr_dataset.datapool.n_celltypes}")
+        print(f"n_gene: {len(self.gene_list)}")
+        print(f"n_perturbation: {len(self.perturbations)}")
+
+    def _calculate_mutation_per_gene(self):
+        """Not all mutations are in the same gene, calculate the number of mutations for each gene as a dictionary"""
+        from pyranges import PyRanges as pr
+
+        # Extend TSS to 4mbp
+        self.perturbations_gene_overlap = pr(self.perturbations).join(
+            pr(self.gencode_obj.gtf).extend(2_000_000)
+        ).df.query('gene_name in @self.gene_list').drop(
+            ['index', 'Start_b', 'End_b', 'Strand'], axis=1
+        )
+
+    def __len__(self):
+        return len(self.perturbations_gene_overlap) * self.inference_dataset.reference_region_dataset.zarr_dataset.datapool.n_celltypes
+
+    def __getitem__(self, index):
+        celltype_id, perturbation_gene_pair_idx = divmod(
+            index, len(self.perturbations_gene_overlap))
+        gene_name = self.perturbations_gene_overlap.gene_name.values[perturbation_gene_pair_idx]
+        perturbation = self.perturbations_gene_overlap.iloc[
+            perturbation_gene_pair_idx:perturbation_gene_pair_idx + 1
+        ]
+        data_key, celltype_id = self.inference_dataset.reference_region_dataset.zarr_dataset.datapool._get_celltype(
+            celltype_id)
+
+        wt_sample = self._get_sample(data_key, celltype_id, gene_name)
+        mut_sample = self._get_sample(
+            data_key, celltype_id, gene_name, perturbation)
+
+        return {'WT': wt_sample, 'MUT': mut_sample}
+
+    def _get_sample(self, data_key, celltype_id, gene_name, perturbation=None):
+        sample = self.inference_dataset.inference_dataset.get_item_for_gene_in_celltype(
+            data_key, celltype_id, gene_name,
+            mutations=perturbation if self.mode == 'mutation' else None,
+            peak_inactivation=perturbation if self.mode == 'peak_inactivation' else None
+        )
+
+        peak_start = sample['metadata']['original_peak_start']
+        peak_end = peak_start + \
+            self.inference_dataset.reference_region_dataset.num_region_per_sample
+
+        region_motif, peaks = self.inference_dataset.data_dict[celltype_id]
+        region_motif = region_motif[peak_start:peak_end]
+        atpm = peaks['aTPM'].values[peak_start:peak_end]
+
+        if not self.inference_dataset.reference_region_dataset.quantitative_atac:
+            region_motif = np.concatenate(
+                [region_motif, np.zeros((region_motif.shape[0], 1)) + 1], axis=1
+            )
+        else:
+            region_motif = np.concatenate(
+                [region_motif, atpm.reshape(-1, 1) / atpm.reshape(-1, 1).max()], axis=1
+            )
+
+        target = sample['additional_peak_features'][:, 0:2]
+        tssidx = sample['additional_peak_features'][:, 3]
+        hic_matrix = sample['hic_matrix']
+        mask = tssidx
+
+        if self.inference_dataset.reference_region_dataset.transform is not None:
+            region_motif, mask, target = self.inference_dataset.reference_region_dataset.transform(
+                region_motif, tssidx, target
+            )
+
+        return {
+            'region_motif': region_motif.astype(np.float32),
+            'mask': mask,
+            'exp_label': target.astype(np.float32),
+            'hic_matrix': hic_matrix,
+            'strand': sample['metadata']['strand'],
+            'gene_name': sample['metadata']['gene_name'],
+            'tss_peak': sample['metadata']['tss_peak'],
+            'all_tss_peak': sample['metadata']['all_tss_peak']
+        }
+
+
 class RegionDataset(Dataset):
     """
     PyTorch dataset class for cell type expression data.
