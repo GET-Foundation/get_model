@@ -161,9 +161,9 @@ class FetalErythroblastDataset(torch.utils.data.Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        row = self.data.loc[idx]
+        row = self.data.iloc[idx]
         x = row["sequence"]
-        y = row["quantile"]
+        y = row["label"]
         
         # apply rc_aug here if using
         if self.rc_aug and coin_flip():

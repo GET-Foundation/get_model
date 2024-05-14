@@ -97,7 +97,7 @@ def run_train(args):
 
     # we need these for the decoder head, if using
     use_head = True
-    n_classes = 5
+    n_classes = 10
 
     # you can override with your own backbone config here if you want,
     # otherwise we'll load the HF one by default
@@ -138,8 +138,12 @@ def run_train(args):
         atac.columns = ["chrom", "start", "end", "atac"]
         atac = atac.sort_values(by="atac")
         atac["sequence"] = atac.apply(lambda x: genome.get_sequence(x["chrom"], x["start"], x["end"]).seq, axis=1)
-        atac["quantile"] = pd.qcut(atac["atac"], q=n_classes, labels=np.arange(n_classes))
-        X_train, X_test, y_train, y_test = train_test_split(atac[["sequence", "chrom", "start", "end"]], atac[["quantile"]], test_size=0.2, random_state=42, stratify=atac["quantile"])
+        if args.balanced_split:
+            atac["label"] = pd.qcut(atac["atac"], q=n_classes, labels=np.arange(n_classes))
+        else: # Use intervals of equal length
+            atac["label"] = np.floor(atac["atac"] * n_classes)
+            atac.loc[atac["label"] > n_classes-1, "label"] = n_classes-1
+        X_train, X_test, y_train, y_test = train_test_split(atac[["sequence", "chrom", "start", "end"]], atac[["label"]], test_size=0.2, random_state=42, stratify=atac["label"])
         train_df = pd.concat([X_train, y_train], axis=1)
         test_df = pd.concat([X_test, y_test], axis=1)
         train_df.to_csv(f"{args.data_dir}/train.csv", index=False) 
@@ -190,6 +194,7 @@ if __name__=="__main__":
     parser.add_argument('--num_epochs', type=int, default=100, help='Number of epochs to train')
     parser.add_argument('--batch_size', type=int, default=256, help='Batch size for training')
     parser.add_argument('--learning_rate', type=float, default=6e-4, help='Learning rate for training')
+    parser.add_argument('--balanced_split', action='store_true', help='Whether to balance the train-test split')
     parser.add_argument("--wandb_project_name", type=str, default="get-finetune", help="wandb project name")
     parser.add_argument("--wandb_run_name", type=str, default=None, help="wandb run name")
     args = parser.parse_args()
