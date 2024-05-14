@@ -1576,7 +1576,7 @@ class InferenceDataset(PretrainDataset):
                 f"Gene {gene_name} not found in the gene information, removing and skipping it.")
         gene_df = pr(peaks_in_locus.copy().reset_index()).join(pr(gene_info_copy[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates(
         )).extend(self.PROMOTER_EXTEND), suffix="_gene", how='left', apply_strand_suffix=False).df[columns_to_include].set_index('index')
-        # gene_df = df.query('gene_name==@gene_name')
+        gene_df = gene_df.query('gene_name==@gene_name')
         if gene_df.shape[0] == 0:
             raise ValueError(
                 f"Gene {gene_name} not found in the peak information, removing and skipping it.")
@@ -2027,13 +2027,14 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
             self.inference_dataset.reference_region_dataset.num_region_per_sample
 
         region_motif, peaks = self.inference_dataset.data_dict[celltype_id]
-        atpm = peaks['aTPM'].values[peak_start:peak_end]
+        atpm = peaks['aTPM'].values
 
         if self.mode == 'peak_inactivation' and perturbation is not None:
             region_motif, atpm = self._apply_peak_inactivation(
                 region_motif, perturbation, peaks, atpm)
 
         region_motif = region_motif[peak_start:peak_end]
+        atpm = atpm[peak_start:peak_end]
 
         if not self.inference_dataset.reference_region_dataset.quantitative_atac:
             region_motif = np.concatenate(
@@ -2074,13 +2075,11 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
 
         overlap = peaks_df.join(perturbation_df, suffix='_perturb').df
         overlap_indices = overlap['index'].values
-
-        for idx in overlap_indices:
-            if idx < region_motif.shape[0]:  # Ensure index is within bounds
-                perturbed_region_motif[idx] = 0
-                atpm[overlap_indices] = 0
-            else:
-                raise (f"Index {idx} out of bounds for region_motif.")
+        overlap_indices = overlap_indices[overlap_indices <
+                                          region_motif.shape[0]]
+        overlap_indices = overlap_indices[overlap_indices > 0]
+        perturbed_region_motif[overlap_indices] = 0
+        atpm[overlap_indices] = 0
         return perturbed_region_motif, atpm
 
 

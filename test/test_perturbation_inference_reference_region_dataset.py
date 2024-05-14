@@ -68,7 +68,7 @@ pirrd = PerturbationInferenceReferenceRegionDataset(
     inference_dataset=rrd, perturbations=inactivated_peaks, mode='peak_inactivation')
 
 # %%
-item = pirrd[2]
+item = pirrd[100]
 
 # %%
 # Verify that the specified peaks are inactivated (set to 0) in the MUT sample
@@ -78,4 +78,6 @@ print("Region Motif WT:\n", wt_region_motif)
 print("Region Motif MUT:\n", mut_region_motif)
 # %%
 sns.heatmap(mut_region_motif-wt_region_motif)
+# %%
+rrd.inference_dataset[100]
 # %%
