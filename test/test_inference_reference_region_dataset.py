@@ -38,8 +38,8 @@ dataset_config = {
     "keep_celltypes": "0.joung_tfatlas.L10M",
     "center_expand_target": 0,
     "random_shift_peak": 0,
-    "peak_count_filter": 10,
-    'mask_ratio': 0,
+    "peak_count_filter": 3,
+    'mask_ratio': 0, 
     "padding": 0,
 }
 # %%
@@ -53,7 +53,6 @@ dataset = InferenceDataset(
     assembly='hg38', gencode_obj={'hg38': gencode}, **dataset_config, gene_list=gene_list)
 # %%
 cfg = ReferenceRegionMotifConfig(
-    peak_count_filter=10,
     motif_scaler=1.3)
 rrm = ReferenceRegionMotif(cfg)
 # %%

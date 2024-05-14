@@ -1671,7 +1671,6 @@ class ReferenceRegionMotif(object):
             os.path.join(cfg.root, cfg.refdata), mode='r')
         self.refdata = self.refdataset['data'][:]
         self.refpeak_names = self.refdataset['peak_names'][:]
-        self.peak_count_filter = cfg.peak_count_filter
         self.motif_scaler = cfg.motif_scaler
         # reorder data to match sorted peak order
         print(self.peaks['index'].values)
@@ -1931,7 +1930,7 @@ class InferenceReferenceRegionDataset(Dataset):
     def data_dict(self):
         if not hasattr(self, '_data_dict'):
             self._data_dict = {data_key: self.reference_region_motif.map_peaks_to_motifs(
-                peaks) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items().items()}
+                peaks) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
         return self._data_dict
 
     def __len__(self):
