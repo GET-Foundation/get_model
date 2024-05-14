@@ -2,16 +2,15 @@ defaults:
   - base_config
   - model/GETFinetune@_here_
   - machine/manitou
-  - dataset@dataset
+  - dataset/finetune_k562_fetal@dataset
   - _self_
 
 assembly: "hg38"
 
 task:
   layer_names: ["atac_attention"]
-  test_mode: "perturb_interpret"
-  gene_list: 
-    - "PPIF"
+  test_mode: "skip"
+  gene_list: "PPIF"
 
 training:
   save_ckpt_freq: 10
@@ -34,7 +33,8 @@ wandb:
   run_name: "experiment_1"
 
 finetune:
+  pretrain_checkpoint: false
+  strict: false
   checkpoint: "/pmglocal/xf2217/GET_STARTED/get_model/GETRegionFinetune_k562/9g198fd4/checkpoints/best.ckpt"
   model_prefix: "model."
-  patterns_to_freeze: ['region_embed', 'encoder', 'head_exp']
-
+  patterns_to_freeze: []

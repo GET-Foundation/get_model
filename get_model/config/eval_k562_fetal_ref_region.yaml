@@ -7,6 +7,12 @@ defaults:
 
 assembly: "hg38"
 
+task:
+  layer_names: []
+  test_mode: "inference"
+  gene_list: /burg/pmg/users/xf2217/CRISPR_comparison/genes.txt
+  mutations: /burg/pmg/users/xf2217/CRISPR_comparison/regions.txt
+
 training:
   save_ckpt_freq: 1
   epochs: 100
@@ -16,7 +22,7 @@ training:
   use_fp16: false
 
 dataset:
-  quantitative_atac: false
+  quantitative_atac: true
   sampling_step: 100
   mask_ratio: 0
 

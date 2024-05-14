@@ -28,7 +28,8 @@ from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import create_optimizer
 from get_model.utils import (cosine_scheduler, load_checkpoint, remove_keys,
-                             rename_lit_state_dict)
+                             rename_lit_state_dict, rename_v1_finetune_keys,
+                             rename_v1_pretrain_keys)
 
 logging.disable(logging.WARN)
 
@@ -55,8 +56,25 @@ class LitModel(L.LightningModule):
         if self.cfg.finetune.checkpoint is not None:
             checkpoint_model = load_checkpoint(
                 self.cfg.finetune.checkpoint)
-        checkpoint_model = rename_lit_state_dict(checkpoint_model)
-        model.load_state_dict(checkpoint_model, strict=True)
+            # state_dict = model.state_dict()
+            # remove_keys(checkpoint_model, state_dict)
+            strict = self.cfg.finetune.strict
+            if 'model' in checkpoint_model:
+                checkpoint_model = checkpoint_model['model']
+            if 'state_dict' in checkpoint_model:
+                checkpoint_model = checkpoint_model['state_dict']
+                checkpoint_model = rename_lit_state_dict(
+                    checkpoint_model, self.cfg.finetune.patterns_to_drop)
+                model.load_state_dict(checkpoint_model, strict=strict)
+            else:
+                if self.cfg.finetune.pretrain_checkpoint:
+                    checkpoint_model = rename_v1_pretrain_keys(
+                        checkpoint_model)
+                    model.load_state_dict(checkpoint_model, strict=strict)
+                else:
+                    checkpoint_model = rename_v1_finetune_keys(
+                        checkpoint_model)
+                    model.load_state_dict(checkpoint_model, strict=strict)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         return model
@@ -308,8 +326,10 @@ class GETDataModule(L.LightningDataModule):
         config, sequence_obj, gencode_obj = self._shared_build_dataset(
             is_train=False, sequence_obj=sequence_obj)
         if hasattr(self, 'mutations') and self.mutations is not None:
-            # remove from config
-            config.pop('mutations')
+            mutations = self.mutations
+        else:
+            mutations = config['mutations']
+        config.pop('mutations', None)
         # no need to leave out chromosomes or celltypes in inference
         # config['leave_out_chromosomes'] = ""
         config['random_shift_peak'] = None
@@ -318,7 +338,7 @@ class GETDataModule(L.LightningDataModule):
             assembly=self.cfg.assembly,
             gencode_obj=gencode_obj,
             gene_list=self.cfg.task.gene_list if gene_list is None else gene_list,
-            mutations=self.mutations,
+            mutations=mutations,
             sequence_obj=sequence_obj,
             **config
         )
@@ -410,12 +430,22 @@ def run(cfg: DictConfig):
     wandb_logger = WandbLogger(name=cfg.wandb.run_name,
                                project=cfg.wandb.project_name)
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+    if cfg.machine.num_devices > 0:
+        strategy = 'auto'
+        accelerator = 'gpu'
+        device = cfg.machine.num_devices
+        if cfg.machine.num_devices > 1:
+            strategy = 'ddp_spawn'
+    else:
+        strategy = 'auto'
+        accelerator = 'cpu'
+        device = 'auto'
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="gpu",
+        accelerator=accelerator,
         num_sanity_val_steps=10,
-        strategy="auto",
-        devices=cfg.machine.num_devices,
+        strategy=strategy,
+        devices=device,
         # callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
         #            LearningRateMonitor(logging_interval='epoch')],
         logger=[wandb_logger,
@@ -431,7 +461,7 @@ def run(cfg: DictConfig):
     # tuner = Tuner(trainer)
     # tuner.lr_find(model, datamodule=dm)
     if cfg.stage == 'fit':
-        trainer.fit(model, dm, ckpt_path=cfg.finetune.checkpoint)
+        trainer.fit(model, dm)
     if cfg.stage == 'validate':
         trainer.validate(model, datamodule=dm)
     if cfg.stage == 'predict':

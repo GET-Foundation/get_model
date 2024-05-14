@@ -446,7 +446,7 @@ class ZarrDataPool(object):
         """Return a list of peak names for a celltype, use glob peaks*"""
         return [key for key in self.zarr_dict[data_key].dataset[celltype_id].keys() if 'peaks' in key]
 
-    def _load_peaks(self, peak_name=None, count_filter=1):
+    def _load_peaks(self, peak_name=None, count_filter=0):
         """
         Load peaks data which is a dictionary of pandas dataframe feather
         """
@@ -1906,35 +1906,46 @@ class ReferenceRegionDataset(Dataset):
 
 class InferenceReferenceRegionDataset(Dataset):
     def __init__(self, reference_region_motif: ReferenceRegionMotif,
-                 inference_dataset: InferenceDataset,
-                 transform=None,
+                 zarr_dataset: InferenceDataset,
                  quantitative_atac: bool = True,
                  sampling_step: int = 50,
                  ) -> None:
         super().__init__()
-        self.reference_region_dataset = ReferenceRegionDataset(
-            reference_region_motif, inference_dataset, transform, quantitative_atac, sampling_step)
-        self.inference_dataset = inference_dataset
+
+        self.mask_ratio = zarr_dataset.mask_ratio
+        self.is_train = zarr_dataset.is_train
+        self.num_region_per_sample = zarr_dataset.n_peaks_upper_bound
+        self.leave_out_celltypes = zarr_dataset.leave_out_celltypes
+        self.leave_out_chromosomes = zarr_dataset.leave_out_chromosomes
+        self.quantitative_atac = quantitative_atac
+
+        self.count_filter = reference_region_motif.count_filter
+        self.peak_names = reference_region_motif.peak_names
+
+        self.zarr_dataset = zarr_dataset
 
     @property
     def data_dict(self):
-        return self.reference_region_dataset.data_dict
+        if not hasattr(self, '_data_dict'):
+            self._data_dict = {data_key: self.reference_region_motif.map_peaks_to_motifs(
+                peaks) for data_key, peaks in self.zarr_dataset.datapool._load_peaks(self.zarr_dataset.datapool.peak_name, self.count_filter).items()}
+        return self._data_dict
 
     def __len__(self):
-        return len(self.inference_dataset)
+        return len(self.zarr_dataset)
 
     def __getitem__(self, index):
-        sample = self.inference_dataset[index]
+        sample = self.zarr_dataset[index]
         peak_start = sample['metadata']['original_peak_start']
         celltype_id = sample['metadata']['celltype_id']
         strand = sample['metadata']['strand']
         gene_name = sample['metadata']['gene_name']
-        peak_end = peak_start + self.reference_region_dataset.num_region_per_sample
+        peak_end = peak_start + self.num_region_per_sample
         region_motif, peaks = self.data_dict[celltype_id]
         region_motif = region_motif[peak_start:peak_end]
         atpm = peaks['aTPM'].values[peak_start:peak_end]
         # append binary or quantitative atac signal
-        if not self.reference_region_dataset.quantitative_atac:
+        if not self.quantitative_atac:
             region_motif = np.concatenate(
                 [region_motif, np.zeros((region_motif.shape[0], 1))+1], axis=1)
         else:
@@ -1944,9 +1955,6 @@ class InferenceReferenceRegionDataset(Dataset):
         tssidx = sample['additional_peak_features'][:, 3]
         hic_matrix = sample['hic_matrix']
         mask = tssidx
-        if self.reference_region_dataset.transform is not None:
-            region_motif, mask, target = self.reference_region_dataset.transform(
-                region_motif, tssidx, target)
         return {'region_motif': region_motif.astype(np.float32),
                 'mask': mask,
                 'exp_label': target.astype(np.float32),
@@ -1971,33 +1979,41 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
         super().__init__()
         self.inference_dataset = inference_dataset
         self.perturbations = perturbations
-        self.gene_list = inference_dataset.inference_dataset.gene_list
-        self.gencode_obj = inference_dataset.inference_dataset.gencode_obj
+        self.gene_list = inference_dataset.zarr_dataset.gene_list
+        self.gencode_obj = inference_dataset.zarr_dataset.gencode_obj
         self.mode = mode
         self._calculate_mutation_per_gene()
         print(
-            f"n_celltype: {self.inference_dataset.reference_region_dataset.zarr_dataset.datapool.n_celltypes}")
+            f"n_celltype: {self.inference_dataset.zarr_dataset.datapool.n_celltypes}")
         print(f"n_gene: {len(self.gene_list)}")
         print(f"n_perturbation: {len(self.perturbations)}")
 
     def _calculate_mutation_per_gene(self):
         """Not all mutations are in the same gene, calculate the number of mutations for each gene as a dictionary"""
         from pyranges import PyRanges as pr
-
-        # Extend TSS to 4mbp
-        self.perturbations_gene_overlap = pr(self.perturbations).join(
-            pr(self.gencode_obj.gtf).extend(2_000_000)
-        ).df.query('gene_name in @self.gene_list').drop(
-            ['index', 'Start_b', 'End_b', 'Strand'], axis=1
-        )
-        # if empty, raise error
-        if self.perturbations_gene_overlap.shape[0] == 0:
-            raise ValueError(
-                "No perturbations found in the gene list, please check the gene list and perturbations."
+        if 'gene_name' not in self.perturbations.columns:
+            # Extend TSS to 4mbp
+            self.perturbations_gene_overlap = pr(self.perturbations).join(
+                pr(self.gencode_obj.gtf).extend(2_000_000)
+            ).df.query('gene_name in @self.gene_list').drop(
+                ['index', 'Start_b', 'End_b', 'Strand'], axis=1
             )
+            # if empty, raise error
+            if self.perturbations_gene_overlap.shape[0] == 0:
+                raise ValueError(
+                    "No perturbations found in the gene list, please check the gene list and perturbations."
+                )
+        else:
+            self.perturbations_gene_overlap = self.perturbations.query(
+                'gene_name in @self.gene_list'
+            )
+            if self.perturbations_gene_overlap.shape[0] == 0:
+                raise ValueError(
+                    "No perturbations found in the gene list, please check the gene list and perturbations."
+                )
 
     def __len__(self):
-        return len(self.perturbations_gene_overlap) * self.inference_dataset.reference_region_dataset.zarr_dataset.datapool.n_celltypes
+        return len(self.perturbations_gene_overlap) * self.inference_dataset.zarr_dataset.datapool.n_celltypes
 
     def __getitem__(self, index):
         celltype_id, perturbation_gene_pair_idx = divmod(
@@ -2006,7 +2022,7 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
         perturbation = self.perturbations_gene_overlap.iloc[
             perturbation_gene_pair_idx:perturbation_gene_pair_idx + 1
         ]
-        data_key, celltype_id = self.inference_dataset.reference_region_dataset.zarr_dataset.datapool._get_celltype(
+        data_key, celltype_id = self.inference_dataset.zarr_dataset.datapool._get_celltype(
             celltype_id)
 
         wt_sample = self._get_sample(data_key, celltype_id, gene_name)
@@ -2016,15 +2032,15 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
         return {'WT': wt_sample, 'MUT': mut_sample}
 
     def _get_sample(self, data_key, celltype_id, gene_name, perturbation=None):
-        sample = self.inference_dataset.inference_dataset.get_item_for_gene_in_celltype(
+        sample = self.inference_dataset.zarr_dataset.get_item_for_gene_in_celltype(
             data_key, celltype_id, gene_name,
             mutations=perturbation if self.mode == 'mutation' else None,
             peak_inactivation=perturbation if self.mode == 'peak_inactivation' else None
         )
-
+        print(perturbation)
         peak_start = sample['metadata']['original_peak_start']
         peak_end = peak_start + \
-            self.inference_dataset.reference_region_dataset.num_region_per_sample
+            self.inference_dataset.num_region_per_sample
 
         region_motif, peaks = self.inference_dataset.data_dict[celltype_id]
         atpm = peaks['aTPM'].values
@@ -2036,7 +2052,7 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
         region_motif = region_motif[peak_start:peak_end]
         atpm = atpm[peak_start:peak_end]
 
-        if not self.inference_dataset.reference_region_dataset.quantitative_atac:
+        if not self.inference_dataset.quantitative_atac:
             region_motif = np.concatenate(
                 [region_motif, np.zeros((region_motif.shape[0], 1)) + 1], axis=1
             )
@@ -2050,16 +2066,14 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
         hic_matrix = sample['hic_matrix']
         mask = tssidx
 
-        if self.inference_dataset.reference_region_dataset.transform is not None:
-            region_motif, mask, target = self.inference_dataset.reference_region_dataset.transform(
-                region_motif, tssidx, target
-            )
-
         return {
             'region_motif': region_motif.astype(np.float32),
             'mask': mask,
             'exp_label': target.astype(np.float32),
             'hic_matrix': hic_matrix,
+            'perturb_chrom': perturbation.Chromosome.values[0] if perturbation is not None else 0,
+            'perturb_start': perturbation.Start.values[0] if perturbation is not None else 0,
+            'perturb_end': perturbation.End.values[0] if perturbation is not None else 0,
             'strand': sample['metadata']['strand'],
             'gene_name': sample['metadata']['gene_name'],
             'tss_peak': sample['metadata']['tss_peak'],
@@ -2074,13 +2088,16 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
         perturbation_df = pr(perturbation)
 
         overlap = peaks_df.join(perturbation_df, suffix='_perturb').df
-        overlap_indices = overlap['index'].values
-        overlap_indices = overlap_indices[overlap_indices <
-                                          region_motif.shape[0]]
-        overlap_indices = overlap_indices[overlap_indices > 0]
-        perturbed_region_motif[overlap_indices] = 0
-        atpm[overlap_indices] = 0
-        return perturbed_region_motif, atpm
+        try:
+            overlap_indices = overlap['index'].values
+            overlap_indices = overlap_indices[overlap_indices <
+                                              region_motif.shape[0]]
+            overlap_indices = overlap_indices[overlap_indices > 0]
+            perturbed_region_motif[overlap_indices] = 0
+            atpm[overlap_indices] = 0
+            return perturbed_region_motif, atpm
+        except:
+            return region_motif, atpm
 
 
 class RegionDataset(Dataset):

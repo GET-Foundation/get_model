@@ -79,5 +79,5 @@ print("Region Motif MUT:\n", mut_region_motif)
 # %%
 sns.heatmap(mut_region_motif-wt_region_motif)
 # %%
-rrd.inference_dataset[100]
+rrd.zarr_dataset[100]
 # %%

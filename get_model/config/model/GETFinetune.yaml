@@ -1,7 +1,7 @@
 model:
   _target_: get_model.model.model_refactored.GETFinetune
   cfg:
-    num_regions: 10
+    num_regions: 200
     num_motif: 637
     embed_dim: 768
     num_layers: 12
@@ -15,8 +15,8 @@ model:
       include_reverse_complement: true
       bidirectional_except_ctcf: true
       motif_prior: true
-      learnable: false
-      has_bias: false
+      learnable: true
+      has_bias: true
     atac_attention:
       motif_dim: 639 # 637 motifs + 2 ctcf
       pool_method: "mean"

@@ -552,7 +552,7 @@ class GETRegionFinetune(BaseGETModel):
         self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
         self.apply(self._init_weights)
 
-    def get_input(self, batch):
+    def get_input(self, batch, perturb=False):
         return {
             'region_motif': batch['region_motif'],
         }

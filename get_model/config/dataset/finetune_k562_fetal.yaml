@@ -4,7 +4,7 @@ keep_celltypes: "k562.encode_hg38atac.ENCFF128WZG.max"
 leave_out_celltypes: null
 leave_out_chromosomes: "chr10,chr11"
 peak_name: "peaks_q0.05_fetal_joint_tissue_open_exp"
-dataset_size: 40960
+dataset_size: 4096
 eval_dataset_size: 512
 additional_peak_columns:
   ["Expression_positive", "Expression_negative", "aTPM", "TSS"]
@@ -22,9 +22,3 @@ n_packs: 1
 padding: 0
 mask_ratio: 0
 insulation_subsample_ratio: 1
-reference_region_motif:
-  root: "/pmglocal/xf2217/get_data/"
-  data: "fetal_k562_peaks_motif.hg38.zarr"
-  refdata: "fetal_union_peak_motif_v1.hg38.zarr"
-  count_filter: 0
-  motif_scaler: 1

@@ -131,6 +131,7 @@ class FinetuneConfig:
     model_prefix: str = "model."
     patterns_to_freeze: list = field(default_factory=lambda: [
         "motif_scanner"])
+    patterns_to_drop: list = field(default_factory=lambda: [])
 
 
 @dataclass
@@ -153,6 +154,7 @@ class TaskConfig:
 
 @dataclass
 class Config:
+    log_image: bool = False
     stage: str = 'fit'
     assembly: str = 'hg38'
     model: Any = MISSING

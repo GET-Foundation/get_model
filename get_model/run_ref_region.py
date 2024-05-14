@@ -1,6 +1,7 @@
 import logging
 
 import lightning as L
+import pandas as pd
 import seaborn as sns
 import torch
 import torch.utils.data
@@ -13,7 +14,7 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 
 import wandb
 from get_model.config.config import *
-from get_model.dataset.zarr_dataset import (InferenceReferenceRegionDataset, ReferenceRegionDataset,
+from get_model.dataset.zarr_dataset import (InferenceReferenceRegionDataset, PerturbationInferenceReferenceRegionDataset, ReferenceRegionDataset,
                                             ReferenceRegionMotif,
                                             ReferenceRegionMotifConfig)
 from get_model.model.model_refactored import *
@@ -42,6 +43,12 @@ class ReferenceRegionDataModule(GETDataModule):
     def build_inference_reference_region_dataset(self, zarr_dataset):
         return InferenceReferenceRegionDataset(self.reference_region_motif, zarr_dataset, quantitative_atac=self.cfg.dataset.quantitative_atac, sampling_step=self.cfg.dataset.sampling_step)
 
+    def build_perturbation_inference_dataset(self, zarr_dataset, perturbations, mode='peak_inactivation'):
+        inference_dataset = self.build_inference_reference_region_dataset(
+            zarr_dataset)
+        print("Perturbations mode", mode)
+        return PerturbationInferenceReferenceRegionDataset(inference_dataset, perturbations, mode=mode)
+
     def setup(self, stage=None):
         super().setup(stage)
         if stage == 'fit' or stage is None:
@@ -55,6 +62,12 @@ class ReferenceRegionDataModule(GETDataModule):
             elif self.cfg.task.test_mode == 'inference':
                 self.dataset_predict = self.build_inference_reference_region_dataset(
                     self.dataset_predict)
+            elif 'perturb' in self.cfg.task.test_mode:
+                self.mutations = pd.read_csv(self.cfg.task.mutations, sep='\t')
+                perturb_mode = 'mutation' if 'mutation' in self.cfg.task.test_mode else 'peak_inactivation'
+                self.dataset_predict = self.build_perturbation_inference_dataset(
+                    self.dataset_predict.zarr_dataset, self.mutations, mode=perturb_mode
+                )
         if stage == 'validate':
             self.dataset_val = self.build_from_zarr_dataset(self.dataset_val)
 
@@ -89,6 +102,7 @@ class ReferenceRegionDataModule(GETDataModule):
             batch_size=self.cfg.machine.batch_size,
             num_workers=self.cfg.machine.num_workers,
             drop_last=False,
+            shuffle=False,
         )
 
 
@@ -131,6 +145,7 @@ class RegionLitModel(LitModel):
                     batch, batch_idx, stage='predict')
                 goi_idx = batch['tss_peak']
                 strand = batch['strand']
+                atpm = batch['region_motif'][0][goi_idx, -1].cpu().item()
                 gene_name = batch['gene_name'][0]
                 for key in pred:
                     pred[key] = pred[key][0][:, strand][goi_idx].max()
@@ -138,9 +153,37 @@ class RegionLitModel(LitModel):
                     # save key, pred[key], obs[key] to a csv
                     with open(f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", "a") as f:
                         f.write(
-                            f"{gene_name},{key},{pred[key]},{obs[key]}\n")
+                            f"{gene_name},{key},{pred[key]},{obs[key]},{atpm}\n")
             except Exception as e:
                 print(e)
+        elif self.cfg.task.test_mode == 'perturb':
+            pred = self.perturb_step(batch, batch_idx)
+            strand = batch['WT']['strand']
+            gene_name = batch['WT']['gene_name']
+            tss_peak = batch['WT']['tss_peak']
+            all_tss_peak = batch['WT']['all_tss_peak'].cpu().numpy()
+            all_tss_peak = all_tss_peak[all_tss_peak > 0]
+            all_tss_peak = all_tss_peak[all_tss_peak <
+                                        pred['pred_wt']['exp'][0].shape[0]]
+            print(all_tss_peak)
+            result = {
+                'gene_name': gene_name[0],
+                'strand': strand.cpu().numpy(),
+                'tss_peak': tss_peak.cpu().numpy(),
+                'perturb_chrom': batch['MUT']['perturb_chrom'][0],
+                'perturb_start': batch['MUT']['perturb_start'][0].cpu().item(),
+                'perturb_end': batch['MUT']['perturb_end'][0].cpu().item(),
+                'pred_wt': pred['pred_wt']['exp'][0][:, strand][all_tss_peak].max().cpu().item(),
+                'pred_mut': pred['pred_mut']['exp'][0][:, strand][all_tss_peak].max().cpu().item(),
+                'obs': pred['obs_wt']['exp'][0][:, strand][all_tss_peak].max().cpu().item()
+            }
+            print(result)
+
+            # save to a csv as one row
+            result = pd.DataFrame(result, index=[0])
+            # if not os.path.exists(f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv"):
+            result.to_csv(
+                f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", index=False, mode='a')
 
     def get_model(self):
         model = instantiate(self.cfg.model)
@@ -266,3 +309,36 @@ def run(cfg: DictConfig):
         trainer.validate(model, datamodule=dm)
     if cfg.stage == 'predict':
         trainer.predict(model, datamodule=dm)
+
+
+# def run_downstream(cfg: DictConfig):
+#     torch.set_float32_matmul_precision('medium')
+#     model = LitModel(cfg)
+#     # move the model to the gpu
+#     model.to('cuda')
+#     dm = GETDataModule(cfg)
+#     model.dm = dm
+#     if cfg.machine.num_devices > 0:
+#         strategy = 'auto'
+#         accelerator = 'gpu'
+#         device = cfg.machine.num_devices
+#         if cfg.machine.num_devices > 1:
+#             strategy = 'ddp_spawn'
+#     else:
+#         strategy = 'auto'
+#         accelerator = 'cpu'
+#         device = 'auto'
+#     trainer = L.Trainer(
+#         max_epochs=cfg.training.epochs,
+#         accelerator=accelerator,
+#         num_sanity_val_steps=10,
+#         strategy=strategy,
+#         devices=device,
+#         # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+#         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
+#         gradient_clip_val=cfg.training.clip_grad,
+#         log_every_n_steps=100,
+#         deterministic=True,
+#         default_root_dir=cfg.machine.output_dir,
+#     )
+#     print(run_ppif_task(trainer, model))
