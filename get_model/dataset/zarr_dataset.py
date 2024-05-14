@@ -1547,7 +1547,6 @@ class InferenceDataset(PretrainDataset):
                 peak_end = peaks_in_locus.shape[0]
                 peak_start = max(0, peak_end - self.n_peaks_upper_bound)
             tss_peak = tss_peak - peak_start
-            print(peak_start, peak_end, peaks_in_locus.shape[0])
             track_start = peaks_in_locus.iloc[peak_start].Start-self.padding
             track_end = peaks_in_locus.iloc[peak_end-1].End+self.padding
             original_peak_start = peaks_in_locus.iloc[peak_start].original_peak_index
@@ -1750,7 +1749,6 @@ class ReferenceRegionMotif(object):
             peaks = pr(self.peaks).join(pr(peaks).sort(), suffix='_input').df.query(
                 'Start==Start_input & End==End_input').reset_index(drop=True)
 
-        print(peaks)
         peak_indices = peaks['index'].values
         data = self.data[peak_indices]
         refpeak_indices = refpeaks['index'].values

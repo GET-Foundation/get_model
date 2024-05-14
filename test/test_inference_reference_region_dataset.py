@@ -64,3 +64,21 @@ rrd.__len__()
 # %%
 sum(rrd.zarr_dataset[0]['additional_peak_features']
     [:, 0:2] == rrd[0]['exp_label'])
+# %%
+rrd.data_dict['0.joung_tfatlas.L10M'][1].loc[rrd.zarr_dataset[0]
+                                             ['metadata']['original_peak_start']]
+
+datapool_peak = rrd.zarr_dataset.datapool.peaks_dict['0.joung_tfatlas.L10M']
+
+rrd_peak = rrd.data_dict['0.joung_tfatlas.L10M'][1]
+
+tss_coord = rrd.zarr_dataset[0]['metadata']['tss_coord']
+
+peak_start = rrd.zarr_dataset[0]['metadata']['original_peak_start']
+
+tss_peak = rrd.zarr_dataset[0]['metadata']['tss_peak']
+
+tss_peak_df = datapool_peak.iloc[peak_start+tss_peak]
+# %%
+print(tss_coord > tss_peak_df.Start and tss_coord < tss_peak_df.End)
+# %%
