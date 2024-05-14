@@ -39,7 +39,7 @@ dataset_config = {
     "center_expand_target": 0,
     "random_shift_peak": 0,
     "peak_count_filter": 3,
-    'mask_ratio': 0, 
+    'mask_ratio': 0,
     "padding": 0,
 }
 # %%
@@ -66,14 +66,3 @@ rrd.data_dict['k562.encode_hg38atac.ENCFF128WZG.max'][1].query(
     'Chromosome=="chr11" & Start>5504223 & End<5507000')
 
 # %%
-InferenceReferenceRegionDataset
-- InferenceDataset
-    - peak_orig -> (aTPM filter) -> open peaks
-    - gene_list
-- ReferenceRegionMotif
-   - K562+Fetal
-       - region_motif matrix
-        - peak_orig
-    - Fetal reference
-       - region_motif matrix
-        - peak
