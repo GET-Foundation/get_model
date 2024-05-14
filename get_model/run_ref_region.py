@@ -216,7 +216,7 @@ class RegionLitModel(LitModel):
     def on_validation_epoch_end(self):
         # save self.trainer.callback_metrics to a csv as one row
         metric_dict = dict_to_item(self.trainer.callback_metrics)
-        metric_dict['count_filter'] = self.cfg.dataset.reference_region_motif.count_filter
+        metric_dict['peak_count_filter'] = self.cfg.dataset.reference_region_motif.peak_count_filter
         metric_dict['motif_scaler'] = self.cfg.dataset.reference_region_motif.motif_scaler
         metric_dict['quantitative_atac'] = self.cfg.dataset.quantitative_atac
         # as dataframe

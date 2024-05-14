@@ -244,7 +244,7 @@ class ZarrDataPool(object):
     def __init__(self, zarr_dirs=None, genome_seq_zarr=None, sequence_obj=None, insulation_paths=None, peak_name='peaks', negative_peak_name=None, negative_peak_ratio=0.1, insulation_subsample_ratio=0.1,
                  max_peak_length=None, center_expand_target=None,
                  motif_mean_std_obj=None, additional_peak_columns=None, keep_celltypes=None, leave_out_celltypes=None,
-                 leave_out_chromosomes=None, non_redundant='max_depth', random_shift_peak=None,
+                 leave_out_chromosomes=None, peak_count_filter=0, non_redundant='max_depth', random_shift_peak=None,
                  filter_by_min_depth=None, is_train=True, hic_path=None):
         # Rest of the code
         logging.info('Initializing ZarrDataPool')
@@ -261,6 +261,7 @@ class ZarrDataPool(object):
         self.keep_celltypes = keep_celltypes
         self.leave_out_celltypes = leave_out_celltypes
         self.leave_out_chromosomes = leave_out_chromosomes
+        self.peak_count_filter = peak_count_filter
         self.additional_peak_columns = additional_peak_columns
         self.is_train = is_train
         self.negative_peak_ratio = negative_peak_ratio
@@ -291,7 +292,8 @@ class ZarrDataPool(object):
         self.data_keys = list(self.zarr_dict.keys())
         self.assembly_dict = {data_key: cdz.assembly for data_key,
                               cdz in self.zarr_dict.items()}
-        self.peaks_dict = self._load_peaks()
+        self.peaks_dict = self._load_peaks(
+            self.peak_name, self.peak_count_filter)
         self.insulation = self._load_insulation()
         self.hic_obj = self._load_hic()
 
@@ -446,14 +448,12 @@ class ZarrDataPool(object):
         """Return a list of peak names for a celltype, use glob peaks*"""
         return [key for key in self.zarr_dict[data_key].dataset[celltype_id].keys() if 'peaks' in key]
 
-    def _load_peaks(self, peak_name=None, count_filter=0):
+    def _load_peaks(self, peak_name=None, peak_count_filter=0):
         """
         Load peaks data which is a dictionary of pandas dataframe feather
         """
         logging.info('Loading peaks data')
         peaks_dict = {}
-        if peak_name is None:
-            peak_name = self.peak_name
         for data_key, cdz in self.zarr_dict.items():
             for celltype_id in cdz.ids:
                 # check if the peak name exists in the zarr
@@ -494,7 +494,7 @@ class ZarrDataPool(object):
                 peak = peak.query(
                     'Count>@lower_count_threshold and Count<@upper_count_threshold').reset_index(drop=True)
                 peaks_dict[celltype_id] = pr(peak.query(
-                    'Count>@count_filter').reset_index(drop=True)).sort().df
+                    'Count>@peak_count_filter').reset_index(drop=True)).sort().df
 
         return peaks_dict
 
@@ -1160,9 +1160,11 @@ class PretrainDataset(Dataset):
                  additional_peak_columns=None,
                  max_peak_length=None,
                  center_expand_target=None,
+                 peak_count_filter=0,
                  n_peaks_lower_bound=5,
                  n_peaks_upper_bound=200,
                  n_peaks_sample_gap=50,
+
                  non_redundant=False,
                  filter_by_min_depth=False,
 
@@ -1248,6 +1250,7 @@ class PretrainDataset(Dataset):
         self.n_peaks_lower_bound = n_peaks_lower_bound
         self.n_peaks_upper_bound = n_peaks_upper_bound
         self.n_peaks_sample_gap = n_peaks_sample_gap
+        self.peak_count_filter = peak_count_filter
         self.negative_peak_ratio = negative_peak_ratio
         self.random_shift_peak = random_shift_peak
         self.use_insulation = use_insulation
@@ -1280,6 +1283,7 @@ class PretrainDataset(Dataset):
                                      keep_celltypes=self.keep_celltypes,
                                      leave_out_celltypes=self.leave_out_celltypes,
                                      leave_out_chromosomes=self.leave_out_chromosomes,
+                                     peak_count_filter=self.peak_count_filter,
                                      is_train=self.is_train, non_redundant=self.non_redundant, filter_by_min_depth=self.filter_by_min_depth,
                                      negative_peak_ratio=self.negative_peak_ratio, random_shift_peak=self.random_shift_peak, hic_path=self.hic_path)
 
@@ -1652,7 +1656,6 @@ class ReferenceRegionMotifConfig:
     root: str = '/home/xf2217/Projects/get_data'
     data: str = 'fetal_tfatlas_peaks_motif.hg38.zarr'
     refdata: str = 'fetal_union_peak_motif_v1.hg38.zarr'
-    count_filter: int = 0
     motif_scaler: float = 1.0
 
 
@@ -1668,7 +1671,7 @@ class ReferenceRegionMotif(object):
             os.path.join(cfg.root, cfg.refdata), mode='r')
         self.refdata = self.refdataset['data'][:]
         self.refpeak_names = self.refdataset['peak_names'][:]
-        self.count_filter = cfg.count_filter
+        self.peak_count_filter = cfg.peak_count_filter
         self.motif_scaler = cfg.motif_scaler
         # reorder data to match sorted peak order
         print(self.peaks['index'].values)
@@ -1783,8 +1786,8 @@ class ReferenceRegionDataset(Dataset):
         self.num_region_per_sample = zarr_dataset.n_peaks_upper_bound
         self.leave_out_celltypes = zarr_dataset.leave_out_celltypes
         self.leave_out_chromosomes = zarr_dataset.leave_out_chromosomes
+        self.peak_count_filter = zarr_dataset.peak_count_filter
 
-        self.count_filter = reference_region_motif.count_filter
         self.peak_names = reference_region_motif.peak_names
         self.setup()
 
@@ -1792,7 +1795,7 @@ class ReferenceRegionDataset(Dataset):
     def data_dict(self):
         if not hasattr(self, '_data_dict'):
             self._data_dict = {data_key: self.reference_region_motif.map_peaks_to_motifs(
-                peaks) for data_key, peaks in self.zarr_dataset.datapool._load_peaks(self.zarr_dataset.datapool.peak_name, self.count_filter).items()}
+                peaks) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
         return self._data_dict
 
     def extract_data_list(self, region_motif, peaks):
@@ -1918,8 +1921,8 @@ class InferenceReferenceRegionDataset(Dataset):
         self.leave_out_celltypes = zarr_dataset.leave_out_celltypes
         self.leave_out_chromosomes = zarr_dataset.leave_out_chromosomes
         self.quantitative_atac = quantitative_atac
-
-        self.count_filter = reference_region_motif.count_filter
+        self.reference_region_motif = reference_region_motif
+        self.peak_count_filter = zarr_dataset.peak_count_filter
         self.peak_names = reference_region_motif.peak_names
 
         self.zarr_dataset = zarr_dataset
@@ -1928,7 +1931,7 @@ class InferenceReferenceRegionDataset(Dataset):
     def data_dict(self):
         if not hasattr(self, '_data_dict'):
             self._data_dict = {data_key: self.reference_region_motif.map_peaks_to_motifs(
-                peaks) for data_key, peaks in self.zarr_dataset.datapool._load_peaks(self.zarr_dataset.datapool.peak_name, self.count_filter).items()}
+                peaks) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items().items()}
         return self._data_dict
 
     def __len__(self):

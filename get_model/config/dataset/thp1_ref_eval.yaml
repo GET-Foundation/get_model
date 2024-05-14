@@ -15,6 +15,7 @@ negative_peak_name: null
 negative_peak_ratio: 0
 random_shift_peak: 0
 max_peak_length: 5000
+peak_count_filter: 0
 use_insulation: False
 preload_count: 10
 pin_mem: True
@@ -26,5 +27,4 @@ reference_region_motif:
   root: "/pmglocal/xf2217/get_data/"
   data: "fetal_THP1_peaks_motif.hg38.zarr"
   refdata: "fetal_union_peak_motif_v1.hg38.zarr"
-  count_filter: 0
   motif_scaler: 1

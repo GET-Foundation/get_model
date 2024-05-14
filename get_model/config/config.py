@@ -36,6 +36,7 @@ class DatasetConfig:
     n_peaks_lower_bound: int = 5
     n_peaks_upper_bound: int = 10
     max_peak_length: int = 5000
+    peak_count_filter: int = 0
     center_expand_target: int = 500
     padding: int = 0
     peak_name: str = "peaks_q0.01_tissue_open_exp"
