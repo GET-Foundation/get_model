@@ -62,7 +62,5 @@ rrd = InferenceReferenceRegionDataset(
 rrd.__len__()
 
 # %%
-rrd.data_dict['k562.encode_hg38atac.ENCFF128WZG.max'][1].query(
-    'Chromosome=="chr11" & Start>5504223 & End<5507000')
-
-# %%
+sum(rrd.zarr_dataset[0]['additional_peak_features']
+    [:, 0:2] == rrd[0]['exp_label'])
