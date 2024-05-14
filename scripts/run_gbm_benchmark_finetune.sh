@@ -1,9 +1,7 @@
-set -e
-
-
-project_name="get-zeroshot-gbm-all-pts"
-sample_list_file="/pmglocal/alb2281/scratch/zero_shot_samples_cont.txt"
+project_name="get-zeroshot-gbm-all-celltypes"
+sample_list_file="/pmglocal/alb2281/scratch/zero_shot_samples.txt"
 mapfile -t samples < "$sample_list_file"
+
 
 # # zero-shot with natac ckpt
 for count_filter in 2; do 
