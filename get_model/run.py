@@ -222,10 +222,14 @@ class LitModel(L.LightningModule):
                 mask = torch.zeros_like(target).to(self.device)
                 mask[:, focus, i] = 1
                 pred[target_name].backward(mask)
+                print(target_tensors)
                 for name, embed in target_tensors.items():
-                    jacobians[target_name][str(
-                        i)][name] = embed.grad.detach().cpu().numpy()
-                    embed.grad.zero_()
+
+                    for layer_name, layer_embed in embed.items():
+                        print(embed.shape)
+                        jacobians[target_name][str(
+                            i)][name] = embed.grad.detach().cpu().numpy()
+                        embed.grad.zero_()
 
         embeddings = {name: embed.detach().cpu().numpy()
                       for name, embed in target_tensors.items()}

@@ -639,6 +639,18 @@ class ZarrDataPool(object):
                 celltype_idx -= cdz.n_celltypes
         raise ValueError(f'Celltype index {celltype_idx} is out of range')
 
+    def _get_data_key(self, celltype):
+        """
+        Get the data_key from the celltype ID
+
+        Parameters:
+        celltype (str): The ID of the cell type.
+
+        Returns:
+        str: The data_key.
+        """
+        return self.celltype_to_data_key[celltype]
+
     def _get_chr_chunk_idx(self, chunk_idx):
         """
         Get the chromosome name and chunk index from the chunk index
@@ -1614,40 +1626,42 @@ class PerturbationInferenceDataset(Dataset):
         super().__init__()
         self.inference_dataset = inference_dataset
         self.perturbations = perturbations
-        self.gene_list = inference_dataset.gene_list
+        self.gene_list = inference_dataset.accessible_genes
         self.gencode_obj = inference_dataset.gencode_obj
         self.mode = mode
         self.calculate_mutation_per_gene()
         print(f"n_celltype: {self.inference_dataset.datapool.n_celltypes}")
         print(f"n_gene: {len(self.gene_list)}")
         print(f"n_perturbation: {len(self.perturbations)}")
+        print(f"overlapping perturbations across cell types: {len(self)}")
 
     def calculate_mutation_per_gene(self):
         """Not all mutations are in the same gene, calculate the number of mutations for each gene as a dictionary"""
-        mutation_per_gene = {}
-        from pyranges import PyRanges as pr
-
-        # extend tss to 4mbp
-        self.perturbations_gene_overlap = pr(self.perturbations).join(pr(self.gencode_obj.gtf).extend(
-            2_000_000)).df.query('gene_name in @self.gene_list').drop(['index', 'Start_b', 'End_b', 'Strand'], axis=1)
+        perturbations_gene_overlap = []
+        for celltype, gene_list in self.gene_list.items():
+            df = pr(self.perturbations).join(pr(self.gencode_obj.gtf).extend(
+            2_000_000)).df.query('gene_name in @gene_list').drop(['index', 'Start_b', 'End_b', 'Strand'], axis=1)
+            df['celltype'] = celltype
+            perturbations_gene_overlap.append(df)
+        self.perturbations_gene_overlap = pd.concat(
+            perturbations_gene_overlap, ignore_index=True)
+        
 
     def __len__(self):
-        return len(self.perturbations_gene_overlap) * self.inference_dataset.datapool.n_celltypes
+        return len(self.perturbations_gene_overlap)
 
-    def __getitem__(self, index):
+    def __getitem__(self, i):
         """return both wild type and mutated batch in a tuple. implement by calling the get_item_for_gene_in_celltype function with or without specify mutation or peak inactivation. loop through the mutations list or peak inactivation list."""
-        celltype_id = index // len(self.perturbations_gene_overlap)
-        perturbation_gene_pair_idx = index % len(
-            self.perturbations_gene_overlap)
-        gene_name = self.perturbations_gene_overlap.gene_name.values[perturbation_gene_pair_idx]
+        celltype = self.perturbations_gene_overlap.celltype.values[i]
+        gene_name = self.perturbations_gene_overlap.gene_name.values[i]
         perturbation = self.perturbations_gene_overlap.iloc[
-            perturbation_gene_pair_idx:perturbation_gene_pair_idx+1]
-        data_key, celltype_id = self.inference_dataset.datapool._get_celltype(
-            celltype_id)
+            i:i+1]
+        data_key = self.inference_dataset.datapool._get_data_key(
+            celltype)
         args = {'mutations': perturbation, 'peak_inactivation': None} if self.mode == 'mutation' else {
             'mutations': None, 'peak_inactivation': perturbation}
-        return {'WT': self.inference_dataset.get_item_for_gene_in_celltype(data_key, celltype_id, gene_name, mutations=None, peak_inactivation=None),
-                'MUT': self.inference_dataset.get_item_for_gene_in_celltype(data_key, celltype_id, gene_name, **args)}
+        return {'WT': self.inference_dataset.get_item_for_gene_in_celltype(data_key, celltype, gene_name, mutations=None, peak_inactivation=None),
+                'MUT': self.inference_dataset.get_item_for_gene_in_celltype(data_key, celltype, gene_name, **args)}
 
 
 @dataclass
@@ -1769,7 +1783,7 @@ class ReferenceRegionDataset(Dataset):
     def __init__(self, reference_region_motif: ReferenceRegionMotif,
                  zarr_dataset: PretrainDataset,
                  transform=None,
-                 quantitative_atac: bool = True,
+                 quantitative_atac: bool = False,
                  sampling_step: int = 50,
                  ) -> None:
         super().__init__()
@@ -1907,7 +1921,7 @@ class ReferenceRegionDataset(Dataset):
 class InferenceReferenceRegionDataset(Dataset):
     def __init__(self, reference_region_motif: ReferenceRegionMotif,
                  zarr_dataset: InferenceDataset,
-                 quantitative_atac: bool = True,
+                 quantitative_atac: bool = False,
                  sampling_step: int = 50,
                  ) -> None:
         super().__init__()
@@ -1979,7 +1993,7 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
         super().__init__()
         self.inference_dataset = inference_dataset
         self.perturbations = perturbations
-        self.gene_list = inference_dataset.zarr_dataset.gene_list
+        self.gene_list = inference_dataset.zarr_dataset.accessible_genes #{celltype_id: gene_list_for_celltype}
         self.gencode_obj = inference_dataset.zarr_dataset.gencode_obj
         self.mode = mode
         self._calculate_mutation_per_gene()
@@ -1992,42 +2006,52 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
         """Not all mutations are in the same gene, calculate the number of mutations for each gene as a dictionary"""
         from pyranges import PyRanges as pr
         if 'gene_name' not in self.perturbations.columns:
-            # Extend TSS to 4mbp
-            self.perturbations_gene_overlap = pr(self.perturbations).join(
-                pr(self.gencode_obj.gtf).extend(2_000_000)
-            ).df.query('gene_name in @self.gene_list').drop(
-                ['index', 'Start_b', 'End_b', 'Strand'], axis=1
-            )
+            perturbations_gene_overlap = []
+            for celltype, gene_list in self.gene_list.items():
+                # Extend TSS to 4mbp
+                celltype_perturbation = pr(self.perturbations).join(
+                    pr(self.gencode_obj.gtf).extend(2_000_000)
+                ).df.query('gene_name in @gene_list').drop(
+                    ['index', 'Start_b', 'End_b', 'Strand'], axis=1
+                )
+                celltype_perturbation['celltype'] = celltype
+                perturbations_gene_overlap.append(celltype_perturbation)
+
+            self.perturbations_gene_overlap = pd.concat(
+                perturbations_gene_overlap)
             # if empty, raise error
             if self.perturbations_gene_overlap.shape[0] == 0:
                 raise ValueError(
                     "No perturbations found in the gene list, please check the gene list and perturbations."
                 )
         else:
-            self.perturbations_gene_overlap = self.perturbations.query(
-                'gene_name in @self.gene_list'
-            )
+            perturbations_gene_overlap = []
+            for celltype, gene_list in self.gene_list.items():
+                celltype_perturbation = self.perturbations.query('gene_name in @gene_list') 
+                celltype_perturbation['celltype'] = celltype
+                perturbations_gene_overlap.append(celltype_perturbation)
+
+            self.perturbations_gene_overlap = pd.concat(perturbations_gene_overlap)
             if self.perturbations_gene_overlap.shape[0] == 0:
                 raise ValueError(
                     "No perturbations found in the gene list, please check the gene list and perturbations."
                 )
 
     def __len__(self):
-        return len(self.perturbations_gene_overlap) * self.inference_dataset.zarr_dataset.datapool.n_celltypes
+        return len(self.perturbations_gene_overlap)
 
-    def __getitem__(self, index):
-        celltype_id, perturbation_gene_pair_idx = divmod(
-            index, len(self.perturbations_gene_overlap))
-        gene_name = self.perturbations_gene_overlap.gene_name.values[perturbation_gene_pair_idx]
+    def __getitem__(self, i):
+        celltype = self.perturbations_gene_overlap.celltype.values[i]
+        gene_name = self.perturbations_gene_overlap.gene_name.values[i]
         perturbation = self.perturbations_gene_overlap.iloc[
-            perturbation_gene_pair_idx:perturbation_gene_pair_idx + 1
+            i:i + 1
         ]
-        data_key, celltype_id = self.inference_dataset.zarr_dataset.datapool._get_celltype(
-            celltype_id)
+        data_key = self.inference_dataset.zarr_dataset.datapool._get_data_key(
+            celltype)
 
-        wt_sample = self._get_sample(data_key, celltype_id, gene_name)
+        wt_sample = self._get_sample(data_key, celltype, gene_name)
         mut_sample = self._get_sample(
-            data_key, celltype_id, gene_name, perturbation)
+            data_key, celltype, gene_name, perturbation)
 
         return {'WT': wt_sample, 'MUT': mut_sample}
 
@@ -2037,20 +2061,17 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
             mutations=perturbation if self.mode == 'mutation' else None,
             peak_inactivation=perturbation if self.mode == 'peak_inactivation' else None
         )
-        print(perturbation)
         peak_start = sample['metadata']['original_peak_start']
         peak_end = peak_start + \
             self.inference_dataset.num_region_per_sample
 
-        region_motif, peaks = self.inference_dataset.data_dict[celltype_id]
+        region_motif = self.inference_dataset.data_dict[celltype_id][0][peak_start:peak_end]
+        peaks = self.inference_dataset.data_dict[celltype_id][1][peak_start:peak_end]
         atpm = peaks['aTPM'].values
 
         if self.mode == 'peak_inactivation' and perturbation is not None:
             region_motif, atpm = self._apply_peak_inactivation(
                 region_motif, perturbation, peaks, atpm)
-
-        region_motif = region_motif[peak_start:peak_end]
-        atpm = atpm[peak_start:peak_end]
 
         if not self.inference_dataset.quantitative_atac:
             region_motif = np.concatenate(
@@ -2082,9 +2103,8 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
 
     def _apply_peak_inactivation(self, region_motif, perturbation, peaks, atpm):
         """Apply peak inactivation by setting the corresponding peak/region in region_motif to 0."""
-        from pyranges import PyRanges as pr
         perturbed_region_motif = region_motif.copy()
-        peaks_df = pr(peaks[['Chromosome', 'Start', 'End']].reset_index())
+        peaks_df = pr(peaks[['Chromosome', 'Start', 'End']].reset_index(drop=True).reset_index())
         perturbation_df = pr(perturbation)
 
         overlap = peaks_df.join(perturbation_df, suffix='_perturb').df
@@ -2097,6 +2117,8 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
             atpm[overlap_indices] = 0
             return perturbed_region_motif, atpm
         except:
+            logging.warning(
+                f"Failed to apply peak inactivation for {perturbation}, no overlapping peaks found.")
             return region_motif, atpm
 
 

@@ -59,14 +59,14 @@ class ReferenceRegionDataModule(GETDataModule):
             if self.cfg.task.test_mode == 'predict':
                 self.dataset_predict = self.build_from_zarr_dataset(
                     self.dataset_predict)
-            elif self.cfg.task.test_mode == 'inference':
+            elif self.cfg.task.test_mode == 'inference' or self.cfg.task.test_mode == 'interpret':
                 self.dataset_predict = self.build_inference_reference_region_dataset(
                     self.dataset_predict)
             elif 'perturb' in self.cfg.task.test_mode:
                 self.mutations = pd.read_csv(self.cfg.task.mutations, sep='\t')
                 perturb_mode = 'mutation' if 'mutation' in self.cfg.task.test_mode else 'peak_inactivation'
                 self.dataset_predict = self.build_perturbation_inference_dataset(
-                    self.dataset_predict.zarr_dataset, self.mutations, mode=perturb_mode
+                    self.dataset_predict.inference_dataset, self.mutations, mode=perturb_mode
                 )
         if stage == 'validate':
             self.dataset_val = self.build_from_zarr_dataset(self.dataset_val)
@@ -157,33 +157,49 @@ class RegionLitModel(LitModel):
             except Exception as e:
                 print(e)
         elif self.cfg.task.test_mode == 'perturb':
+            # try:
             pred = self.perturb_step(batch, batch_idx)
-            strand = batch['WT']['strand']
-            gene_name = batch['WT']['gene_name']
-            tss_peak = batch['WT']['tss_peak']
-            all_tss_peak = batch['WT']['all_tss_peak'].cpu().numpy()
-            all_tss_peak = all_tss_peak[all_tss_peak > 0]
-            all_tss_peak = all_tss_peak[all_tss_peak <
-                                        pred['pred_wt']['exp'][0].shape[0]]
-            print(all_tss_peak)
-            result = {
-                'gene_name': gene_name[0],
-                'strand': strand.cpu().numpy(),
-                'tss_peak': tss_peak.cpu().numpy(),
-                'perturb_chrom': batch['MUT']['perturb_chrom'][0],
-                'perturb_start': batch['MUT']['perturb_start'][0].cpu().item(),
-                'perturb_end': batch['MUT']['perturb_end'][0].cpu().item(),
-                'pred_wt': pred['pred_wt']['exp'][0][:, strand][all_tss_peak].max().cpu().item(),
-                'pred_mut': pred['pred_mut']['exp'][0][:, strand][all_tss_peak].max().cpu().item(),
-                'obs': pred['obs_wt']['exp'][0][:, strand][all_tss_peak].max().cpu().item()
-            }
-            print(result)
+            batch_size = len(batch['WT']['strand'])
+            results = []
 
-            # save to a csv as one row
-            result = pd.DataFrame(result, index=[0])
-            # if not os.path.exists(f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv"):
-            result.to_csv(
-                f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", index=False, mode='a')
+            for i in range(batch_size):
+                strand = batch['WT']['strand'][i].cpu().numpy()
+                gene_name = batch['WT']['gene_name'][i]
+                tss_peak = batch['WT']['tss_peak'][i].cpu().numpy()
+                all_tss_peak = batch['WT']['all_tss_peak'][i].cpu().numpy()
+                all_tss_peak = all_tss_peak[all_tss_peak > 0]
+                all_tss_peak = all_tss_peak[all_tss_peak < pred['pred_wt']['exp'][i].shape[0]]
+
+                result = {
+                    'gene_name': gene_name,
+                    'strand': strand,
+                    'tss_peak': tss_peak,
+                    'perturb_chrom': batch['MUT']['perturb_chrom'][i],
+                    'perturb_start': batch['MUT']['perturb_start'][i].cpu().item(),
+                    'perturb_end': batch['MUT']['perturb_end'][i].cpu().item(),
+                    'pred_wt': pred['pred_wt']['exp'][i][:, strand][all_tss_peak].mean().cpu().item(),
+                    'pred_mut': pred['pred_mut']['exp'][i][:, strand][all_tss_peak].mean().cpu().item(),
+                    'obs': pred['obs_wt']['exp'][i][:, strand][all_tss_peak].mean().cpu().item()
+                }
+                results.append(result)
+
+            # Save results to a csv as multiple rows
+            results_df = pd.DataFrame(results)
+            results_df.to_csv(
+                f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", index=False, mode='a', header=False
+            )
+            # except Exception as e:
+                # print(e)
+        elif self.cfg.task.test_mode == 'interpret':
+            tss_peak = batch['tss_peak'][0].cpu().numpy()
+            # assume focus is the center peaks in the input sample
+            with torch.enable_grad():
+                pred, obs, jacobians, embeddings = self.interpret_step(batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=tss_peak)
+                # print shape of each
+                print(pred, obs, jacobians, embeddings)
+            
+        
+
 
     def get_model(self):
         model = instantiate(self.cfg.model)
@@ -216,7 +232,7 @@ class RegionLitModel(LitModel):
     def on_validation_epoch_end(self):
         # save self.trainer.callback_metrics to a csv as one row
         metric_dict = dict_to_item(self.trainer.callback_metrics)
-        metric_dict['peak_count_filter'] = self.cfg.dataset.reference_region_motif.peak_count_filter
+        metric_dict['peak_count_filter'] = self.cfg.dataset.peak_count_filter
         metric_dict['motif_scaler'] = self.cfg.dataset.reference_region_motif.motif_scaler
         metric_dict['quantitative_atac'] = self.cfg.dataset.quantitative_atac
         # as dataframe
@@ -285,6 +301,9 @@ def run(cfg: DictConfig):
         strategy = 'auto'
         accelerator = 'cpu'
         device = 'auto'
+    inference_mode = True
+    if 'interpret' in cfg.task.test_mode:
+        inference_mode = False
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator=accelerator,
@@ -302,6 +321,7 @@ def run(cfg: DictConfig):
         log_every_n_steps=4,
         val_check_interval=0.5,
         default_root_dir=cfg.machine.output_dir,
+        inference_mode=inference_mode
     )
     if cfg.stage == 'fit':
         trainer.fit(model, dm)
