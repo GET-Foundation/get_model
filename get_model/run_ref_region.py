@@ -5,6 +5,7 @@ import pandas as pd
 import seaborn as sns
 import torch
 import torch.utils.data
+import zarr
 from hydra.utils import instantiate
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
@@ -14,14 +15,15 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 
 import wandb
 from get_model.config.config import *
-from get_model.dataset.zarr_dataset import (InferenceReferenceRegionDataset, PerturbationInferenceReferenceRegionDataset, ReferenceRegionDataset,
-                                            ReferenceRegionMotif,
-                                            ReferenceRegionMotifConfig)
+from get_model.dataset.zarr_dataset import (
+    InferenceReferenceRegionDataset,
+    PerturbationInferenceReferenceRegionDataset, ReferenceRegionDataset,
+    ReferenceRegionMotif, ReferenceRegionMotifConfig)
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
 from get_model.run import GETDataModule, LitModel
-from get_model.utils import (cosine_scheduler, load_checkpoint, remove_keys,
+from get_model.utils import (cosine_scheduler, load_checkpoint, recursive_detach, recursive_numpy, recursive_save_to_zarr, remove_keys,
                              rename_lit_state_dict, rename_v1_finetune_keys,
                              rename_v1_pretrain_keys)
 
@@ -191,16 +193,40 @@ class RegionLitModel(LitModel):
             # except Exception as e:
                 # print(e)
         elif self.cfg.task.test_mode == 'interpret':
+            all_tss_peak = batch['all_tss_peak'][0].cpu().numpy()
             tss_peak = batch['tss_peak'][0].cpu().numpy()
             # assume focus is the center peaks in the input sample
-            with torch.enable_grad():
-                pred, obs, jacobians, embeddings = self.interpret_step(batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=tss_peak)
-                # print shape of each
-                print(pred, obs, jacobians, embeddings)
+            torch.set_grad_enabled(True)
+            pred, obs, jacobians, embeddings = self.interpret_step(batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=tss_peak)
+            pred = np.array([pred['exp'][i][:, batch['strand'][i].cpu().numpy()][batch['all_tss_peak'][i].cpu().numpy()].mean() for i in range(len(batch['gene_name']))])
+            obs = np.array([obs['exp'][i][:, batch['strand'][i].cpu().numpy()][batch['all_tss_peak'][i].cpu().numpy()].mean() for i in range(len(batch['gene_name']))])
+            gene_names = recursive_numpy(recursive_detach(batch['gene_name']))
+            for i, gene_name in enumerate(gene_names):
+                if len(gene_name)< 20:
+                    gene_names[i] = gene_name + ' '*(15-len(gene_name))
+            chromosomes = recursive_numpy(recursive_detach(batch['chromosome']))
+            for i, chromosome in enumerate(chromosomes):
+                if len(chromosome) < 10:
+                    chromosomes[i] = chromosome + ' '*(10-len(chromosome))
+            
+            result = {
+                'pred': pred,
+                'obs': obs,
+                'jacobians': jacobians,
+                'input': embeddings['input']['region_motif'],
+                'peaks': recursive_numpy(recursive_detach(batch['peak_coord'])),
+                'chromosome': chromosomes,
+                'strand': recursive_numpy(recursive_detach(batch['strand'])),
+                'gene_name': gene_names,
+            }
+            # save to zarr
+            zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.zarr" 
+            from numcodecs import VLenUTF8
+            object_codec = VLenUTF8()
+            z = zarr.open(zarr_path, mode='a')
+            recursive_save_to_zarr(z, result,  object_codec=object_codec, overwrite=True)
             
         
-
-
     def get_model(self):
         model = instantiate(self.cfg.model)
         if self.cfg.finetune.checkpoint is not None:

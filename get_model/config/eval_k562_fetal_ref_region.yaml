@@ -41,7 +41,7 @@ wandb:
 finetune:
   pretrain_checkpoint: false
   strict: true
-  checkpoint: "/burg/pmg/users/xf2217/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
+  checkpoint: /pmglocal/xf2217/GET_STARTED/get_model/GETRegionFinetune_k562/ygbofx71/checkpoints/best.ckpt
   model_prefix: "model."
   patterns_to_freeze: []
 

@@ -1811,6 +1811,7 @@ class ReferenceRegionDataset(Dataset):
 
     def extract_data_list(self, region_motif, peaks):
         region_motif_list = []
+        peak_list = []
         target_list = []
         tssidx_list = []
         hic_matrix_list = []
@@ -1871,28 +1872,32 @@ class ReferenceRegionDataset(Dataset):
                         hic_matrix_list.append(0)
 
                     region_motif_list.append(region_motif_i)
+                    peak_list.append(celltype_peak_annot_i)
                     target_list.append(target_i)
                     tssidx_list.append(tssidx_i)
-        return region_motif_list, target_list, tssidx_list, hic_matrix_list
+        return peak_list, region_motif_list, target_list, tssidx_list, hic_matrix_list
 
     def setup(self):
         self.peaks = []
+        self.region_motif = []
         self.targets = []
         self.tssidxs = []
         self.hic_matrices = []
 
         for data_key, (region_motif, peaks) in tqdm(self.data_dict.items()):
-            peak_list_i, target_list_i, tssidx_list_i, hic_matrix_list_i = self.extract_data_list(
+            peak_list_i, region_motif_list_i, target_list_i, tssidx_list_i, hic_matrix_list_i = self.extract_data_list(
                 region_motif, peaks)
             self.peaks.extend(peak_list_i)
+            self.region_motif.extend(region_motif_list_i)
             self.targets.extend(target_list_i)
             self.tssidxs.extend(tssidx_list_i)
             self.hic_matrices.extend(hic_matrix_list_i)
 
     def __len__(self):
-        return len(self.peaks)
+        return len(self.region_motif)
 
     def __getitem__(self, index):
+        region_motif = self.region_motif[index]
         peak = self.peaks[index]
         target = self.targets[index]
         tssidx = self.tssidxs[index]
@@ -1909,11 +1914,13 @@ class ReferenceRegionDataset(Dataset):
         else:
             mask = tssidx
         if self.transform is not None:
-            peak, mask, target = self.transform(peak, tssidx, target)
-        if peak.shape[0] == 1:
-            peak = peak.squeeze(0)
-        return {'region_motif': peak.toarray().astype(np.float32),
+            region_motif, mask, target = self.transform(region_motif, tssidx, target)
+        if region_motif.shape[0] == 1:
+            region_motif = region_motif.squeeze(0)
+        return {'region_motif': region_motif.toarray().astype(np.float32),
                 'mask': mask,
+                'chromosome': peak['Chromosome'].values[0],
+                'peak': peak[['Start', 'End']].values,
                 'exp_label': target.toarray().astype(np.float32),
                 'hic_matrix': hic_matrix}
 
@@ -1950,13 +1957,19 @@ class InferenceReferenceRegionDataset(Dataset):
 
     def __getitem__(self, index):
         sample = self.zarr_dataset[index]
+        target = sample['additional_peak_features'][:, 0:2]
+        tssidx = sample['additional_peak_features'][:, 3]
+        hic_matrix = sample['hic_matrix']
+        mask = tssidx
         peak_start = sample['metadata']['original_peak_start']
         celltype_id = sample['metadata']['celltype_id']
         strand = sample['metadata']['strand']
         gene_name = sample['metadata']['gene_name']
-        peak_end = peak_start + self.num_region_per_sample
+        peak_end = peak_start + target.shape[0]
         region_motif, peaks = self.data_dict[celltype_id]
         region_motif = region_motif[peak_start:peak_end]
+        chromosome = peaks['Chromosome'].values[peak_start]
+        peaks_coord = peaks[['Start', 'End']].values[peak_start:peak_end]
         atpm = peaks['aTPM'].values[peak_start:peak_end]
         # append binary or quantitative atac signal
         if not self.quantitative_atac:
@@ -1965,11 +1978,10 @@ class InferenceReferenceRegionDataset(Dataset):
         else:
             region_motif = np.concatenate(
                 [region_motif, atpm.reshape(-1, 1)/atpm.reshape(-1, 1).max()], axis=1)
-        target = sample['additional_peak_features'][:, 0:2]
-        tssidx = sample['additional_peak_features'][:, 3]
-        hic_matrix = sample['hic_matrix']
-        mask = tssidx
+
         return {'region_motif': region_motif.astype(np.float32),
+                'chromosome': chromosome,
+                'peak_coord': peaks_coord,
                 'mask': mask,
                 'exp_label': target.astype(np.float32),
                 'hic_matrix': hic_matrix,
@@ -2061,9 +2073,13 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
             mutations=perturbation if self.mode == 'mutation' else None,
             peak_inactivation=perturbation if self.mode == 'peak_inactivation' else None
         )
+        target = sample['additional_peak_features'][:, 0:2]
+        tssidx = sample['additional_peak_features'][:, 3]
+        hic_matrix = sample['hic_matrix']
+        mask = tssidx
+
         peak_start = sample['metadata']['original_peak_start']
-        peak_end = peak_start + \
-            self.inference_dataset.num_region_per_sample
+        peak_end = peak_start + target.shape[0]
 
         region_motif = self.inference_dataset.data_dict[celltype_id][0][peak_start:peak_end]
         peaks = self.inference_dataset.data_dict[celltype_id][1][peak_start:peak_end]
@@ -2082,10 +2098,7 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
                 [region_motif, atpm.reshape(-1, 1) / atpm.reshape(-1, 1).max()], axis=1
             )
 
-        target = sample['additional_peak_features'][:, 0:2]
-        tssidx = sample['additional_peak_features'][:, 3]
-        hic_matrix = sample['hic_matrix']
-        mask = tssidx
+
 
         return {
             'region_motif': region_motif.astype(np.float32),

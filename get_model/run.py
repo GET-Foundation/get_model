@@ -27,7 +27,7 @@ from get_model.dataset.zarr_dataset import (InferenceDataset,
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import create_optimizer
-from get_model.utils import (cosine_scheduler, load_checkpoint, remove_keys,
+from get_model.utils import (cosine_scheduler, load_checkpoint, recursive_detach, recursive_numpy, remove_keys,
                              rename_lit_state_dict, rename_v1_finetune_keys,
                              rename_v1_pretrain_keys)
 
@@ -185,24 +185,26 @@ class LitModel(L.LightningModule):
         input = self.model.get_input(batch)
         assert focus is not None, "Please provide a focus position for interpretation"
         assert layer_names is not None, "Please provide a list of layer names for interpretation"
-        for layer_name in layer_names:
-            assert layer_name in self.model.get_layer_names(
-            ), f"{layer_name} is not valid, valid layers are: {self.model.get_layer_names()}"
+        for layer_input_name in layer_names:
+            assert layer_input_name in self.model.get_layer_names(
+            ), f"{layer_input_name} is not valid, valid layers are: {self.model.get_layer_names()}"
 
         # Register hooks to capture the target tensors
         def capture_target_tensor(name):
             def hook(module, input, output):
-                target_tensors[name] = output
                 # Retain the gradient of the target tensor
                 output.retain_grad()
+                target_tensors[name] = output
             return hook
 
         if layer_names is None or len(layer_names) == 0:
             target_tensors['input'] = input
+            for key, tensor in input.items():
+                tensor.requires_grad = True
         else:
-            for name in layer_names:
-                layer = self.model.get_layer(name)
-                hook = layer.register_forward_hook(capture_target_tensor(name))
+            for layer_name in layer_names:
+                layer = self.model.get_layer(layer_name)
+                hook = layer.register_forward_hook(capture_target_tensor(layer_name))
                 hooks.append(hook)
 
         # Forward pass
@@ -222,22 +224,25 @@ class LitModel(L.LightningModule):
                 mask = torch.zeros_like(target).to(self.device)
                 mask[:, focus, i] = 1
                 pred[target_name].backward(mask)
-                print(target_tensors)
-                for name, embed in target_tensors.items():
-
-                    for layer_name, layer_embed in embed.items():
-                        print(embed.shape)
+                for layer_name, layer in target_tensors.items():
+                    if isinstance(layer, torch.Tensor):
+                        if layer.grad is None:
+                            continue
                         jacobians[target_name][str(
-                            i)][name] = embed.grad.detach().cpu().numpy()
-                        embed.grad.zero_()
-
-        embeddings = {name: embed.detach().cpu().numpy()
-                      for name, embed in target_tensors.items()}
-        for target_name, target in pred.items():
-            pred[target_name] = target.detach().cpu().numpy()
-        for target_name, target in obs.items():
-            obs[target_name] = target.detach().cpu().numpy()
-        return pred, obs, jacobians, embeddings
+                            i)][layer_name] = layer.grad.detach().cpu().numpy()
+                        layer.grad.zero_()
+                    elif isinstance(layer, dict):
+                        for layer_input_name, layer_input in layer.items():
+                            if layer_input.grad is None:
+                                continue
+                            jacobians[target_name][str(
+                                i)][layer_name] = layer_input.grad.detach().cpu().numpy()
+                            layer_input.grad.zero_()
+        pred = recursive_numpy(recursive_detach(pred))
+        obs = recursive_numpy(recursive_detach(obs))
+        jacobians = recursive_numpy(jacobians)
+        target_tensors = recursive_numpy(target_tensors)
+        return pred, obs, jacobians, target_tensors
 
     def configure_optimizers(self):
         # a adam optimizer with a scheduler using lightning function
