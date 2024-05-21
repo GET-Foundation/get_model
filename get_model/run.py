@@ -27,7 +27,8 @@ from get_model.dataset.zarr_dataset import (InferenceDataset,
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import create_optimizer
-from get_model.utils import (cosine_scheduler, load_checkpoint, recursive_detach, recursive_numpy, remove_keys,
+from get_model.utils import (cosine_scheduler, load_checkpoint,
+                             recursive_detach, recursive_numpy, remove_keys,
                              rename_lit_state_dict, rename_v1_finetune_keys,
                              rename_v1_pretrain_keys)
 

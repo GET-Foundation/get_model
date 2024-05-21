@@ -1490,6 +1490,8 @@ class InferenceDataset(PretrainDataset):
         window_idx = info['window_idx'][0]
         gene_info = self._get_gene_info_from_window_idx(
             window_idx).query('gene_name==@gene_name')
+        if gene_info.shape[0] == 0:
+            return None
         return self._get_item_for_gene_in_celltype(mutations, peak_inactivation, track_start, track_end, gene_info, info)
 
     def _get_item_for_gene_in_celltype(self, mutations, peak_inactivation, track_start, track_end, gene_info, info):
@@ -1587,18 +1589,23 @@ class InferenceDataset(PretrainDataset):
             columns_to_include += self.additional_peak_columns
         gene_info_copy = gene_info.copy().query('gene_name==@gene_name')
         if gene_info_copy.shape[0] == 0:
-            raise ValueError(
+            print(
                 f"Gene {gene_name} not found in the gene information, removing and skipping it.")
         gene_df = pr(peaks_in_locus.copy().reset_index()).join(pr(gene_info_copy[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates(
         )).extend(self.PROMOTER_EXTEND), suffix="_gene", how='left', apply_strand_suffix=False).df[columns_to_include].set_index('index')
         gene_df = gene_df.query('gene_name==@gene_name')
         if gene_df.shape[0] == 0:
-            raise ValueError(
+            print(
                 f"Gene {gene_name} not found in the peak information, removing and skipping it.")
-
-        strand = gene_df.Strand.values[0]
-        all_tss_peak = gene_df.index.values
-        tss_peak = all_tss_peak[0] if strand == '+' else all_tss_peak[-1]
+            return
+        elif gene_df.shape[0] > 1:
+            strand = gene_df.Strand.values[0]
+            all_tss_peak = gene_df.index.values
+            tss_peak = all_tss_peak[0] if strand == '+' else all_tss_peak[-1]
+        else:
+            strand = gene_df.Strand.values
+            tss_peak = gene_df.index.values
+            all_tss_peak = [tss_peak]
         return gene_df, tss_peak, all_tss_peak
 
     def get_peaks_around_pos(self, celltype_id, chr_name, pos):
