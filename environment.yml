@@ -503,3 +503,4 @@ dependencies:
       - hydra-core
       - lightning
       - pytest
+      - minLoRA @ git+https://github.com/cccntu/minLoRA.git@master

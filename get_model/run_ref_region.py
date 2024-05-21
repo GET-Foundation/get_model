@@ -12,7 +12,7 @@ from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
 from matplotlib import pyplot as plt
 from omegaconf import MISSING, DictConfig, OmegaConf
-
+from minlora import add_lora, merge_lora
 import wandb
 from get_model.config.config import *
 from get_model.dataset.zarr_dataset import (
@@ -250,6 +250,24 @@ class RegionLitModel(LitModel):
                     checkpoint_model = rename_v1_finetune_keys(
                         checkpoint_model)
                     model.load_state_dict(checkpoint_model, strict=strict)
+        
+        # Add LoRA to the model if specified in the configuration
+        if self.cfg.finetune.use_lora:
+            add_lora(model)
+            
+            # Load LoRA parameters based on the stage
+            if self.cfg.stage == 'fit':
+                # Load LoRA parameters for training
+                if self.cfg.finetune.lora_checkpoint is not None:
+                    lora_state_dict = torch.load(self.cfg.finetune.lora_checkpoint)
+                    model.load_state_dict(lora_state_dict, strict=False)
+            elif self.cfg.stage in ['validate', 'predict']:
+                # Load LoRA parameters for validation and prediction
+                if self.cfg.finetune.lora_checkpoint is not None:
+                    lora_state_dict = torch.load(self.cfg.finetune.lora_checkpoint)
+                    model.load_state_dict(lora_state_dict, strict=False)
+                    merge_lora(model)  # Merge LoRA parameters into the model
+        
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         print("Model = %s" % str(model))
