@@ -1677,6 +1677,7 @@ class ReferenceRegionMotifConfig:
     data: str = 'fetal_gbm_peak_motif_v1.hg38.zarr'
     refdata: str = 'fetal_union_peak_motif_v1.hg38.zarr'
     motif_scaler: float = 1.0
+    count_filter: float = 2
 
 
 class ReferenceRegionMotif(object):

@@ -12,7 +12,7 @@ from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
 from matplotlib import pyplot as plt
 from omegaconf import MISSING, DictConfig, OmegaConf
-from minlora import add_lora, merge_lora
+# from minlora import add_lora, merge_lora
 import wandb
 from get_model.config.config import *
 from get_model.dataset.zarr_dataset import (
