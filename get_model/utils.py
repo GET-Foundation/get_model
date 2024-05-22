@@ -6,21 +6,21 @@
 # https://github.com/facebookresearch/deit
 # https://github.com/facebookresearch/dino
 # --------------------------------------------------------'
-import io
-import os
-import math
-import time
-import json
-from collections import defaultdict, deque
 import datetime
-from typing import OrderedDict
-import numpy as np
-from timm.utils import get_state_dict
-
+import io
+import json
+import math
+import os
+import time
+from collections import defaultdict, deque
 from pathlib import Path
+from typing import OrderedDict
 
+import numpy as np
 import torch
 import torch.distributed as dist
+import zarr
+from timm.utils import get_state_dict
 
 try:
     from torch import inf
@@ -381,13 +381,14 @@ def rename_keys(checkpoint_model):
     return new_dict
 
 
-def rename_lit_state_dict(state_dict):
+def rename_lit_state_dict(state_dict, patterns_to_drop=[]):
     new_state_dict = {}
     for key in state_dict.keys():
         new_key = key.replace("model.", "")
         new_state_dict[new_key] = state_dict[key]
-        # if "cls" in new_key:
-        # del new_state_dict[new_key]
+        for key_to_drop in patterns_to_drop:
+            if key_to_drop in new_key:
+                del new_state_dict[new_key]
     return new_state_dict
 
 
@@ -517,6 +518,47 @@ def load_state_dict(
         )
     if len(error_msgs) > 0:
         print("\n".join(error_msgs))
+
+def recursive_detach(tensors):
+    if isinstance(tensors, dict):
+        return {k: recursive_detach(v) for k, v in tensors.items()}
+    elif isinstance(tensors, list):
+        return [recursive_detach(v) for v in tensors]
+    elif isinstance(tensors, torch.Tensor):
+        if tensors.is_cuda:
+            return tensors.detach().cpu()
+    else:
+        return tensors
+
+def recursive_numpy(tensors):
+    if isinstance(tensors, dict):
+        return {k: recursive_numpy(v) for k, v in tensors.items()}
+    elif isinstance(tensors, list):
+        return [recursive_numpy(v) for v in tensors]
+    elif isinstance(tensors, torch.Tensor):
+        return tensors.detach().cpu().numpy()
+    else:
+        return tensors
+
+def recursive_save_to_zarr(zarr_group, dict_data, **kwargs):
+    for k, v in dict_data.items():
+        if isinstance(v, dict):
+            subgroup = zarr_group.require_group(k)
+            recursive_save_to_zarr(subgroup, v, **kwargs)
+        else:
+            # if group not exist, create it
+            if k not in zarr_group:
+                zarr_group.create_dataset(k, data=v, **kwargs)
+            else: # append to existing group
+                # pad to the same shape
+                if isinstance(v, np.ndarray) and isinstance(zarr_group[k], zarr.core.Array) and zarr_group[k].shape[1:] != v.shape[1:]:
+                    new_shape = [v.shape[0]] + list(zarr_group[k].shape[1:])
+                    new_data = np.zeros(new_shape, dtype=v.dtype)
+                    new_data[:, :v.shape[1]] = v
+                    zarr_group[k].append(new_data)
+                else:
+                    zarr_group[k].append(v)
+                
 
 
 class NativeScalerWithGradNormCount:

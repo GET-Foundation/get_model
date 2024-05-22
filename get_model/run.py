@@ -27,8 +27,10 @@ from get_model.dataset.zarr_dataset import (InferenceDataset,
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import create_optimizer
-from get_model.utils import (cosine_scheduler, load_checkpoint, remove_keys,
-                             rename_lit_state_dict)
+from get_model.utils import (cosine_scheduler, load_checkpoint,
+                             recursive_detach, recursive_numpy, remove_keys,
+                             rename_lit_state_dict, rename_v1_finetune_keys,
+                             rename_v1_pretrain_keys)
 
 logging.disable(logging.WARN)
 
@@ -55,8 +57,25 @@ class LitModel(L.LightningModule):
         if self.cfg.finetune.checkpoint is not None:
             checkpoint_model = load_checkpoint(
                 self.cfg.finetune.checkpoint)
-        checkpoint_model = rename_lit_state_dict(checkpoint_model)
-        model.load_state_dict(checkpoint_model, strict=True)
+            # state_dict = model.state_dict()
+            # remove_keys(checkpoint_model, state_dict)
+            strict = self.cfg.finetune.strict
+            if 'model' in checkpoint_model:
+                checkpoint_model = checkpoint_model['model']
+            if 'state_dict' in checkpoint_model:
+                checkpoint_model = checkpoint_model['state_dict']
+                checkpoint_model = rename_lit_state_dict(
+                    checkpoint_model, self.cfg.finetune.patterns_to_drop)
+                model.load_state_dict(checkpoint_model, strict=strict)
+            else:
+                if self.cfg.finetune.pretrain_checkpoint:
+                    checkpoint_model = rename_v1_pretrain_keys(
+                        checkpoint_model)
+                    model.load_state_dict(checkpoint_model, strict=strict)
+                else:
+                    checkpoint_model = rename_v1_finetune_keys(
+                        checkpoint_model)
+                    model.load_state_dict(checkpoint_model, strict=strict)
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         return model
@@ -167,24 +186,26 @@ class LitModel(L.LightningModule):
         input = self.model.get_input(batch)
         assert focus is not None, "Please provide a focus position for interpretation"
         assert layer_names is not None, "Please provide a list of layer names for interpretation"
-        for layer_name in layer_names:
-            assert layer_name in self.model.get_layer_names(
-            ), f"{layer_name} is not valid, valid layers are: {self.model.get_layer_names()}"
+        for layer_input_name in layer_names:
+            assert layer_input_name in self.model.get_layer_names(
+            ), f"{layer_input_name} is not valid, valid layers are: {self.model.get_layer_names()}"
 
         # Register hooks to capture the target tensors
         def capture_target_tensor(name):
             def hook(module, input, output):
-                target_tensors[name] = output
                 # Retain the gradient of the target tensor
                 output.retain_grad()
+                target_tensors[name] = output
             return hook
 
         if layer_names is None or len(layer_names) == 0:
             target_tensors['input'] = input
+            for key, tensor in input.items():
+                tensor.requires_grad = True
         else:
-            for name in layer_names:
-                layer = self.model.get_layer(name)
-                hook = layer.register_forward_hook(capture_target_tensor(name))
+            for layer_name in layer_names:
+                layer = self.model.get_layer(layer_name)
+                hook = layer.register_forward_hook(capture_target_tensor(layer_name))
                 hooks.append(hook)
 
         # Forward pass
@@ -204,18 +225,25 @@ class LitModel(L.LightningModule):
                 mask = torch.zeros_like(target).to(self.device)
                 mask[:, focus, i] = 1
                 pred[target_name].backward(mask)
-                for name, embed in target_tensors.items():
-                    jacobians[target_name][str(
-                        i)][name] = embed.grad.detach().cpu().numpy()
-                    embed.grad.zero_()
-
-        embeddings = {name: embed.detach().cpu().numpy()
-                      for name, embed in target_tensors.items()}
-        for target_name, target in pred.items():
-            pred[target_name] = target.detach().cpu().numpy()
-        for target_name, target in obs.items():
-            obs[target_name] = target.detach().cpu().numpy()
-        return pred, obs, jacobians, embeddings
+                for layer_name, layer in target_tensors.items():
+                    if isinstance(layer, torch.Tensor):
+                        if layer.grad is None:
+                            continue
+                        jacobians[target_name][str(
+                            i)][layer_name] = layer.grad.detach().cpu().numpy()
+                        layer.grad.zero_()
+                    elif isinstance(layer, dict):
+                        for layer_input_name, layer_input in layer.items():
+                            if layer_input.grad is None:
+                                continue
+                            jacobians[target_name][str(
+                                i)][layer_name] = layer_input.grad.detach().cpu().numpy()
+                            layer_input.grad.zero_()
+        pred = recursive_numpy(recursive_detach(pred))
+        obs = recursive_numpy(recursive_detach(obs))
+        jacobians = recursive_numpy(jacobians)
+        target_tensors = recursive_numpy(target_tensors)
+        return pred, obs, jacobians, target_tensors
 
     def configure_optimizers(self):
         # a adam optimizer with a scheduler using lightning function
@@ -308,8 +336,10 @@ class GETDataModule(L.LightningDataModule):
         config, sequence_obj, gencode_obj = self._shared_build_dataset(
             is_train=False, sequence_obj=sequence_obj)
         if hasattr(self, 'mutations') and self.mutations is not None:
-            # remove from config
-            config.pop('mutations')
+            mutations = self.mutations
+        else:
+            mutations = config['mutations']
+        config.pop('mutations', None)
         # no need to leave out chromosomes or celltypes in inference
         # config['leave_out_chromosomes'] = ""
         config['random_shift_peak'] = None
@@ -318,7 +348,7 @@ class GETDataModule(L.LightningDataModule):
             assembly=self.cfg.assembly,
             gencode_obj=gencode_obj,
             gene_list=self.cfg.task.gene_list if gene_list is None else gene_list,
-            mutations=self.mutations,
+            mutations=mutations,
             sequence_obj=sequence_obj,
             **config
         )
@@ -348,7 +378,7 @@ class GETDataModule(L.LightningDataModule):
                 self.dataset_predict = self.build_training_dataset(
                     sequence_obj=sequence_obj, is_train=False)
             elif self.cfg.task.test_mode == 'interpret' or self.cfg.task.test_mode == 'inference':
-                self.mutations = None,
+                self.mutations = None
                 self.dataset_predict = self.build_inference_dataset(
                     sequence_obj=sequence_obj)
             elif 'perturb' in self.cfg.task.test_mode:
@@ -410,12 +440,22 @@ def run(cfg: DictConfig):
     wandb_logger = WandbLogger(name=cfg.wandb.run_name,
                                project=cfg.wandb.project_name)
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+    if cfg.machine.num_devices > 0:
+        strategy = 'auto'
+        accelerator = 'gpu'
+        device = cfg.machine.num_devices
+        if cfg.machine.num_devices > 1:
+            strategy = 'ddp_spawn'
+    else:
+        strategy = 'auto'
+        accelerator = 'cpu'
+        device = 'auto'
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="gpu",
+        accelerator=accelerator,
         num_sanity_val_steps=10,
-        strategy="auto",
-        devices=cfg.machine.num_devices,
+        strategy=strategy,
+        devices=device,
         # callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
         #            LearningRateMonitor(logging_interval='epoch')],
         logger=[wandb_logger,
@@ -431,7 +471,7 @@ def run(cfg: DictConfig):
     # tuner = Tuner(trainer)
     # tuner.lr_find(model, datamodule=dm)
     if cfg.stage == 'fit':
-        trainer.fit(model, dm, ckpt_path=cfg.finetune.checkpoint)
+        trainer.fit(model, dm)
     if cfg.stage == 'validate':
         trainer.validate(model, datamodule=dm)
     if cfg.stage == 'predict':
@@ -448,12 +488,22 @@ def run_downstream(cfg: DictConfig):
     model.to('cuda')
     dm = GETDataModule(cfg)
     model.dm = dm
+    if cfg.machine.num_devices > 0:
+        strategy = 'auto'
+        accelerator = 'gpu'
+        device = cfg.machine.num_devices
+        if cfg.machine.num_devices > 1:
+            strategy = 'ddp_spawn'
+    else:
+        strategy = 'auto'
+        accelerator = 'cpu'
+        device = 'auto'
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="gpu",
+        accelerator=accelerator,
         num_sanity_val_steps=10,
-        strategy="auto",
-        devices=cfg.machine.num_devices,
+        strategy=strategy,
+        devices=device,
         # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,

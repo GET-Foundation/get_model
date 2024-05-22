@@ -15,7 +15,7 @@ from torch.optim.optimizer import Optimizer
 
 import wandb
 from get_model.config.config import *
-from get_model.dataset.zarr_dataset import RegionDataset
+from get_model.dataset.zarr_dataset import InferenceRegionDataset, RegionDataset, get_gencode_obj
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
@@ -33,8 +33,12 @@ class RegionDataModule(L.LightningDataModule):
     def build_training_dataset(self, is_train=True):
         return RegionDataset(**self.cfg.dataset, is_train=is_train)
 
-    def build_inference_dataset(self, is_train=False):
-        return RegionDataset(**self.cfg.dataset, is_train=is_train)
+    def build_inference_dataset(self, is_train=False, gene_list=None, gencode_obj=None):
+        if gencode_obj is None:
+            gencode_obj = get_gencode_obj(
+                self.cfg.assembly, self.cfg.machine.data_path)
+
+        return InferenceRegionDataset(**self.cfg.dataset, is_train=is_train, gene_list=self.cfg.task.gene_list if gene_list is None else gene_list, gencode_obj=gencode_obj)
 
     def prepare_data(self):
         pass
@@ -47,7 +51,8 @@ class RegionDataModule(L.LightningDataModule):
             if self.cfg.task.test_mode == 'predict':
                 self.dataset_predict = self.build_training_dataset(
                     is_train=False)
-            elif self.cfg.task.test_mode == 'interpret':
+            elif self.cfg.task.test_mode == 'interpret' or self.cfg.task.test_mode == 'inference':
+                self.mutations = None
                 self.dataset_predict = self.build_inference_dataset()
 
         if stage == 'validate':
@@ -121,6 +126,27 @@ class RegionLitModel(LitModel):
             metrics, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
         self.log("val_loss", loss,
                  batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
+
+    def predict_step(self, batch, batch_idx, *args, **kwargs):
+        if self.cfg.task.test_mode == 'inference':
+            # try:
+            loss, pred, obs = self._shared_step(
+                batch, batch_idx, stage='predict')
+            goi_idx = batch['tss_peak']
+            strand = batch['strand']
+            gene_name = batch['gene_name'][0]
+            for key in pred:
+                pred[key] = pred[key][:, :, strand][goi_idx > 0].max()
+                obs[key] = obs[key][:, :, strand][goi_idx > 0].mean()
+                # save key, pred[key], obs[key] to a csv
+                with open(f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", "a") as f:
+                    f.write(
+                        f"{gene_name},{key},{pred[key]},{obs[key]}\n")
+                print(
+                    f'Saved to {self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv')
+            # except Exception as e:
+            #     print(e)
+        # elif self.cfg.task.test_mode == 'interpret':
 
     def get_model(self):
         model = instantiate(self.cfg.model)
@@ -198,12 +224,22 @@ def run(cfg: DictConfig):
     wandb_logger = WandbLogger(name=cfg.wandb.run_name,
                                project=cfg.wandb.project_name)
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+    if cfg.machine.num_devices > 0:
+        strategy = 'auto'
+        accelerator = 'gpu'
+        device = cfg.machine.num_devices
+        if cfg.machine.num_devices > 1:
+            strategy = 'ddp_spawn'
+    else:
+        strategy = 'auto'
+        accelerator = 'cpu'
+        device = 'auto'
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="gpu",
+        accelerator=accelerator,
         num_sanity_val_steps=10,
-        strategy="ddp_spawn",
-        devices=cfg.machine.num_devices,
+        strategy=strategy,
+        devices=device,
         logger=[
             wandb_logger,
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],

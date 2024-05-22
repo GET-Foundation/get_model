@@ -13,9 +13,9 @@ dataset:
     transform: null
     data_type: 'fetal'
     leave_out_celltypes: 'Astrocytes'
-    leave_out_chromosomes: 'chr11'
+    leave_out_chromosomes: null
     quantitative_atac: false
-    sampling_step: 5
+    sampling_step: 450
 
 training:
   save_ckpt_freq: 1
@@ -36,6 +36,11 @@ optimizer:
 wandb:
   project_name: "GETRegionFinetuneV1"
   run_name: "Astrocyte"
+
+task:
+  layer_names: []
+  gene_list: /home/xf2217/Projects/get_revision/brain_multiome/genes_in_Q1.txt
+
 
 finetune:
   pretrain_checkpoint: false

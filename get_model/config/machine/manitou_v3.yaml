@@ -1,6 +1,6 @@
 data_path: "/pmglocal/xf2217/get_data/"
 codebase: "/pmglocal/xf2217/GET_STARTED/get_model/"
 output_dir: "/pmglocal/xf2217/output"
-num_devices: 6
-num_workers: 0
+num_devices: 1
+num_workers: 8
 batch_size: 16

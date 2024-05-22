@@ -552,7 +552,7 @@ class GETRegionFinetune(BaseGETModel):
         self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
         self.apply(self._init_weights)
 
-    def get_input(self, batch):
+    def get_input(self, batch, perturb=False):
         return {
             'region_motif': batch['region_motif'],
         }
@@ -579,6 +579,32 @@ class GETRegionFinetune(BaseGETModel):
         return {
             'region_motif': torch.randn(B, R, M).float().abs(),
         }
+
+
+@dataclass
+class MLPRegionFinetuneModelConfig(BaseGETModelConfig):
+    use_atac: bool = False
+    input_dim: int = 283
+    output_dim: int = 2
+
+
+class MLPRegionFinetune(GETRegionFinetune):
+    def __init__(self, cfg: MLPRegionFinetuneModelConfig):
+        super(GETRegionFinetune, self).__init__(cfg)
+        self.linear1 = torch.nn.Linear(cfg.input_dim, 512)
+        self.relu1 = torch.nn.ReLU()
+        self.linear2 = torch.nn.Linear(512, 256)
+        self.relu2 = torch.nn.ReLU()
+        self.linear3 = torch.nn.Linear(256, cfg.output_dim)
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.relu1(x)
+        x = self.linear2(x)
+        x = self.relu2(x)
+        x = self.linear3(x)
+        x = torch.nn.Softplus()(x)
+        return x
 
 
 @dataclass

@@ -1,8 +1,8 @@
 defaults:
   - base_ref_region_config
   - model/GETRegionFinetune@_here_
-  - machine/pc
-  - dataset/tfatlas_eval@dataset
+  - machine/manitou
+  - dataset/thp1_ref_eval@dataset
   - _self_
 
 assembly: "hg38"
@@ -29,13 +29,13 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune"
-  run_name: "TFAtlas"
+  project_name: "GETRegionFinetune_thp1"
+  run_name: "thp1_Ref_fit"
 
 finetune:
   pretrain_checkpoint: false
   strict: true
-  checkpoint: "/home/xf2217/Projects/get_revision/TFAtlas_fetal_compare/best0.05.ckpt"
+  checkpoint: "/burg/pmg/users/xf2217/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
   model_prefix: "model."
   patterns_to_freeze: []
 

@@ -1,6 +1,6 @@
 zarr_dirs:
   - "encode_hg38atac_dense.zarr"
-keep_celltypes: "k562.encode_hg38atac.ENCFF128WZG.max"
+keep_celltypes: "THP1.encode_hg38atac.THP1.max"
 leave_out_celltypes: null
 leave_out_chromosomes: "chr10,chr11"
 peak_name: "peaks_q0.05_fetal_joint_tissue_open_exp"
@@ -25,6 +25,6 @@ mask_ratio: 0
 insulation_subsample_ratio: 1
 reference_region_motif:
   root: "/pmglocal/xf2217/get_data/"
-  data: "fetal_k562_peaks_motif.hg38.zarr"
+  data: "fetal_THP1_peaks_motif.hg38.zarr"
   refdata: "fetal_union_peak_motif_v1.hg38.zarr"
   motif_scaler: 1

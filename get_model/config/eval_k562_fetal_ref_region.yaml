@@ -1,11 +1,17 @@
 defaults:
   - base_ref_region_config
   - model/GETRegionFinetune@_here_
-  - machine/pc
-  - dataset/tfatlas_eval@dataset
+  - machine/manitou
+  - dataset/k562_ref_eval@dataset
   - _self_
 
 assembly: "hg38"
+
+task:
+  layer_names: []
+  test_mode: "interpret"
+  gene_list: /burg/pmg/users/xf2217/CRISPR_comparison/genes.txt
+  mutations: /burg/pmg/users/xf2217/CRISPR_comparison/regions.txt
 
 training:
   save_ckpt_freq: 1
@@ -29,13 +35,13 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune"
-  run_name: "TFAtlas"
+  project_name: "GETRegionFinetune_k562"
+  run_name: "k562_ref_fit"
 
 finetune:
   pretrain_checkpoint: false
   strict: true
-  checkpoint: "/home/xf2217/Projects/get_revision/TFAtlas_fetal_compare/best0.05.ckpt"
+  checkpoint: /pmglocal/xf2217/GET_STARTED/get_model/GETRegionFinetune_k562/ygbofx71/checkpoints/best.ckpt
   model_prefix: "model."
   patterns_to_freeze: []
 
