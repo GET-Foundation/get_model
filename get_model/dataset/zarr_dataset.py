@@ -1449,7 +1449,6 @@ class InferenceDataset(PretrainDataset):
     def _get_window_idx_for_gene_and_celltype(self, data_key, celltype_id, gene_name):
         """Get window index for a gene and celltype"""
         gene_df = self.tss_chunk_idx.query('gene_name==@gene_name')
-        print(gene_df)
         chunk_idxs = gene_df['chunk_idx']
         strand = gene_df['Strand'].values[0]
         tss_coord = gene_df['Start'].values
@@ -1532,7 +1531,6 @@ class InferenceDataset(PretrainDataset):
         chr_name = info['chr_name']
         tss_coord = info['tss_coord']
         gene_name = info['gene_name']
-        print(info)
         # get peaks in gene locus
         peaks_in_locus = self.get_peaks_around_pos(
             celltype_id, chr_name, tss_coord)
@@ -1602,8 +1600,6 @@ class InferenceDataset(PretrainDataset):
         if gene_info_copy.shape[0] == 0:
             print(
                 f"Gene {gene_name} not found in the gene information, removing and skipping it.")
-        print(gene_info_copy)
-        print(peaks_in_locus)
         gene_df = pr(peaks_in_locus.copy().reset_index()).join(pr(gene_info_copy[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates(
         )).extend(self.PROMOTER_EXTEND), suffix="_gene", how='left', apply_strand_suffix=False).df[columns_to_include].set_index('index')
         gene_df = gene_df.query('gene_name==@gene_name')

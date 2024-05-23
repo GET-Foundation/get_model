@@ -4,7 +4,7 @@ import pandas as pd
 result = pd.read_csv('/pmglocal/xf2217/output/k562_ref_fit_watac.csv', names=['gene_name', 'strand', 'tss_peak', 'perturb_chrom', 'perturb_start', 'perturb_end', 'pred_wt', 'pred_mut', 'obs'], header=None)
 result
 # %%
-experiment = pd.read_csv('/burg/pmg/users/xf2217/CRISPR_comparison/resources/example/EPCrisprBenchmark_Fulco2019_K562_GRCh38.tsv.gz', sep='\t')
+experiment = pd.read_csv('../EPCrisprBenchmark_Fulco2019_K562_GRCh38.tsv.gz', sep='\t')
 # %%
 experiment['key'] = experiment['chrom'] + ':' + experiment['chromStart'].astype(str) + '-' + experiment['chromEnd'].astype(str) + ':' + experiment['measuredGeneSymbol']
 
@@ -61,22 +61,25 @@ to_save
 # %%
 # load jacobian-based analysis
 import zarr
-z = zarr.open_group('/pmglocal/xf2217/output/k562_ref_fit_watac.zarr/', mode='r')
+z = zarr.open_group('/home/xf2217/output/k562_lora_fulco.zarr/', mode='r')
 import numpy as np
 gene_names = [x.strip(' ') for x in z['gene_name'][:]]
 chromosomes = [x.strip(' ') for x in z['chromosome'][:]]
 
 strand = z['strand'][:]
 jacobians = np.stack([z['jacobians']['exp'][str(x)]['input'][i] for i, x in enumerate(strand)])
+jacobians = jacobians - jacobians.mean(0)
+jacobians = jacobians / jacobians.std(0)
+jacobians[jacobians<0] = 0
 input_data = z['input'][:]
 atac = input_data[:,:, 282]
 peaks = z['peaks'][:]
-input_x_jacob = input_data * jacobians
+input_x_jacob = jacobians
 # %%
 dfs = []
 import pandas as pd
 for i, gene in enumerate(gene_names):
-    gene_df = pd.DataFrame({'score': np.absolute(input_x_jacob[i]).sum(1), 'Chromosome': chromosomes[i], 'Start': peaks[i][:, 0], 'End': peaks[i][:, 1], 'gene_name': gene, 'Strand': strand[i], 'atac': atac[i]})
+    gene_df = pd.DataFrame({'score': input_x_jacob[i].sum(1), 'Chromosome': chromosomes[i], 'Start': peaks[i][:, 0], 'End': peaks[i][:, 1], 'gene_name': gene, 'Strand': strand[i], 'atac': atac[i]})
     dfs.append(gene_df)
 
 
@@ -123,8 +126,8 @@ sns.scatterplot(x='atac/dis', y='EffectSize', data=overlap, hue='Significant')
 from sklearn.metrics import precision_recall_curve
 import matplotlib.pyplot as plt
 from sklearn.metrics import average_precision_score
-precision, recall, _ = precision_recall_curve(overlap['Significant'], overlap['atac/dis'])
-average_precision = average_precision_score(overlap['Significant'], overlap['atac/dis'])
+precision, recall, _ = precision_recall_curve(overlap['Significant'], overlap['score'])
+average_precision = average_precision_score(overlap['Significant'], overlap['score'])
 plt.plot(recall, precision, label='AP={0:0.3f}'.format(average_precision))
 # add random
 plt.plot([0, 1], [overlap['Significant'].mean(), overlap['Significant'].mean()], linestyle='--', label='Random={0:0.3f}'.format(overlap['Significant'].mean()))
@@ -139,4 +142,11 @@ sns.violinplot(x='Significant', y='atac/dis', data=overlap, cut=0)
 to_save = overlap.rename({'Start_experiment':'start', 'End_experiment':'end', 'Chromosome':'chr', 'gene_name': 'TargetGene', 'atac/dis':'AtacDis'}, axis=1)[['chr', 'start', 'end', 'TargetGene', 'AtacDis']]
 to_save['CellType'] = 'K562'
 to_save.to_csv('/burg/pmg/users/xf2217/CRISPR_comparison/resources/example/AtacDis_K562_Fulco2019Genes_GRCh38.tsv', sep='\t')
+# %%
+sns.scatterplot(x=input_data[np.random.choice(1800, 1000)].mean(0).flatten(), y =input_data[np.random.choice(1800, 1000)].mean(0).flatten())
+# %%
+np.save('random_input_for_k562.npz', input_data[np.random.choice(1800, 1000)].mean(0))
+# %%
+import numpy as np
+np.load('random_input_for_k562.npy')
 # %%
