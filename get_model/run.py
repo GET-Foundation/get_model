@@ -1,4 +1,5 @@
 import logging
+import zarr
 
 import lightning as L
 import pandas as pd
@@ -28,12 +29,23 @@ from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import create_optimizer
 from get_model.utils import (cosine_scheduler, load_checkpoint,
-                             recursive_detach, recursive_numpy, remove_keys,
+                             recursive_detach, recursive_numpy, recursive_save_to_zarr, remove_keys,
                              rename_lit_state_dict, rename_v1_finetune_keys,
                              rename_v1_pretrain_keys)
 
 logging.disable(logging.WARN)
 
+# Wrapper model for Captum
+class WrapperModel(torch.nn.Module):
+    def __init__(self, model, focus):
+        super(WrapperModel, self).__init__()
+        self.model = model
+        self.focus = focus
+
+    def forward(self, input, strand, *args, **kwargs):
+        output = self.model.forward(input)
+        print('output shape: ', output.shape)
+        return output[:, self.focus, strand]
 
 class LitModel(L.LightningModule):
     def __init__(self, cfg: DictConfig):
@@ -245,6 +257,69 @@ class LitModel(L.LightningModule):
         target_tensors = recursive_numpy(target_tensors)
         return pred, obs, jacobians, target_tensors
 
+
+    def interpret_captum_step(self, batch, batch_idx, focus):
+        import torch
+        from captum.attr import DeepLift, IntegratedGradients, InputXGradient, Saliency
+        
+        gene_name = batch['gene_name'][0]
+        input_data = batch['region_motif']
+        strand = batch['strand'][0]
+
+        attribution_method = 'DLI'
+        # random_background_path = self.cfg.task.random_background_path
+        random_background = np.load('/home/xf2217/Projects/get_model/test/random_input_for_k562.npy')
+        random_background = torch.FloatTensor(random_background).cuda().unsqueeze(0)
+        print('random_background shape', random_background.shape)
+        print('input_data shape', input_data.shape)
+        if input_data.shape != random_background.shape:
+            # pad the input data to match the random background on second dimension
+            n_region_input = input_data.shape[1]
+            n_region_random = random_background.shape[1]
+            if n_region_input < n_region_random:
+                input_data = torch.cat([input_data, torch.zeros(input_data.shape[0], n_region_random - n_region_input, input_data.shape[2]).cuda()], dim=1)
+            elif n_region_input > n_region_random:
+                random_background = torch.cat([random_background, torch.zeros(random_background.shape[0], n_region_input - n_region_random, random_background.shape[2]).cuda()], dim=1)
+        print('input_data shape', input_data.shape)
+        print('random_background shape', random_background.shape)
+        wrapped_model = WrapperModel(self.model, focus)
+        
+        if attribution_method == 'DLI':
+            attrib_method = DeepLift(wrapped_model, multiply_by_inputs=True)
+        elif attribution_method == 'IGI':
+            attrib_method = IntegratedGradients(wrapped_model, multiply_by_inputs=True)
+        elif attribution_method == 'GI':
+            attrib_method = InputXGradient(wrapped_model)
+        elif attribution_method == 'SA':
+            attrib_method = Saliency(wrapped_model)
+        else:
+            raise ValueError(f"Unsupported attribution method: {attribution_method}")
+        
+        attributions = attrib_method.attribute(inputs=input_data, baselines=random_background, additional_forward_args=strand).squeeze().detach().cpu().numpy()
+        attributions = np.sum(attributions, axis=1)
+        chromosomes = recursive_numpy(recursive_detach(batch['chromosome']))
+        for i, chromosome in enumerate(chromosomes):
+            if len(chromosome) < 10:
+                chromosomes[i] = chromosome + ' '*(10-len(chromosome))
+        gene_names = recursive_numpy(recursive_detach(batch['gene_name']))
+        for i, gene_name in enumerate(gene_names):
+            if len(gene_name)< 20:
+                gene_names[i] = gene_name + ' '*(15-len(gene_name))
+        # Process and save attributions as needed
+        result_df = {
+            'gene_name': gene_names,
+            'attribution': attributions,
+            'peaks': recursive_numpy(recursive_detach(batch['peak_coord'])),
+            'chromosome': chromosomes,
+            'strand': recursive_numpy(recursive_detach(batch['strand'])),
+        }
+        zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.zarr" 
+        from numcodecs import VLenUTF8
+        object_codec = VLenUTF8()
+        z = zarr.open(zarr_path, mode='a')
+        recursive_save_to_zarr(z, result_df,  object_codec=object_codec, overwrite=True)
+    
+
     def configure_optimizers(self):
         # a adam optimizer with a scheduler using lightning function
         optimizer = torch.optim.Adam(
@@ -377,7 +452,7 @@ class GETDataModule(L.LightningDataModule):
             if self.cfg.task.test_mode == 'predict':
                 self.dataset_predict = self.build_training_dataset(
                     sequence_obj=sequence_obj, is_train=False)
-            elif self.cfg.task.test_mode == 'interpret' or self.cfg.task.test_mode == 'inference':
+            elif self.cfg.task.test_mode == 'interpret' or self.cfg.task.test_mode == 'inference' or self.cfg.task.test_mode == 'interpret_captum':
                 self.mutations = None
                 self.dataset_predict = self.build_inference_dataset(
                     sequence_obj=sequence_obj)

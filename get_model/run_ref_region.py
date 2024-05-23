@@ -61,7 +61,7 @@ class ReferenceRegionDataModule(GETDataModule):
             if self.cfg.task.test_mode == 'predict':
                 self.dataset_predict = self.build_from_zarr_dataset(
                     self.dataset_predict)
-            elif self.cfg.task.test_mode == 'inference' or self.cfg.task.test_mode == 'interpret':
+            elif self.cfg.task.test_mode == 'inference' or self.cfg.task.test_mode == 'interpret' or self.cfg.task.test_mode == 'interpret_captum':
                 self.dataset_predict = self.build_inference_reference_region_dataset(
                     self.dataset_predict)
             elif 'perturb' in self.cfg.task.test_mode:
@@ -225,8 +225,14 @@ class RegionLitModel(LitModel):
             object_codec = VLenUTF8()
             z = zarr.open(zarr_path, mode='a')
             recursive_save_to_zarr(z, result,  object_codec=object_codec, overwrite=True)
-            
         
+        elif self.cfg.task.test_mode == 'interpret_captum':
+            tss_peak = batch['tss_peak'][0].cpu().numpy()
+            # assume focus is the center peaks in the input sample
+            torch.set_grad_enabled(True)
+            self.interpret_captum_step(batch, batch_idx, focus=tss_peak)
+
+
     def get_model(self):
         model = instantiate(self.cfg.model)
         if self.cfg.finetune.checkpoint is not None:
