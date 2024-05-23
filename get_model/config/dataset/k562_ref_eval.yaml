@@ -24,7 +24,7 @@ padding: 0
 mask_ratio: 0
 insulation_subsample_ratio: 1
 reference_region_motif:
-  root: "/pmglocal/xf2217/get_data/"
+  root: "/home/xf2217/Projects/get_data/"
   data: "fetal_k562_peaks_motif.hg38.zarr"
   refdata: "fetal_union_peak_motif_v1.hg38.zarr"
   motif_scaler: 1
