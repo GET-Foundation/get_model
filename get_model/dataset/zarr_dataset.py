@@ -600,8 +600,7 @@ class ZarrDataPool(object):
             random_int = 0
         df['Start'] = df['Start'].values + random_int
         df['End'] = df['End'].values + random_int
-        df = df.query(
-            'Chromosome == @chr_name and Start >= @start and End <= @end')
+        df = df[(df.Chromosome == chr_name) & (df.Start >= start) & (df.End <= end)]
         return df
 
     def _query_insulation(self, chr_name, start, end):
@@ -1450,6 +1449,7 @@ class InferenceDataset(PretrainDataset):
     def _get_window_idx_for_gene_and_celltype(self, data_key, celltype_id, gene_name):
         """Get window index for a gene and celltype"""
         gene_df = self.tss_chunk_idx.query('gene_name==@gene_name')
+        print(gene_df)
         chunk_idxs = gene_df['chunk_idx']
         strand = gene_df['Strand'].values[0]
         tss_coord = gene_df['Start'].values
@@ -1502,7 +1502,7 @@ class InferenceDataset(PretrainDataset):
         # get the neighboring peaks for the gene
         info, peaks_in_locus, track_start, track_end = self._calculate_peak_bounds_for_gene(
             gene_info, info, track_start, track_end)
-
+        
         # generate sample
         sample = self.datapool.generate_sample(
             chr_name, track_start, track_end, data_key, celltype_id, mutations=mutations, peak_inactivation=peak_inactivation, padding=self.padding)
@@ -1532,7 +1532,7 @@ class InferenceDataset(PretrainDataset):
         chr_name = info['chr_name']
         tss_coord = info['tss_coord']
         gene_name = info['gene_name']
-
+        print(info)
         # get peaks in gene locus
         peaks_in_locus = self.get_peaks_around_pos(
             celltype_id, chr_name, tss_coord)
@@ -1577,6 +1577,17 @@ class InferenceDataset(PretrainDataset):
             tss_peak = tss_peak - peak_start
             peaks_in_locus = peaks_in_locus_subset
             original_peak_start = peaks_in_locus.iloc[peak_start].original_peak_index
+        
+        if isinstance(original_peak_start, pd.Series):
+            original_peak_start = original_peak_start.values[0]
+        if isinstance(peak_start, pd.Series):
+            peak_start = peak_start.values[0]
+        if isinstance(tss_peak, pd.Series):
+            tss_peak = tss_peak.values[0]
+        if isinstance(track_start, pd.Series):
+            track_start = track_start.values[0]
+        if isinstance(track_end, pd.Series):
+            track_end = track_end.values[0]
         return peaks_in_locus, track_start, track_end, tss_peak, peak_start, original_peak_start
 
     def _get_absolute_tss_peak(self, gene_info, peaks_in_locus, gene_name):
@@ -1591,6 +1602,8 @@ class InferenceDataset(PretrainDataset):
         if gene_info_copy.shape[0] == 0:
             print(
                 f"Gene {gene_name} not found in the gene information, removing and skipping it.")
+        print(gene_info_copy)
+        print(peaks_in_locus)
         gene_df = pr(peaks_in_locus.copy().reset_index()).join(pr(gene_info_copy[['Chromosome', 'Start', 'End', 'gene_name', 'Strand', 'chunk_idx']].drop_duplicates(
         )).extend(self.PROMOTER_EXTEND), suffix="_gene", how='left', apply_strand_suffix=False).df[columns_to_include].set_index('index')
         gene_df = gene_df.query('gene_name==@gene_name')
@@ -1693,7 +1706,6 @@ class ReferenceRegionMotif(object):
         self.refpeak_names = self.refdataset['peak_names'][:]
         self.motif_scaler = cfg.motif_scaler
         # reorder data to match sorted peak order
-        print(self.peaks['index'].values)
         self.data = self.data[self.peaks['index'].values]
         self.refdata = self.refdata[self.refpeaks['index'].values]
         # drop 'index' column in peaks

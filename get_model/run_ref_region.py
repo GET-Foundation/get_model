@@ -260,13 +260,13 @@ class RegionLitModel(LitModel):
                 # Load LoRA parameters for training
                 if self.cfg.finetune.lora_checkpoint is not None:
                     lora_state_dict = torch.load(self.cfg.finetune.lora_checkpoint)
-                    model.load_state_dict(lora_state_dict, strict=False)
+                    model.load_state_dict(rename_lit_state_dict(lora_state_dict['state_dict']), strict=True)
             elif self.cfg.stage in ['validate', 'predict']:
                 # Load LoRA parameters for validation and prediction
                 if self.cfg.finetune.lora_checkpoint is not None:
                     lora_state_dict = torch.load(self.cfg.finetune.lora_checkpoint)
-                    model.load_state_dict(lora_state_dict, strict=False)
-                    merge_lora(model)  # Merge LoRA parameters into the model
+                    model.load_state_dict(rename_lit_state_dict(lora_state_dict['state_dict']), strict=True)
+                    # merge_lora(model)  # Merge LoRA parameters into the model
         
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)

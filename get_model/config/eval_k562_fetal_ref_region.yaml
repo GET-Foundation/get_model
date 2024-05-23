@@ -41,7 +41,8 @@ wandb:
 finetune:
   pretrain_checkpoint: false
   strict: true
-  checkpoint: /pmglocal/xf2217/GET_STARTED/get_model/GETRegionFinetune_k562/ygbofx71/checkpoints/best.ckpt
+  use_lora: true
+  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
   model_prefix: "model."
   patterns_to_freeze: []
 
