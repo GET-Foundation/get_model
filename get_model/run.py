@@ -47,6 +47,29 @@ class WrapperModel(torch.nn.Module):
         print('output shape: ', output.shape)
         return output[:, self.focus, strand]
 
+def extract_peak_df(batch):
+    print(list(batch.keys()))
+    peak_coord = batch['peak_coord'][0].cpu().numpy()
+    chr_name = batch['chromosome'][0]
+    df = pd.DataFrame(peak_coord, columns=['Start', 'End'])
+    df['Chromosome'] = chr_name
+    return df[['Chromosome', 'Start', 'End']]
+
+def get_insulation_overlap(batch, insulation):
+    from pyranges import PyRanges as pr
+    peak_df = extract_peak_df(batch)
+    tss_peak = int(batch['tss_peak'][0].cpu())
+    insulation = insulation[insulation['Chromosome'] == peak_df['Chromosome'].values[0]]
+    print(pr(peak_df.iloc[tss_peak:tss_peak+1]))
+    overlap = pr(peak_df.iloc[tss_peak:tss_peak+1]).join(pr(insulation), suffix='_insulation').df
+    final_insulation = overlap.sort_values('mean_num_celltype').iloc[-1][['Chromosome', 'Start_insulation', 'End_insulation']].rename({'Start_insulation': 'Start', 'End_insulation': 'End'})
+    subset_peak_df = peak_df.loc[(peak_df.Start>final_insulation.Start) & (peak_df.End<final_insulation.End)]
+    new_peak_start_idx = subset_peak_df.index.min()
+    new_peak_end_idx = subset_peak_df.index.max()
+    new_tss_peak = tss_peak - new_peak_start_idx
+    return new_peak_start_idx, new_peak_end_idx, new_tss_peak
+
+
 class LitModel(L.LightningModule):
     def __init__(self, cfg: DictConfig):
         super().__init__()
@@ -258,18 +281,21 @@ class LitModel(L.LightningModule):
         return pred, obs, jacobians, target_tensors
 
 
-    def interpret_captum_step(self, batch, batch_idx, focus):
+    def interpret_captum_step(self, batch, batch_idx, focus, start, end, shift=0):
         import torch
         from captum.attr import DeepLift, IntegratedGradients, InputXGradient, Saliency
         
         gene_name = batch['gene_name'][0]
-        input_data = batch['region_motif']
+        input_data = batch['region_motif'][0][start+shift:end+shift+1].unsqueeze(0).cuda()
         strand = batch['strand'][0]
+        focus = focus - shift
 
         attribution_method = 'DLI'
         # random_background_path = self.cfg.task.random_background_path
         random_background = np.load('/home/xf2217/Projects/get_model/test/random_input_for_k562.npy')
-        random_background = torch.FloatTensor(random_background).cuda().unsqueeze(0)
+        if self.cfg.dataset.quantitative_atac==False:
+            random_background[:, 282] = 1
+        random_background = torch.FloatTensor(random_background).unsqueeze(0).cuda()
         print('random_background shape', random_background.shape)
         print('input_data shape', input_data.shape)
         if input_data.shape != random_background.shape:
@@ -295,8 +321,8 @@ class LitModel(L.LightningModule):
         else:
             raise ValueError(f"Unsupported attribution method: {attribution_method}")
         
-        attributions = attrib_method.attribute(inputs=input_data, baselines=random_background, additional_forward_args=strand).squeeze().detach().cpu().numpy()
-        attributions = np.sum(attributions, axis=1)
+        attributions = attrib_method.attribute(inputs=input_data, additional_forward_args=strand).squeeze().detach().cpu().numpy()
+        attributions = np.absolute(attributions).sum(1)
         chromosomes = recursive_numpy(recursive_detach(batch['chromosome']))
         for i, chromosome in enumerate(chromosomes):
             if len(chromosome) < 10:
@@ -308,10 +334,12 @@ class LitModel(L.LightningModule):
         # Process and save attributions as needed
         result_df = {
             'gene_name': gene_names,
+            'input': recursive_numpy(recursive_detach(batch['region_motif'])),
             'attribution': attributions,
             'peaks': recursive_numpy(recursive_detach(batch['peak_coord'])),
             'chromosome': chromosomes,
             'strand': recursive_numpy(recursive_detach(batch['strand'])),
+            'shift': shift,
         }
         zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.zarr" 
         from numcodecs import VLenUTF8

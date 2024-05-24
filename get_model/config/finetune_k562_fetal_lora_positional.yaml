@@ -1,6 +1,6 @@
 defaults:
   - base_ref_region_config
-  - model/GETRegionFinetune@_here_
+  - model/GETRegionFinetunePositional@_here_
   - machine/manitou
   - dataset/k562_ref_eval@dataset
   - _self_
@@ -35,8 +35,8 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune_k562"
-  run_name: "k562_ref_fit"
+  project_name: "GETRegionFinetuneLoRA_k562"
+  run_name: "Positional-only"
 
 finetune:
   pretrain_checkpoint: false
