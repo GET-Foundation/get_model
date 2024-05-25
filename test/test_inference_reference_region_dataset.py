@@ -1,5 +1,6 @@
 # %%
 from http.client import OK
+from pyrsistent import get_in
 import seaborn as sns
 import torch.utils
 from get_model.run_ref_region import *
@@ -33,6 +34,7 @@ dataset_config = {
     ],
     "peak_name": "fetal_tfatlas_peaks_tissue_open_exp",
     "leave_out_chromosomes": "",
+    "use_insulation": True,
     "additional_peak_columns": ["Expression_positive", "Expression_negative", "aTPM", "TSS"],
     "n_peaks_upper_bound": 900,
     "keep_celltypes": "0.joung_tfatlas.L10M",
@@ -81,4 +83,27 @@ tss_peak = rrd.zarr_dataset[0]['metadata']['tss_peak']
 tss_peak_df = datapool_peak.iloc[peak_start+tss_peak]
 # %%
 print(tss_coord > tss_peak_df.Start and tss_coord < tss_peak_df.End)
+# %%
+def extract_peak_df(batch):
+    peak_coord = batch['celltype_peaks'] + batch['metadata']['start'] 
+    chr_name = batch['metadata']['chr_name']
+    df = pd.DataFrame(peak_coord, columns=['Start', 'End'])
+    df['Chromosome'] = chr_name
+    return df[['Chromosome', 'Start', 'End']]
+
+def get_insulation_overlap(batch, insulation):
+    from pyranges import PyRanges as pr
+    peak_df = extract_peak_df(batch)
+    insulation = insulation[insulation['Chromosome'] == peak_df['Chromosome'].values[0]]
+    overlap = pr(peak_df.iloc[batch['metadata']['tss_peak']]).join(pr(insulation), suffix='_insulation').df
+    final_insulation = overlap.sort_values('mean_num_celltype').iloc[-1][['Chromosome', 'Start_insulation', 'End_insulation']].rename({'Start_insulation': 'Start', 'End_insulation': 'End'})
+    subset_peak_df = peak_df.loc[(peak_df.Start>final_insulation.Start) & (peak_df.End<final_insulation.End)]
+    new_peak_start_idx = subset_peak_df.index.min()
+    new_peak_end_idx = subset_peak_df.index.max()
+    new_tss_peak = batch['metadata']['tss_peak'] - new_peak_start_idx
+    return new_peak_start_idx, new_peak_end_idx, new_tss_peak
+
+
+# %%
+get_insulation_overlap(dataset[0], dataset.datapool.insulation)
 # %%
