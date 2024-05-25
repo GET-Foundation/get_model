@@ -1,6 +1,6 @@
 zarr_dirs:
   - "htan_gbm_dense.zarr"
-keep_celltypes: "Macrophages.htan_gbm.C3N-02188_CPT0168830014_snATAC_GBM_Tumor.1024"
+keep_celltypes: "Tumor.htan_gbm.C3N-01818_CPT0168270014_snATAC_GBM_Tumor.2048"
 leave_out_celltypes: null
 leave_out_chromosomes: null
 peak_name: "fetal_gbm_peaks_open_exp"

@@ -2,22 +2,27 @@ defaults:
   - base_ref_region_config
   - model/GETRegionFinetune@_here_
   - machine/manitou_alb2281
-  - dataset/gbm_eval@dataset
-  - machine/manitou
   - dataset/gbm_ref_eval@dataset
+  - _self_
 
 assembly: "hg38"
 
+task:
+  layer_names: []
+  test_mode: "inference"
+  gene_list: genes.txt
+  mutations: regions.txt
+
 training:
   save_ckpt_freq: 1
-  epochs: 20
+  epochs: 100
   warmup_epochs: 1
   accumulate_grad_batches: 1
   clip_grad: null
   use_fp16: false
 
 dataset:
-  quantitative_atac: false
+  quantitative_atac: true
   sampling_step: 100
   mask_ratio: 0
 
@@ -30,10 +35,6 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "get-finetune-region-alb2281"
-  run_name: "gbm-v1"
-  project_name: "GETRegionFinetune_gbm"
-  run_name: "base_model"
   project_name: "GETRegionFinetune_gbm"
   run_name: "debug"
 
