@@ -1,17 +1,17 @@
 defaults:
   - base_ref_region_config
-  - model/GETRegionFinetune@_here_
-  - machine/manitou_alb2281
-  - dataset/gbm_ref_eval@dataset
+  - model/GETRegionFinetunePositional@_here_
+  - machine/manitou
+  - dataset/k562_ref_eval@dataset
   - _self_
 
 assembly: "hg38"
 
 task:
   layer_names: []
-  test_mode: "inference"
-  gene_list: genes.txt
-  mutations: regions.txt
+  test_mode: "interpret"
+  gene_list: /burg/pmg/users/xf2217/CRISPR_comparison/genes.txt
+  mutations: /burg/pmg/users/xf2217/CRISPR_comparison/regions.txt
 
 training:
   save_ckpt_freq: 1
@@ -35,13 +35,13 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune_gbm"
-  run_name: "debug"
+  project_name: "GETRegionFinetuneLoRA_k562"
+  run_name: "Positional-only"
 
 finetune:
   pretrain_checkpoint: false
   strict: true
-  use_lora: false
+  use_lora: true
   checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth"
   model_prefix: "model."
   patterns_to_freeze: []

@@ -19,6 +19,7 @@ from get_model.model.modules import (ATACHead, ATACHeadConfig, HiCHead, HiCHeadC
                                      MotifScanner, MotifScannerConfig,
                                      RegionEmbed, RegionEmbedConfig, SplitPool,
                                      SplitPoolConfig, dict_to_device)
+from get_model.model.position_encoding import AbsolutePositionalEncoding
 from get_model.model.transformer import GETTransformer
 
 
@@ -579,6 +580,39 @@ class GETRegionFinetune(BaseGETModel):
         return {
             'region_motif': torch.randn(B, R, M).float().abs(),
         }
+
+class GETRegionFinetunePositional(GETRegionFinetune):
+    def __init__(self, cfg: GETRegionFinetuneModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.pos_embed = AbsolutePositionalEncoding(cfg.region_embed.embed_dim, dropout=0.1, max_len=1000)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+        return {
+            'region_motif': batch['region_motif'],
+        }
+
+    def forward(self, region_motif):
+
+        x = self.region_embed(region_motif)
+        x = self.pos_embed(x)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, _ = self.encoder(x)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        return exp
+
+    def before_loss(self, output, batch):
+
+        pred = {'exp': output}
+        obs = {'exp': batch['exp_label']}
+        return pred, obs
 
 
 @dataclass

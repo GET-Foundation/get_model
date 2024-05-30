@@ -22,7 +22,7 @@ from get_model.dataset.zarr_dataset import (
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
-from get_model.run import GETDataModule, LitModel
+from get_model.run import GETDataModule, LitModel, get_insulation_overlap
 from get_model.utils import (cosine_scheduler, load_checkpoint, recursive_detach, recursive_numpy, recursive_save_to_zarr, remove_keys,
                              rename_lit_state_dict, rename_v1_finetune_keys,
                              rename_v1_pretrain_keys)
@@ -142,22 +142,20 @@ class RegionLitModel(LitModel):
 
     def predict_step(self, batch, batch_idx, *args, **kwargs):
         if self.cfg.task.test_mode == 'inference':
-            try:
-                loss, pred, obs = self._shared_step(
-                    batch, batch_idx, stage='predict')
-                goi_idx = batch['tss_peak']
-                strand = batch['strand']
-                atpm = batch['region_motif'][0][goi_idx, -1].cpu().item()
-                gene_name = batch['gene_name'][0]
-                for key in pred:
-                    pred[key] = pred[key][0][:, strand][goi_idx].max()
-                    obs[key] = obs[key][0][:, strand][goi_idx].mean()
-                    # save key, pred[key], obs[key] to a csv
-                    with open(f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", "a") as f:
-                        f.write(
-                            f"{gene_name},{key},{pred[key]},{obs[key]},{atpm}\n")
-            except Exception as e:
-                raise e
+            loss, pred, obs = self._shared_step(
+                batch, batch_idx, stage='predict')
+            goi_idx = batch['tss_peak']
+            strand = batch['strand']
+            atpm = batch['region_motif'][0][goi_idx, -1].cpu().item()
+            gene_name = batch['gene_name'][0]
+            print(gene_name)
+            for key in pred:
+                pred[key] = pred[key][0][:, strand][goi_idx].max()
+                obs[key] = obs[key][0][:, strand][goi_idx].mean()
+                # save key, pred[key], obs[key] to a csv
+                with open(f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", "a") as f:
+                    f.write(
+                        f"{gene_name},{key},{pred[key]},{obs[key]},{atpm}\n")
         elif self.cfg.task.test_mode == 'perturb':
             # try:
             pred = self.perturb_step(batch, batch_idx)
@@ -228,9 +226,14 @@ class RegionLitModel(LitModel):
         
         elif self.cfg.task.test_mode == 'interpret_captum':
             tss_peak = batch['tss_peak'][0].cpu().numpy()
-            # assume focus is the center peaks in the input sample
-            torch.set_grad_enabled(True)
-            self.interpret_captum_step(batch, batch_idx, focus=tss_peak)
+
+            new_peak_start_idx, new_peak_end_idx, new_tss_peak = get_insulation_overlap(batch, self.dm.dataset_predict.zarr_dataset.datapool.insulation)
+            for shift in np.random.randint(-10, 10, 5):
+                if new_peak_start_idx+shift < 0 or new_peak_end_idx+shift >= batch['region_motif'][0].shape[0]:
+                    continue
+                # assume focus is the center peaks in the input sample
+                torch.set_grad_enabled(True)
+                self.interpret_captum_step(batch, batch_idx, focus=new_tss_peak, start=new_peak_start_idx, end=new_peak_end_idx, shift=shift)
 
 
     def get_model(self):
@@ -339,7 +342,9 @@ def run(cfg: DictConfig):
     dm = ReferenceRegionDataModule(cfg)
     model.dm = dm
     wandb_logger = WandbLogger(name=cfg.wandb.run_name,
-                               project=cfg.wandb.project_name)
+                               project=cfg.wandb.project_name,
+                               entity="get-v3",
+    )
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
     if cfg.machine.num_devices > 0:
         strategy = 'auto'

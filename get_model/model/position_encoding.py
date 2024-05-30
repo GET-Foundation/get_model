@@ -57,5 +57,5 @@ class AbsolutePositionalEncoding(nn.Module):
         Arguments:
             x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
         """
-        x = x + self.pe[: x.size(0)]
+        x = x + self.pe[: x.size(1)].transpose(0, 1)
         return self.dropout(x)

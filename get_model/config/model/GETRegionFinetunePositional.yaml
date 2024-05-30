@@ -1,0 +1,44 @@
+model:
+  _target_: get_model.model.model_refactored.GETRegionFinetunePositional
+  cfg:
+    num_regions: 900
+    num_motif: 283
+    embed_dim: 768
+    num_layers: 12
+    num_heads: 12
+    dropout: 0.1
+    output_dim: 2
+    flash_attn: false
+    pool_method: "mean"
+    region_embed:
+      num_regions: ${model.cfg.num_regions}
+      num_features: ${model.cfg.num_motif} 
+      embed_dim: ${model.cfg.embed_dim}
+    encoder:
+      num_heads: ${model.cfg.num_heads}
+      embed_dim: ${model.cfg.embed_dim}
+      num_layers: ${model.cfg.num_layers}
+      drop_path_rate: ${model.cfg.dropout}
+      drop_rate: 0
+      attn_drop_rate: 0
+      use_mean_pooling: false
+      flash_attn: ${model.cfg.flash_attn}
+    head_exp:
+      embed_dim: ${model.cfg.embed_dim}
+      output_dim: ${model.cfg.output_dim}
+      use_atac: false
+
+    mask_token:
+      embed_dim: ${model.cfg.embed_dim}
+      std: 0.02
+    loss:
+      components:
+        exp:
+          _target_: torch.nn.PoissonNLLLoss
+          reduction: "mean"
+          log_input: False
+      weights:
+        exp: 1.0
+    metrics:
+      components:
+        exp: ["pearson", "spearman", "r2"]
