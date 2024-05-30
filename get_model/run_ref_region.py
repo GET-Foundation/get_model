@@ -148,7 +148,6 @@ class RegionLitModel(LitModel):
             strand = batch['strand']
             atpm = batch['region_motif'][0][goi_idx, -1].cpu().item()
             gene_name = batch['gene_name'][0]
-            print(gene_name)
             for key in pred:
                 pred[key] = pred[key][0][:, strand][goi_idx].max()
                 obs[key] = obs[key][0][:, strand][goi_idx].mean()
