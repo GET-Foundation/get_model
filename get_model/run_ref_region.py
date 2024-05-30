@@ -142,22 +142,20 @@ class RegionLitModel(LitModel):
 
     def predict_step(self, batch, batch_idx, *args, **kwargs):
         if self.cfg.task.test_mode == 'inference':
-            try:
-                loss, pred, obs = self._shared_step(
-                    batch, batch_idx, stage='predict')
-                goi_idx = batch['tss_peak']
-                strand = batch['strand']
-                atpm = batch['region_motif'][0][goi_idx, -1].cpu().item()
-                gene_name = batch['gene_name'][0]
-                for key in pred:
-                    pred[key] = pred[key][0][:, strand][goi_idx].max()
-                    obs[key] = obs[key][0][:, strand][goi_idx].mean()
-                    # save key, pred[key], obs[key] to a csv
-                    with open(f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", "a") as f:
-                        f.write(
-                            f"{gene_name},{key},{pred[key]},{obs[key]},{atpm}\n")
-            except Exception as e:
-                print(e)
+            loss, pred, obs = self._shared_step(
+                batch, batch_idx, stage='predict')
+            goi_idx = batch['tss_peak']
+            strand = batch['strand']
+            atpm = batch['region_motif'][0][goi_idx, -1].cpu().item()
+            gene_name = batch['gene_name'][0]
+            print(gene_name)
+            for key in pred:
+                pred[key] = pred[key][0][:, strand][goi_idx].max()
+                obs[key] = obs[key][0][:, strand][goi_idx].mean()
+                # save key, pred[key], obs[key] to a csv
+                with open(f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", "a") as f:
+                    f.write(
+                        f"{gene_name},{key},{pred[key]},{obs[key]},{atpm}\n")
         elif self.cfg.task.test_mode == 'perturb':
             # try:
             pred = self.perturb_step(batch, batch_idx)

@@ -1682,7 +1682,7 @@ class PerturbationInferenceDataset(Dataset):
 
 @dataclass
 class ReferenceRegionMotifConfig:
-    root: str = '/pmglocal/alb2281/get/get_data'
+    root: str = '/home/ubuntu/alb2281/get/get_data'
     data: str = 'fetal_gbm_peak_motif_v1.hg38.zarr'
     refdata: str = 'fetal_union_peak_motif_v1.hg38.zarr'
     motif_scaler: float = 1.0
@@ -1821,8 +1821,13 @@ class ReferenceRegionDataset(Dataset):
     @property
     def data_dict(self):
         if not hasattr(self, '_data_dict'):
-            self._data_dict = {data_key: self.reference_region_motif.map_peaks_to_motifs(
-                peaks) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
+            self._data_dict = {}
+            for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items():
+                data, new_peaks = self.reference_region_motif.map_peaks_to_motifs(peaks)
+                new_datapool_peaks = new_peaks[['peak_names', 'Start', 'End', 'Expression_positive', 'Expression_negative', 'aTPM', 'Count', 'TSS', 'Chromosome']].reset_index(drop=True)
+                self.zarr_dataset.datapool.peaks_dict[data_key] = new_datapool_peaks
+                self._data_dict[data_key] = self.reference_region_motif.map_peaks_to_motifs(new_datapool_peaks)
+            
         return self._data_dict
 
     def extract_data_list(self, region_motif, peaks):
@@ -1965,9 +1970,15 @@ class InferenceReferenceRegionDataset(Dataset):
     @property
     def data_dict(self):
         if not hasattr(self, '_data_dict'):
-            self._data_dict = {data_key: self.reference_region_motif.map_peaks_to_motifs(
-                peaks) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
+            self._data_dict = {}
+            for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items():
+                data, new_peaks = self.reference_region_motif.map_peaks_to_motifs(peaks)
+                new_datapool_peaks = new_peaks[['peak_names', 'Start', 'End', 'Expression_positive', 'Expression_negative',	'aTPM',	'Count', 'TSS', 'Chromosome']].reset_index(drop=True)
+                self.zarr_dataset.datapool.peaks_dict[data_key] = new_datapool_peaks
+                self._data_dict[data_key] = self.reference_region_motif.map_peaks_to_motifs(new_datapool_peaks)
+            
         return self._data_dict
+
 
     def __len__(self):
         return len(self.zarr_dataset)
