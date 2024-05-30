@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e 
 
 # run zero-shot gene DEA
 project_name="get-gbm-zeroshot-gene-dea"

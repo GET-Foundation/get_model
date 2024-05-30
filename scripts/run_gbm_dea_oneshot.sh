@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e 
 
 # run one-shot gene DEA
 project_name="get-gbm-oneshot-gene-dea"
