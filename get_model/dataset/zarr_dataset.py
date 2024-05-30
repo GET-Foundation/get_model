@@ -1470,7 +1470,7 @@ class InferenceDataset(PretrainDataset):
 
     def _get_gene_info_from_window_idx(self, window_idx):
         # TODO: genome_chunk_length is affected by leave out chromosome by tss_chunk_idx is not
-        chunk_idx = window_idx % self.tss_chunk_idx.chunk_idx.max()
+        chunk_idx = window_idx % (self.tss_chunk_idx.chunk_idx.max()+1)
         gene_df = self.tss_chunk_idx.query(
             'chunk_idx==@chunk_idx or chunk_idx==@chunk_idx+1')
         return gene_df
@@ -1982,12 +1982,15 @@ class InferenceReferenceRegionDataset(Dataset):
         celltype_id = sample['metadata']['celltype_id']
         strand = sample['metadata']['strand']
         gene_name = sample['metadata']['gene_name']
+        print(gene_name)
         peak_end = peak_start + target.shape[0]
         region_motif, peaks = self.data_dict[celltype_id]
-        region_motif = region_motif[peak_start:peak_end]
-        chromosome = peaks['Chromosome'].values[peak_start]
-        peaks_coord = peaks[['Start', 'End']].values[peak_start:peak_end]
-        atpm = peaks['aTPM'].values[peak_start:peak_end]
+        rrd_peak_start = peaks.query('index_input==@peak_start').index.values[0]
+        rrd_peak_end = peaks.query('index_input==@peak_end').index.values[0]
+        region_motif = region_motif[rrd_peak_start:rrd_peak_end]
+        chromosome = peaks['Chromosome'].values[rrd_peak_start]
+        peaks_coord = peaks[['Start', 'End']].values[rrd_peak_start:rrd_peak_end]
+        atpm = peaks['aTPM'].values[rrd_peak_start:rrd_peak_end]
         # append binary or quantitative atac signal
         if not self.quantitative_atac:
             region_motif = np.concatenate(

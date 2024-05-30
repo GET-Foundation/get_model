@@ -157,7 +157,7 @@ class RegionLitModel(LitModel):
                         f.write(
                             f"{gene_name},{key},{pred[key]},{obs[key]},{atpm}\n")
             except Exception as e:
-                print(e)
+                raise e
         elif self.cfg.task.test_mode == 'perturb':
             # try:
             pred = self.perturb_step(batch, batch_idx)

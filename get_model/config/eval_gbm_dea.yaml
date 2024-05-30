@@ -9,7 +9,7 @@ assembly: "hg38"
 
 task:
   test_mode: "inference"
-  gene_list: null
+  gene_list: RET
 
 training:
   save_ckpt_freq: 1
