@@ -1,6 +1,4 @@
 # %%
-from http.client import OK
-from pyrsistent import get_in
 import seaborn as sns
 import torch.utils
 from get_model.run_ref_region import *
@@ -21,35 +19,35 @@ random.seed(0)
 gencode_config = {
     "assembly": "hg38",
     "version": 40,
-    "gtf_dir": "/home/xf2217/Projects/caesar/data/"
+    "gtf_dir": "/home/ubuntu/alb2281/get/get_data"
 }
 # Configuration for the dataset
 dataset_config = {
-    "zarr_dirs": ["/home/xf2217/Projects/get_data/joung_tfatlas_dense.zarr"],
-    "genome_seq_zarr": {'hg38': "/home/xf2217/Projects/get_data/hg38.zarr"},
-    "genome_motif_zarr": "/home/xf2217/Projects/get_data/hg38_motif_result.zarr",
+    "zarr_dirs": ["/home/ubuntu/alb2281/get/get_data/htan_gbm_dense.zarr"],
+    "genome_seq_zarr": {'hg38': "/home/ubuntu/alb2281/get/get_data/hg38.zarr"},
+    "genome_motif_zarr": "/home/ubuntu/alb2281/get/get_data/hg38_motif_result.zarr",
     "insulation_paths": [
-        "/home/xf2217/Projects/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather",
-        "/home/xf2217/Projects/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather"
+        "/home/ubuntu/alb2281/repos/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather",
+        "/home/ubuntu/alb2281/repos/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather"
     ],
-    "peak_name": "fetal_tfatlas_peaks_tissue_open_exp",
+    "peak_name": "fetal_gbm_peaks_open_exp",
     "leave_out_chromosomes": "",
     "use_insulation": True,
     "additional_peak_columns": ["Expression_positive", "Expression_negative", "aTPM", "TSS"],
     "n_peaks_upper_bound": 900,
-    "keep_celltypes": "0.joung_tfatlas.L10M",
+    "keep_celltypes": ["Tumor.htan_gbm.C3N-01818_CPT0168270014_snATAC_GBM_Tumor.2048" ],
     "center_expand_target": 0,
     "random_shift_peak": 0,
-    "peak_count_filter": 3,
-    'mask_ratio': 0,
+    "peak_count_filter": 10,
+    "mask_ratio": 0,
     "padding": 0,
 }
+
 # %%
-hg38 = DenseZarrIO('/home/xf2217/Projects/get_data/hg38.zarr')
+hg38 = DenseZarrIO('/home/ubuntu/alb2281/get/get_data/hg38.zarr')
 gencode = Gencode(**gencode_config)
 # %%
-gene_list = np.loadtxt(
-    '/home/xf2217/Projects/get_revision/TFAtlas_fetal_compare/diff_genes.txt', dtype=str)[0:10]
+gene_list = ['ABCD1', 'TP53']
 
 dataset = InferenceDataset(
     assembly='hg38', gencode_obj={'hg38': gencode}, **dataset_config, gene_list=gene_list)

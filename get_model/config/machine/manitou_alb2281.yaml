@@ -1,6 +1,6 @@
-data_path: "/pmglocal/alb2281/get/get_data/"
-codebase: "/pmglocal/alb2281/repos/get_model"
-output_dir: "/pmglocal/alb2281/get/output"
+data_path: "/home/ubuntu/alb2281/get/get_data"
+codebase: "/home/ubuntu/alb2281/repos/get_model"
+output_dir: "/home/ubuntu/alb2281/get/output"
 num_devices: 1
 num_workers: 1
 batch_size: 1
