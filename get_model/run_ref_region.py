@@ -144,17 +144,19 @@ class RegionLitModel(LitModel):
         if self.cfg.task.test_mode == 'inference':
             loss, pred, obs = self._shared_step(
                 batch, batch_idx, stage='predict')
-            goi_idx = batch['tss_peak']
-            strand = batch['strand']
-            atpm = batch['region_motif'][0][goi_idx, -1].cpu().item()
-            gene_name = batch['gene_name'][0]
-            for key in pred:
-                pred[key] = pred[key][0][:, strand][goi_idx].max()
-                obs[key] = obs[key][0][:, strand][goi_idx].mean()
-                # save key, pred[key], obs[key] to a csv
-                with open(f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", "a") as f:
-                    f.write(
-                        f"{gene_name},{key},{pred[key]},{obs[key]},{atpm}\n")
+            result_df = []
+            for batch_element in range(len(batch['gene_name'])):
+                goi_idx = batch['all_tss_peak'][batch_element]
+                strand = batch['strand'][batch_element]
+                atpm = batch['region_motif'][batch_element][goi_idx, -1].max().cpu().item()
+                gene_name = batch['gene_name'][batch_element]
+                for key in pred:
+                    result_df.append(
+                        {'gene_name': gene_name, 'key': key, 'pred': pred[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'obs': obs[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'atpm': atpm})
+            result_df = pd.DataFrame(result_df)
+            result_df.to_csv(
+                f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", index=False, mode='a', header=False
+            )
         elif self.cfg.task.test_mode == 'perturb':
             # try:
             pred = self.perturb_step(batch, batch_idx)
