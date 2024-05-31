@@ -2009,13 +2009,16 @@ class InferenceReferenceRegionDataset(Dataset):
 
         # right zero padding
         pad_length = self.num_region_per_sample - region_motif.shape[0]
+        max_tss_count = 100
+
         region_motif = np.pad(region_motif, ((0, pad_length), (0, 0)), mode='constant')
         peaks_coord = np.pad(peaks_coord, ((0, pad_length), (0, 0)), mode='constant')
         mask = np.pad(mask, (0, pad_length), mode='constant')
         exp_label = np.pad(target, ((0, pad_length), (0, 0)), mode='constant')
-        all_tss_peak = np.pad(sample['metadata']['all_tss_peak'], (0, -1), mode='constant')
-        # breakpoint()
-        # hic_matrix = np.pad(hic_matrix, ((0, pad_length), (0, pad_length)), mode='constant')
+        tss_peak = sample['metadata']['tss_peak']
+        if tss_peak.shape == ():
+            tss_peak = np.array([tss_peak])
+        all_tss_peak = np.pad(sample['metadata']['all_tss_peak'], (0, max_tss_count - len(sample['metadata']['all_tss_peak'])), mode='constant')
 
         return {'region_motif': region_motif.astype(np.float32),
                 'chromosome': chromosome,
@@ -2025,8 +2028,8 @@ class InferenceReferenceRegionDataset(Dataset):
                 'hic_matrix': hic_matrix,
                 'strand': strand,
                 'gene_name': gene_name,
-                'tss_peak': sample['metadata']['tss_peak'],
-                'all_tss_peak': all_tss_peak
+                'tss_peak': tss_peak,
+                'all_tss_peak': all_tss_peak,
         }
 
 
