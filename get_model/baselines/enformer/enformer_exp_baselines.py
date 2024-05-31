@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 
 transform_path = 'gs://dm-enformer/models/enformer.finetuned.SAD.robustscaler-PCA500-robustscaler.transform.pkl'
-model_path = "https://www.kaggle.com/models/deepmind/enformer/TensorFlow2/enformer/1"
+model_path = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/ckpts/enformer-base"
 fasta_file = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/genome.fa'
 clinvar_vcf = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/clinvar.vcf.gz'
 targets_txt = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/targets_human.txt"
@@ -27,7 +27,8 @@ output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/pre
 
 SEQUENCE_LENGTH = 393216
 OUTPUT_SEQ_LENGTH = 114688
-BATCH_SIZE = 2
+BATCH_SIZE = 12
+SAVE_EVERY_N_BATCHES = 100
 
 
 class Enformer:
@@ -187,19 +188,21 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_idx)
     target_interval = kipoiseq.Interval(row["Chromosome"], row["Start"], row["End"]) 
     sequence_one_hot = one_hot_encode(fasta_extractor.extract(target_interval.resize(SEQUENCE_LENGTH)))
     one_hot_seq_col.append(sequence_one_hot)
-    
-  one_hot_seq_batch = np.reshape(one_hot_seq_col, (BATCH_SIZE, SEQUENCE_LENGTH, 4))
-  predictions = model.predict_on_batch(one_hot_seq_batch)['human']
+  
+  print("Length of one-hot col: ", len(one_hot_seq_col))
+  print(len(batch_df), SEQUENCE_LENGTH, 4)
+  one_hot_seq_batch = np.reshape(one_hot_seq_col, (len(batch_df), SEQUENCE_LENGTH, 4))
+  predictions = model.predict_on_batch(one_hot_seq_batch)['human'][:,:,track_idx]
   
   mean_preds = []
   for idx, row in batch_df.iterrows():
     output_start = (row["Start"] + row["End"])/2 - OUTPUT_SEQ_LENGTH/2
     output_end = (row["Start"] + row["End"])/2 + OUTPUT_SEQ_LENGTH/2
     interval_bins = np.linspace(output_start, output_end, num=896, endpoint=False)
-    exp_output_start = np.abs(interval_bins - start).argmin()
-    exp_output_end = np.abs(interval_bins - end).argmin()
+    exp_output_start = np.abs(interval_bins - row["Start"]).argmin()
+    exp_output_end = np.abs(interval_bins - row["End"]).argmin()
     ret_pred = predictions[idx, exp_output_start:exp_output_end]
-    mean_preds.append(ret_pred.mean())
+    mean_preds.append([row["tss_idx"], ret_pred.mean()])
   
   return mean_preds
 
@@ -207,10 +210,40 @@ if __name__=="__main__":
   pyfaidx.Faidx(fasta_file)
   fasta_extractor = FastaStringExtractor(fasta_file)
   model = Enformer(model_path)
+  enformer_track_idx = 4873 # CAGE:Astrocyte - cerebellum
 
   astrocyte_file = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/leaveout_celltypes/cerebellum_1.csv"
   astrocyte_df = pd.read_csv(astrocyte_file)
-  for start in tqdm(range(0, len(astrocyte_df), BATCH_SIZE)):
+
+  tss_file = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/leaveout_celltypes/cerebellum_1.tss.npy"
+  tss_array = np.load("/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/leaveout_celltypes/cerebellum_1.tss.npy")
+
+  # get indices for tss True on either strand
+  tss_indices = np.where(tss_array[:,0] | tss_array[:,1])[0]
+
+  # filter astrocyte_df to rows where TSS is True on either strand
+  astrocyte_df = astrocyte_df.iloc[tss_indices]
+  astrocyte_df["tss_idx"] = astrocyte_df.index
+  
+  print(f"Predicting for {len(astrocyte_df)} regions.")
+    
+  batch_preds = []
+  num_batches = 0
+
+  # interrupted at start=3600
+  for start in tqdm(range(3600, len(astrocyte_df), BATCH_SIZE)):
     end = start + BATCH_SIZE
-    batch_df = astrocyte_df[start:end]
-    pred = compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, 4769)
+    batch_df = astrocyte_df[start:end].reset_index()
+    mean_pred = compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, enformer_track_idx)
+    batch_preds.append(mean_pred)
+
+    if (num_batches + 1) % SAVE_EVERY_N_BATCHES == 0:
+      flat_preds = [item for sublist in batch_preds for item in sublist]
+      np.save(f"{output_dir}/astrocyte_cerebellum_1_preds_example_{start}.npy", flat_preds)
+      batch_preds = []
+
+    num_batches += 1
+
+  if batch_preds:
+    flat_preds = [item for sublist in batch_preds for item in sublist]
+    np.save(f"{output_dir}/astrocyte_cerebellum_1_preds_example_{start}.npy", flat_preds)
