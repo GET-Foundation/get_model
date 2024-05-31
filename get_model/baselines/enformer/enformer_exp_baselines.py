@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import seaborn as sns
 from tqdm import tqdm
-
+import pyliftover
 
 transform_path = 'gs://dm-enformer/models/enformer.finetuned.SAD.robustscaler-PCA500-robustscaler.transform.pkl'
 model_path = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/ckpts/enformer-base"
@@ -99,10 +99,6 @@ class EnformerScoreVariantsPCANormalized:
     return self._transform.transform(scores)[:, :self._num_top_features]
 
 
-# TODO(avsec): Add feature description: Either PCX, or full names.
-# %%
-# @title `variant_centered_sequences`
-
 class FastaStringExtractor:
     
     def __init__(self, fasta_file):
@@ -185,22 +181,23 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_idx)
   # prepare one-hot batch
   one_hot_seq_col = []
   for idx, row in tqdm(batch_df.iterrows(), total=len(batch_df)):
-    target_interval = kipoiseq.Interval(row["Chromosome"], row["Start"], row["End"]) 
+    target_interval = kipoiseq.Interval(row["Chromosome_hg38"], row["Start_hg38"], row["End_hg38"]) 
     sequence_one_hot = one_hot_encode(fasta_extractor.extract(target_interval.resize(SEQUENCE_LENGTH)))
     one_hot_seq_col.append(sequence_one_hot)
   
-  print("Length of one-hot col: ", len(one_hot_seq_col))
-  print(len(batch_df), SEQUENCE_LENGTH, 4)
+  for item in one_hot_seq_col:
+    if item.shape[0] != SEQUENCE_LENGTH:
+      breakpoint()
   one_hot_seq_batch = np.reshape(one_hot_seq_col, (len(batch_df), SEQUENCE_LENGTH, 4))
   predictions = model.predict_on_batch(one_hot_seq_batch)['human'][:,:,track_idx]
   
   mean_preds = []
   for idx, row in batch_df.iterrows():
-    output_start = (row["Start"] + row["End"])/2 - OUTPUT_SEQ_LENGTH/2
-    output_end = (row["Start"] + row["End"])/2 + OUTPUT_SEQ_LENGTH/2
+    output_start = (row["Start_hg38"] + row["End_hg38"])/2 - OUTPUT_SEQ_LENGTH/2
+    output_end = (row["Start_hg38"] + row["End_hg38"])/2 + OUTPUT_SEQ_LENGTH/2
     interval_bins = np.linspace(output_start, output_end, num=896, endpoint=False)
-    exp_output_start = np.abs(interval_bins - row["Start"]).argmin()
-    exp_output_end = np.abs(interval_bins - row["End"]).argmin()
+    exp_output_start = np.abs(interval_bins - row["Start_hg38"]).argmin()
+    exp_output_end = np.abs(interval_bins - row["End_hg38"]).argmin()
     ret_pred = predictions[idx, exp_output_start:exp_output_end]
     mean_preds.append([row["tss_idx"], ret_pred.mean()])
   
@@ -224,12 +221,29 @@ if __name__=="__main__":
   # filter astrocyte_df to rows where TSS is True on either strand
   astrocyte_df = astrocyte_df.iloc[tss_indices]
   astrocyte_df["tss_idx"] = astrocyte_df.index
+
+  def convert_chr(chromosome, start, ret_type=None):
+    converted = lo.convert_coordinate(chromosome, start)
+    if converted:
+      if ret_type == "chr":
+        return converted[0][0]
+      elif ret_type == "coord":
+        return converted[0][1]
+    else: 
+      return None
+
+  lo = pyliftover.LiftOver('hg19', 'hg38') 
+  astrocyte_df["Chromosome_hg38"] = astrocyte_df.apply(lambda x: convert_chr(x["Chromosome"], x["Start"], "chr"), axis=1)
+  astrocyte_df["Start_hg38"] = astrocyte_df.apply(lambda x: convert_chr(x["Chromosome"], x["Start"], "coord"), axis=1)
+  astrocyte_df["End_hg38"] = astrocyte_df.apply(lambda x: convert_chr(x["Chromosome"], x["End"], "coord"), axis=1)
+  astrocyte_df = astrocyte_df.dropna()
+  astrocyte_df["Start_hg38"] = astrocyte_df["Start_hg38"].astype(int)
+  astrocyte_df["End_hg38"] = astrocyte_df["End_hg38"].astype(int)
   
   print(f"Predicting for {len(astrocyte_df)} regions.")
     
   batch_preds = []
   num_batches = 0
-
   # interrupted at start=3600
   for start in tqdm(range(3600, len(astrocyte_df), BATCH_SIZE)):
     end = start + BATCH_SIZE
