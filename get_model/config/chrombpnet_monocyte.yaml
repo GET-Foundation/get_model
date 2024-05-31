@@ -40,5 +40,4 @@ wandb:
 
 finetune:
   checkpoint: "/pmglocal/xf2217/Expression_Finetune_monocyte.Chr4&14.conv50.learnable_motif_prior.chrombpnet.shift10.R100L1000.augmented.20240307/checkpoint-17.pth"
-  model_prefix: "model."
   patterns_to_freeze: []
