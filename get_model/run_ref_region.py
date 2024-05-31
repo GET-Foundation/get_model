@@ -147,6 +147,7 @@ class RegionLitModel(LitModel):
             result_df = []
             for batch_element in range(len(batch['gene_name'])):
                 goi_idx = batch['all_tss_peak'][batch_element]
+                goi_idx = goi_idx[goi_idx > 0] # filter out pad (tss_peak = 0)
                 strand = batch['strand'][batch_element]
                 atpm = batch['region_motif'][batch_element][goi_idx, -1].max().cpu().item()
                 gene_name = batch['gene_name'][batch_element]
