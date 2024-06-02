@@ -10,17 +10,16 @@ from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig
 from torch.nn.init import trunc_normal_
 
-from get_model.model.modules import (ATACHead, ATACHeadConfig, HiCHead, HiCHeadConfig,
+from get_model.model.modules import (ATACHead, ContactMapHead, ContactMapHeadConfig, DistanceContactHead, DistanceContactHeadConfig, HiCHead, HiCHeadConfig,
                                      ATACSplitPool,
                                      ATACSplitPoolConfig, ATACSplitPoolMaxNorm,
                                      ATACSplitPoolMaxNormConfig, BaseConfig,
                                      BaseModule, ConvPool, ConvPoolConfig,
                                      ExpressionHead, ExpressionHeadConfig,
                                      MotifScanner, MotifScannerConfig,
-                                     RegionEmbed, RegionEmbedConfig, SplitPool,
-                                     SplitPoolConfig, dict_to_device)
+                                     RegionEmbed, RegionEmbedConfig)
 from get_model.model.position_encoding import AbsolutePositionalEncoding
-from get_model.model.transformer import GETTransformer
+from get_model.model.transformer import GETTransformer, GETTransformerWithContactMap
 
 
 class MNLLLoss(nn.Module):
@@ -148,6 +147,14 @@ class GETLoss(nn.Module):
             return {f"{name}_loss": loss_fn(pred[name], obs[name]) * weight for name, (loss_fn, weight) in self.losses.items()}
         elif isinstance(self.losses, nn.Module):
             return self.losses(pred, obs)
+
+    def freeze_component(self, component_name):
+        """Freeze a component of the loss function by set the weight to 0"""
+        if component_name in self.losses:
+            self.losses[component_name] = (self.losses[component_name][0], 0)
+        else:
+            raise ValueError(
+                f"Component '{component_name}' not found in the loss function.")
 
 
 class RegressionMetrics(nn.Module):
@@ -581,11 +588,13 @@ class GETRegionFinetune(BaseGETModel):
             'region_motif': torch.randn(B, R, M).float().abs(),
         }
 
+
 class GETRegionFinetunePositional(GETRegionFinetune):
     def __init__(self, cfg: GETRegionFinetuneModelConfig):
         super().__init__(cfg)
         self.region_embed = RegionEmbed(cfg.region_embed)
-        self.pos_embed = AbsolutePositionalEncoding(cfg.region_embed.embed_dim, dropout=0.1, max_len=1000)
+        self.pos_embed = AbsolutePositionalEncoding(
+            cfg.region_embed.embed_dim, dropout=0.1, max_len=1000)
         self.encoder = GETTransformer(**cfg.encoder)
         self.head_exp = ExpressionHead(cfg.head_exp)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
@@ -729,6 +738,174 @@ class GETRegionFinetuneHiC(BaseGETModel):
         B, R, M = 2, 900, 283
         return {
             'region_motif': torch.randn(B, R, M).float().abs(),
+        }
+
+
+@dataclass
+class DistanceContactMapModelConfig(BaseGETModelConfig):
+    pass
+
+
+class DistanceContactMap(BaseGETModel):
+    """A simple and small ResNet model to predict the contact map from the log distance map.
+    The output has the same shape as the input distance map.
+    """
+
+    def __init__(self, cfg: DistanceContactMapModelConfig):
+        super().__init__(cfg)
+        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.conv3 = nn.Conv2d(64, 1, 3, padding=1)
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Conv2d):
+            nn.init.xavier_uniform_(m.weight)
+            if isinstance(m, nn.Conv2d) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, distance_map):
+        x = F.gelu(self.conv1(distance_map))
+        x = F.gelu(self.conv2(x))
+        x = self.conv3(x)
+        hic = F.softplus(x)
+        return hic
+
+    def get_input(self, batch):
+        peak_coord = batch['peak_coord']
+        peak_coord_mean = peak_coord[:, :, 0]
+        # pair-wise distance using torch
+        # Add new dimensions to create column and row vectors
+        peak_coord_mean_col = peak_coord_mean.unsqueeze(
+            2)  # Adds a new axis (column vector)
+        peak_coord_mean_row = peak_coord_mean.unsqueeze(
+            1)  # Adds a new axis (row vector)
+
+        # Compute the pairwise difference
+        distance = torch.log10(
+            (peak_coord_mean_col - peak_coord_mean_row).abs() + 1).unsqueeze(1)
+        return {
+            'distance_map': distance,
+        }
+
+    def before_loss(self, output, batch):
+        pred = {'hic': output.squeeze(1)}
+        obs = {'hic': batch['hic_matrix'].float()}
+        # if a element in batch['hic_matrix'].sum(1).sum(1) == 0, we should ignore the loss for that element
+        if (batch['hic_matrix'].sum(1).sum(1) == 0).any():
+            mask = batch['hic_matrix'].sum(1).sum(1) != 0
+            obs['hic'][mask] = pred['hic'][mask].detach()
+
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R = 2, 900
+        return {
+            'distance_map': torch.randn(B, 1, R, R).float(),
+        }
+
+
+@dataclass
+class GETRegionFinetuneExpHiCABCConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    header_hic: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    header_abc: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    distance_contact_map: DistanceContactHeadConfig = field(
+        default_factory=DistanceContactHeadConfig)
+
+
+class GETRegionFinetuneExpHiCABC(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneExpHiCABCConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformerWithContactMap(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.hic_header = ContactMapHead(cfg.header_hic)
+        self.abc_header = ContactMapHead(cfg.header_abc)
+        self.distance_contact_map = DistanceContactHead(
+            cfg.distance_contact_map)
+        self.distance_contact_map.eval()
+        self.proj_distance = nn.Linear(cfg.embed_dim, 128)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        logging.info(
+            f"GETRegionFinetuneExpHiCABC can only be used with quantitative_atac=True in order to generate the ABC score.")
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+        peak_coord = batch['peak_coord']
+        peak_coord_mean = peak_coord[:, :, 0]
+        # pair-wise distance using torch
+        # Add new dimensions to create column and row vectors
+        peak_coord_mean_col = peak_coord_mean.unsqueeze(
+            2)  # Adds a new axis (column vector)
+        peak_coord_mean_row = peak_coord_mean.unsqueeze(
+            1)  # Adds a new axis (row vector)
+
+        # Compute the pairwise difference
+        distance = torch.log10(
+            (peak_coord_mean_col - peak_coord_mean_row).abs() + 1).unsqueeze(1)
+        region_model = batch['region_motif'].clone()
+        batch['distance_map'] = distance
+        # region_model[:, :, -1] = 1 # set atac to binary
+        return {
+            'region_motif': region_model,
+            'distance_map': distance,
+        }
+
+    def forward(self, region_motif, distance_map):
+        x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, fused_distance_map, _ = self.encoder(x, distance_map)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        fused_distance_map = self.proj_distance(
+            fused_distance_map).transpose(1, 3).transpose(2, 3)
+        hic = self.hic_header(fused_distance_map).squeeze(1)
+        abc = self.abc_header(fused_distance_map).squeeze(1)
+        return exp, hic, abc
+
+    def before_loss(self, output, batch):
+        exp, hic_contact_map, abc_contact_map = output
+        atac = batch['region_motif'][:, :, -1]
+        # outer sum of atac and itself
+        atac = torch.sqrt(atac.unsqueeze(1) * atac.unsqueeze(2))
+        # test if batch['hic_matrix'] has shape and not a scalar
+        if len(batch['hic_matrix'][0].shape) >= 2:
+            hic = batch['hic_matrix'].float()
+        else:
+            logging.info(
+                f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
+            hic = self.distance_contact_map(
+                batch['distance_map']).detach().squeeze(1)
+        abc = atac * hic
+        pred = {
+            'exp': exp,
+            # 'hic': hic_contact_map,
+            'abc': abc_contact_map,
+        }
+        obs = {
+            'exp': batch['exp_label'],
+            # 'hic': hic,
+            'abc': abc,
+        }
+        if (batch['hic_matrix'].sum(1).sum(1) == 0).any():
+            mask = batch['hic_matrix'].sum(1).sum(1) != 0
+            # obs['hic'][mask] = pred['hic'][mask].detach()
+            obs['abc'][mask] = pred['abc'][mask].detach()
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+            'distance_map': torch.randn(B, R, R).float(),
         }
 
 

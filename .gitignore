@@ -29,3 +29,7 @@ outputs/
 *.ckpt
 logs
 multirun
+test/abc
+*.txt
+*.tsv
+test/esc_abc

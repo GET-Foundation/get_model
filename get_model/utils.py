@@ -341,13 +341,11 @@ def init_distributed_mode(args):
 
 def load_checkpoint(checkpoint_path, model_key=None):
     if checkpoint_path.startswith("https"):
-        checkpoint = torch.hub.load_state_dict_from_url(
-            checkpoint_path, map_location="cpu", check_hash=True
-        )
+        checkpoint = torch.hub.load_state_dict_from_url(checkpoint_path, map_location="cpu", check_hash=True)
     else:
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
     print("Load ckpt from %s" % checkpoint_path)
-
+    
     if model_key is not None:
         checkpoint_model = None
         for key in model_key.split("|"):
@@ -359,9 +357,8 @@ def load_checkpoint(checkpoint_path, model_key=None):
             checkpoint_model = checkpoint
     else:
         checkpoint_model = checkpoint
-
+    
     return checkpoint_model
-
 
 def remove_keys(checkpoint_model, model_state_dict):
     for k in ["head.weight", "head.bias"]:
@@ -370,15 +367,26 @@ def remove_keys(checkpoint_model, model_state_dict):
             del checkpoint_model[k]
 
 
-def rename_keys(checkpoint_model):
-    all_keys = list(checkpoint_model.keys())
-    new_dict = OrderedDict()
-    for key in all_keys:
-        if key.startswith("backbone."):
-            new_dict[key[9:]] = checkpoint_model[key]
-        else:
-            new_dict[key] = checkpoint_model[key]
-    return new_dict
+
+def rename_keys(state_dict):
+    new_state_dict = {}
+    for key in state_dict.keys():
+        new_key = key
+        if "blocks." in new_key:
+            new_key = new_key.replace("blocks.", "encoder.blocks.")
+        if "fc_norm." in new_key:
+            new_key = new_key.replace("fc_norm.", "encoder.norm.")
+        if "head." in new_key:
+            new_key = new_key.replace("head.", "head_exp.head.")
+        if "region_embed.proj." in new_key:
+            new_key = new_key.replace(
+                "region_embed.proj.", "region_embed.embed.")
+        new_state_dict[new_key] = state_dict[key]
+
+    if 'region_embed.embed.weight' in new_state_dict:
+        # .unsqueeze(2)
+        new_state_dict['region_embed.embed.weight'] = new_state_dict['region_embed.embed.weight']
+    return new_state_dict
 
 
 def rename_lit_state_dict(state_dict, patterns_to_drop=[]):
@@ -432,6 +440,26 @@ def rename_v1_finetune_keys(state_dict):
     return new_state_dict
 
 
+def extract_state_dict(checkpoint_model):
+    if 'model' in checkpoint_model:
+        checkpoint_model = checkpoint_model['model']
+    if 'state_dict' in checkpoint_model:
+        checkpoint_model = checkpoint_model['state_dict']
+    return checkpoint_model
+
+def rename_state_dict(state_dict, rename_config):
+    if rename_config is None:
+        return state_dict
+    
+    new_state_dict = {}
+    for key, value in state_dict.items():
+        new_key = key
+        for pattern, replacement in rename_config.items():
+            new_key = new_key.replace(pattern, replacement)
+        new_state_dict[new_key] = value
+    
+    return new_state_dict
+
 def freeze_layers(model, freeze_last_layer=False, freeze_atac_attention=False):
     if freeze_last_layer:
         for name, param in model.named_parameters():
@@ -450,74 +478,14 @@ def freeze_layers(model, freeze_last_layer=False, freeze_atac_attention=False):
                 param.requires_grad = False
                 print(f"Freezed weights of {name}")
 
+def load_state_dict(model, state_dict, strict=True, patterns_to_drop=[]):
+    # Remove keys matching the patterns_to_drop
+    for pattern in patterns_to_drop:
+        state_dict = {k: v for k, v in state_dict.items() if pattern not in k}
+    
+    model.load_state_dict(state_dict, strict=strict)
 
-def load_state_dict(
-    model, state_dict, prefix="", ignore_missing="relative_position_index"
-):
-    missing_keys = []
-    unexpected_keys = []
-    error_msgs = []
-    # copy state_dict so _load_from_state_dict can modify it
-    metadata = getattr(state_dict, "_metadata", None)
-    state_dict = state_dict.copy()
-    # state_dict = rename_keys(state_dict)
-    # print(state_dict)
-    if metadata is not None:
-        state_dict._metadata = metadata
 
-    def load(module, prefix=""):
-        local_metadata = {} if metadata is None else metadata.get(
-            prefix[:-1], {})
-        module._load_from_state_dict(
-            state_dict,
-            prefix,
-            local_metadata,
-            True,
-            missing_keys,
-            unexpected_keys,
-            error_msgs,
-        )
-        for name, child in module._modules.items():
-            if child is not None:
-                load(child, prefix + name + ".")
-
-    load(model, prefix=prefix)
-
-    warn_missing_keys = []
-    ignore_missing_keys = []
-    for key in missing_keys:
-        keep_flag = True
-        for ignore_key in ignore_missing.split("|"):
-            if ignore_key in key:
-                keep_flag = False
-                break
-        if keep_flag:
-            warn_missing_keys.append(key)
-        else:
-            ignore_missing_keys.append(key)
-
-    missing_keys = warn_missing_keys
-
-    if len(missing_keys) > 0:
-        print(
-            "Weights of {} not initialized from pretrained model: {}".format(
-                model.__class__.__name__, missing_keys
-            )
-        )
-    if len(unexpected_keys) > 0:
-        print(
-            "Weights from pretrained model not used in {}: {}".format(
-                model.__class__.__name__, unexpected_keys
-            )
-        )
-    if len(ignore_missing_keys) > 0:
-        print(
-            "Ignored weights of {} not initialized from pretrained model: {}".format(
-                model.__class__.__name__, ignore_missing_keys
-            )
-        )
-    if len(error_msgs) > 0:
-        print("\n".join(error_msgs))
 
 def recursive_detach(tensors):
     if isinstance(tensors, dict):
@@ -686,26 +654,6 @@ def save_model(
             client_state=client_state,
         )
 
-
-def rename_keys(state_dict):
-    new_state_dict = {}
-    for key in state_dict.keys():
-        new_key = key
-        if "blocks." in new_key:
-            new_key = new_key.replace("blocks.", "encoder.blocks.")
-        if "fc_norm." in new_key:
-            new_key = new_key.replace("fc_norm.", "encoder.norm.")
-        if "head." in new_key:
-            new_key = new_key.replace("head.", "head_exp.head.")
-        if "region_embed.proj." in new_key:
-            new_key = new_key.replace(
-                "region_embed.proj.", "region_embed.embed.")
-        new_state_dict[new_key] = state_dict[key]
-
-    if 'region_embed.embed.weight' in new_state_dict:
-        # .unsqueeze(2)
-        new_state_dict['region_embed.embed.weight'] = new_state_dict['region_embed.embed.weight']
-    return new_state_dict
 
 
 def auto_load_model(

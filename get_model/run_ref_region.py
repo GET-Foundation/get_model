@@ -1,4 +1,5 @@
 import logging
+from functools import partial
 
 import lightning as L
 import pandas as pd
@@ -11,8 +12,10 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
 from matplotlib import pyplot as plt
+from minlora import LoRAParametrization
+from minlora.model import add_lora_by_name
 from omegaconf import MISSING, DictConfig, OmegaConf
-from minlora import add_lora, merge_lora
+
 import wandb
 from get_model.config.config import *
 from get_model.dataset.zarr_dataset import (
@@ -23,9 +26,10 @@ from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
 from get_model.run import GETDataModule, LitModel, get_insulation_overlap
-from get_model.utils import (cosine_scheduler, load_checkpoint, recursive_detach, recursive_numpy, recursive_save_to_zarr, remove_keys,
-                             rename_lit_state_dict, rename_v1_finetune_keys,
-                             rename_v1_pretrain_keys)
+from get_model.utils import (cosine_scheduler, extract_state_dict,
+                             load_checkpoint, load_state_dict,
+                             recursive_detach, recursive_numpy,
+                             recursive_save_to_zarr, rename_state_dict)
 
 
 class ReferenceRegionDataModule(GETDataModule):
@@ -111,19 +115,34 @@ class ReferenceRegionDataModule(GETDataModule):
 class RegionLitModel(LitModel):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
+        self.min_exp_loss = float('inf')
+        self.exp_overfit_count = 0
+        self.exp_overfit_threshold = 1
 
     def validation_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='val')
         # print(pred['exp'].detach().cpu().numpy().flatten().max(),
         #       obs['exp'].detach().cpu().numpy().flatten().max())
 
+        # if size of obs is too large, subsample 2000 elements
+        if 'hic' in obs:
+            idx = np.random.choice(
+                obs['hic'].flatten().shape[0], 1000, replace=False)
+            obs['hic'] = obs['hic'].flatten()[idx]
+            pred['hic'] = pred['hic'].flatten()[idx]
+        
+        if 'abc' in obs:
+            idx = np.random.choice(
+                obs['abc'].flatten().shape[0], 1000, replace=False)
+            obs['abc'] = obs['abc'].flatten()[idx]
+            pred['abc'] = pred['abc'].flatten()[idx]
+
         if self.cfg.eval_tss:
             tss_idx = batch['mask']
-            for key in pred:
                 # pred[key] = (pred[key] * tss_idx)
                 # obs[key] = (obs[key] * tss_idx)
-                pred[key] = pred[key][tss_idx > 0].flatten()
-                obs[key] = obs[key][tss_idx > 0].flatten()
+            pred['exp'] = pred['exp'][tss_idx > 0].flatten()
+            obs['exp'] = obs['exp'][tss_idx > 0].flatten()
 
         metrics = self.metrics(pred, obs)
         if batch_idx == 0 and self.cfg.log_image:
@@ -139,27 +158,42 @@ class RegionLitModel(LitModel):
             metrics, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
         self.log("val_loss", loss,
                  batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
+    def on_train_epoch_end(self):
+        # get loss from the last epoch
+        if 'val_exp_loss' not in self.trainer.callback_metrics:
+            return
+        val_exp_loss = self.trainer.callback_metrics['val_exp_loss']
+        if val_exp_loss < self.min_exp_loss:
+            self.min_exp_loss = val_exp_loss
+        else:
+            self.exp_overfit_count += 1
+        if self.exp_overfit_count > self.exp_overfit_threshold:
+            # freeze encoder, region_embed, head_exp
+            # self.model.freeze_layers(
+            #     patterns_to_freeze=['encoder', 'region_embed', 'head_exp'], invert_match=False)
+            print("Freezing exp loss component")
+            self.loss.freeze_component('exp')
 
     def predict_step(self, batch, batch_idx, *args, **kwargs):
         if self.cfg.task.test_mode == 'inference':
-            try:
-                loss, pred, obs = self._shared_step(
-                    batch, batch_idx, stage='predict')
-                goi_idx = batch['tss_peak']
-                strand = batch['strand']
-                atpm = batch['region_motif'][0][goi_idx, -1].cpu().item()
-                gene_name = batch['gene_name'][0]
+            loss, pred, obs = self._shared_step(
+                batch, batch_idx, stage='predict')
+            result_df = []
+            for batch_element in range(len(batch['gene_name'])):
+                goi_idx = batch['all_tss_peak'][batch_element]
+                goi_idx = goi_idx[goi_idx > 0] # filter out pad (tss_peak = 0)
+                strand = batch['strand'][batch_element]
+                atpm = batch['region_motif'][batch_element][goi_idx, -1].max().cpu().item()
+                gene_name = batch['gene_name'][batch_element]
                 for key in pred:
-                    pred[key] = pred[key][0][:, strand][goi_idx].max()
-                    obs[key] = obs[key][0][:, strand][goi_idx].mean()
-                    # save key, pred[key], obs[key] to a csv
-                    with open(f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", "a") as f:
-                        f.write(
-                            f"{gene_name},{key},{pred[key]},{obs[key]},{atpm}\n")
-            except Exception as e:
-                print(e)
+                    result_df.append(
+                        {'gene_name': gene_name, 'key': key, 'pred': pred[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'obs': obs[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'atpm': atpm})
+            result_df = pd.DataFrame(result_df)
+            result_df.to_csv(
+                f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", index=False, mode='a', header=False
+            )
         elif self.cfg.task.test_mode == 'perturb':
-            # try:
+            # TODO: need to figure out if batching is working
             pred = self.perturb_step(batch, batch_idx)
             batch_size = len(batch['WT']['strand'])
             results = []
@@ -168,9 +202,9 @@ class RegionLitModel(LitModel):
                 strand = batch['WT']['strand'][i].cpu().numpy()
                 gene_name = batch['WT']['gene_name'][i]
                 tss_peak = batch['WT']['tss_peak'][i].cpu().numpy()
-                all_tss_peak = batch['WT']['all_tss_peak'][i].cpu().numpy()
-                all_tss_peak = all_tss_peak[all_tss_peak > 0]
-                all_tss_peak = all_tss_peak[all_tss_peak < pred['pred_wt']['exp'][i].shape[0]]
+                goi_idx = batch['WT']['all_tss_peak'][i].cpu().numpy()
+                goi_idx = goi_idx[goi_idx > 0]
+                goi_idx = goi_idx[goi_idx < pred['pred_wt']['exp'][i].shape[0]]
 
                 result = {
                     'gene_name': gene_name,
@@ -179,9 +213,9 @@ class RegionLitModel(LitModel):
                     'perturb_chrom': batch['MUT']['perturb_chrom'][i],
                     'perturb_start': batch['MUT']['perturb_start'][i].cpu().item(),
                     'perturb_end': batch['MUT']['perturb_end'][i].cpu().item(),
-                    'pred_wt': pred['pred_wt']['exp'][i][:, strand][all_tss_peak].mean().cpu().item(),
-                    'pred_mut': pred['pred_mut']['exp'][i][:, strand][all_tss_peak].mean().cpu().item(),
-                    'obs': pred['obs_wt']['exp'][i][:, strand][all_tss_peak].mean().cpu().item()
+                    'pred_wt': pred['pred_wt']['exp'][i][:, strand][goi_idx].mean().cpu().item(),
+                    'pred_mut': pred['pred_mut']['exp'][i][:, strand][goi_idx].mean().cpu().item(),
+                    'obs': pred['obs_wt']['exp'][i][:, strand][goi_idx].mean().cpu().item()
                 }
                 results.append(result)
 
@@ -193,7 +227,7 @@ class RegionLitModel(LitModel):
             # except Exception as e:
                 # print(e)
         elif self.cfg.task.test_mode == 'interpret':
-            all_tss_peak = batch['all_tss_peak'][0].cpu().numpy()
+            goi_idx = batch['all_tss_peak'][0].cpu().numpy()
             tss_peak = batch['tss_peak'][0].cpu().numpy()
             # assume focus is the center peaks in the input sample
             torch.set_grad_enabled(True)
@@ -240,47 +274,49 @@ class RegionLitModel(LitModel):
 
     def get_model(self):
         model = instantiate(self.cfg.model)
+        
+        # Load main model checkpoint
         if self.cfg.finetune.checkpoint is not None:
-            checkpoint_model = load_checkpoint(
-                self.cfg.finetune.checkpoint)
-            state_dict = model.state_dict()
-            # remove_keys(checkpoint_model, state_dict)
-            strict = self.cfg.finetune.strict
-            if 'model' in checkpoint_model:
-                checkpoint_model = checkpoint_model['model']
-            if 'state_dict' in checkpoint_model:
-                checkpoint_model = checkpoint_model['state_dict']
-                checkpoint_model = rename_lit_state_dict(checkpoint_model)
-                model.load_state_dict(checkpoint_model, strict=strict)
-            else:
-                if self.cfg.finetune.pretrain_checkpoint:
-                    checkpoint_model = rename_v1_pretrain_keys(
-                        checkpoint_model)
-                    model.load_state_dict(checkpoint_model, strict=strict)
-                else:
-                    checkpoint_model = rename_v1_finetune_keys(
-                        checkpoint_model)
-                    model.load_state_dict(checkpoint_model, strict=strict)
+            checkpoint_model = load_checkpoint(self.cfg.finetune.checkpoint, model_key=self.cfg.finetune.model_key)
+            checkpoint_model = extract_state_dict(checkpoint_model)
+            checkpoint_model = rename_state_dict(checkpoint_model, self.cfg.finetune.rename_config)
+            load_state_dict(model, checkpoint_model, strict=self.cfg.finetune.strict)
+        
+        # Load additional checkpoints
+        if len(self.cfg.finetune.additional_checkpoints) > 0:
+            for checkpoint_config in self.cfg.finetune.additional_checkpoints:
+                checkpoint_model = load_checkpoint(checkpoint_config.checkpoint, model_key=checkpoint_config.model_key)
+                checkpoint_model = extract_state_dict(checkpoint_model)
+                checkpoint_model = rename_state_dict(checkpoint_model, checkpoint_config.rename_config)
+                load_state_dict(model, checkpoint_model, strict=checkpoint_config.strict)
         
         # Add LoRA to the model if specified in the configuration
         if self.cfg.finetune.use_lora:
-            add_lora(model)
+            lora_config = {  # specify which layers to add lora to, by default only add to linear layers
+                nn.Linear: {
+                    "weight": partial(LoRAParametrization.from_linear, rank=8),
+                },
+            }
+
+            add_lora_by_name(model, ['head_exp', 'region_embed', 'encoder'], lora_config)
             
             # Load LoRA parameters based on the stage
             if self.cfg.stage == 'fit':
                 # Load LoRA parameters for training
                 if self.cfg.finetune.lora_checkpoint is not None:
-                    lora_state_dict = torch.load(self.cfg.finetune.lora_checkpoint)
-                    model.load_state_dict(rename_lit_state_dict(lora_state_dict['state_dict']), strict=True)
+                    lora_state_dict = load_checkpoint(self.cfg.finetune.lora_checkpoint)
+                    lora_state_dict = extract_state_dict(lora_state_dict)
+                    lora_state_dict = rename_state_dict(lora_state_dict, self.cfg.finetune.lora_rename_config)
+                    load_state_dict(model, lora_state_dict, strict=True)
             elif self.cfg.stage in ['validate', 'predict']:
                 # Load LoRA parameters for validation and prediction
                 if self.cfg.finetune.lora_checkpoint is not None:
-                    lora_state_dict = torch.load(self.cfg.finetune.lora_checkpoint)
-                    model.load_state_dict(rename_lit_state_dict(lora_state_dict['state_dict']), strict=True)
-                    # merge_lora(model)  # Merge LoRA parameters into the model
+                    lora_state_dict = load_checkpoint(self.cfg.finetune.lora_checkpoint)
+                    lora_state_dict = extract_state_dict(lora_state_dict)
+                    lora_state_dict = rename_state_dict(lora_state_dict, self.cfg.finetune.lora_rename_config)
+                    load_state_dict(model, lora_state_dict, strict=True)
         
-        model.freeze_layers(
-            patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
+        model.freeze_layers(patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         print("Model = %s" % str(model))
         return model
 
@@ -302,7 +338,10 @@ class RegionLitModel(LitModel):
                       mode='a', header=False, index=False)
 
     def configure_optimizers(self):
-        num_layers = self.model.cfg.encoder.num_layers
+        if hasattr(self.model.cfg, 'encoder') and hasattr(self.model.cfg.encoder, 'num_layers'):
+            num_layers = self.model.cfg.encoder.num_layers
+        else:
+            num_layers = 0
         assigner = LayerDecayValueAssigner(
             list(0.75 ** (num_layers + 1 - i) for i in range(num_layers + 2)))
 

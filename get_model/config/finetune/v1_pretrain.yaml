@@ -1,0 +1,8 @@
+checkpoint: "path/to/checkpoint.ckpt"
+model_key: "model"
+rename_config:
+  "encoder.head.": "head_mask."
+  "encoder.region_embed": "region_embed"
+  "region_embed.proj.": "region_embed.embed."
+  "encoder.cls_token": "cls_token"
+strict: True

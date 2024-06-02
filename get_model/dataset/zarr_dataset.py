@@ -139,24 +139,45 @@ def apply_indel(arr, start, end, alt_sequence):
 
 
 def get_hic_from_idx(hic, csv, start=None, end=None, resolution=5000, method='observed'):
-    if start is not None and end is not None:
-        csv_region = csv.iloc[start:end]
-    else:
-        csv_region = csv
-    chrom = csv_region.iloc[0].Chromosome.replace("chr", "")
-    if chrom != csv_region.iloc[-1].Chromosome.replace("chr", ""):
-        return None
-    start = csv_region.iloc[0].Start // resolution
-    end = csv_region.iloc[-1].End // resolution + 1
-    if (end-start) * resolution > 4000000:
-        return None
-    hic_idx = np.array([row.Start // resolution - start +
-                       1 for _, row in csv_region.iterrows()])
-    mzd = hic.getMatrixZoomData(chrom, chrom, method, "KR", "BP", resolution)
-    numpy_matrix = mzd.getRecordsAsMatrix(
-        start * resolution, end * resolution, start * resolution, end * resolution)
-    dst = np.log10(numpy_matrix[hic_idx, :][:, hic_idx]+1)
-    return dst
+    # if from hic straw
+    if hasattr(hic, 'getMatrixZoomData'):
+        if start is not None and end is not None:
+            csv_region = csv.iloc[start:end]
+        else:
+            csv_region = csv
+        chrom = csv_region.iloc[0].Chromosome.replace("chr", "")
+        if chrom != csv_region.iloc[-1].Chromosome.replace("chr", ""):
+            return None
+        start = csv_region.iloc[0].Start // resolution
+        end = csv_region.iloc[-1].End // resolution + 1
+        if (end-start) * resolution > 4000000:
+            return None
+        hic_idx = np.array([row.Start // resolution - start +
+                        1 for _, row in csv_region.iterrows()])
+        mzd = hic.getMatrixZoomData(chrom, chrom, method, "KR", "BP", resolution)
+        numpy_matrix = mzd.getRecordsAsMatrix(
+            start * resolution, end * resolution, start * resolution, end * resolution)
+        numpy_matrix = np.nan_to_num(numpy_matrix)
+        dst = np.log10(numpy_matrix[hic_idx, :][:, hic_idx]+1)
+        return dst
+    # if from cooler
+    elif hasattr(hic, 'matrix'):
+        if start is not None and end is not None:
+            csv_region = csv.iloc[start:end]
+        else:
+            csv_region = csv
+        chrom = csv_region.iloc[0].Chromosome.replace("chr", "")
+        if chrom != csv_region.iloc[-1].Chromosome.replace("chr", ""):
+            return None
+        start = csv_region.iloc[0].Start // resolution
+        end = csv_region.iloc[-1].End // resolution + 1
+        if (end-start) * resolution > 4000000:
+            return None
+        hic_idx = np.array([row.Start // resolution - start for _, row in csv_region.iterrows()])
+        numpy_matrix = hic.matrix(balance=True).fetch(f'chr{chrom}:{start * resolution}-{end * resolution}')
+        numpy_matrix = np.nan_to_num(numpy_matrix)
+        dst = np.log10(numpy_matrix[hic_idx, :][:, hic_idx]+1)
+        return dst
 
 
 class MotifMeanStd(object):
@@ -299,11 +320,25 @@ class ZarrDataPool(object):
 
     def _load_hic(self):
         try:
-            import hicstraw
-            hic_obj = hicstraw.HiCFile(self.hic_path)
+            if '.hic' in self.hic_path:
+                try:
+                    import hicstraw
+                    hic_obj = hicstraw.HiCFile(self.hic_path)
+                except:
+                    logging.warning(
+                        'hicstraw is not installed, cannot load hic data, or the hic file is not found')
+                    hic_obj = None
+            elif 'cool' in self.hic_path:
+                try:
+                    import cooler
+                    hic_obj = cooler.Cooler(self.hic_path+'::/resolutions/5000')
+                except:
+                    logging.warning(
+                        'cooler is not installed, cannot load hic data, or the hic file is not found')
+                    hic_obj = None
         except:
             logging.warning(
-                'hicstraw is not installed, cannot load hic data, or the hic file is not found')
+                'hic file is not found, or the file type is not supported')
             hic_obj = None
         return hic_obj
 
@@ -398,8 +433,11 @@ class ZarrDataPool(object):
 
         celltype_peaks = celltype_peaks.reset_index(drop=True).reset_index()
         if self.motif_mean_std_obj is not None:
-            motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chr_chunk_idx:chr_chunk_idx+2].reshape(
+            try:
+                motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chr_chunk_idx:chr_chunk_idx+2].reshape(
                 2, 2, -1).mean(0)
+            except: # TODO need to check the best way to handle this!!!!!
+                motif_mean_std = np.zeros((2, 2, 1))
 
         return chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
 
@@ -1470,7 +1508,7 @@ class InferenceDataset(PretrainDataset):
 
     def _get_gene_info_from_window_idx(self, window_idx):
         # TODO: genome_chunk_length is affected by leave out chromosome by tss_chunk_idx is not
-        chunk_idx = window_idx % self.tss_chunk_idx.chunk_idx.max()
+        chunk_idx = window_idx % (self.tss_chunk_idx.chunk_idx.max() + 1)
         gene_df = self.tss_chunk_idx.query(
             'chunk_idx==@chunk_idx or chunk_idx==@chunk_idx+1')
         return gene_df
@@ -1893,52 +1931,85 @@ class ReferenceRegionDataset(Dataset):
         return peak_list, region_motif_list, target_list, tssidx_list, hic_matrix_list
 
     def setup(self):
-        self.peaks = []
-        self.region_motif = []
-        self.targets = []
-        self.tssidxs = []
-        self.hic_matrices = []
-
+        self.sample_indices = []
+        
         for data_key, (region_motif, peaks) in tqdm(self.data_dict.items()):
-            peak_list_i, region_motif_list_i, target_list_i, tssidx_list_i, hic_matrix_list_i = self.extract_data_list(
-                region_motif, peaks)
-            self.peaks.extend(peak_list_i)
-            self.region_motif.extend(region_motif_list_i)
-            self.targets.extend(target_list_i)
-            self.tssidxs.extend(tssidx_list_i)
-            self.hic_matrices.extend(hic_matrix_list_i)
-
+            all_chromosomes = peaks["Chromosome"].unique().tolist()
+            input_chromosomes = _chromosome_splitter(
+                all_chromosomes, self.leave_out_chromosomes, is_train=self.is_train
+            )
+            
+            for chromosome in input_chromosomes:
+                idx_peak_list = peaks.query('Chromosome==@chromosome').index.values
+                idx_peak_start = idx_peak_list[0]
+                idx_peak_end = idx_peak_list[-1]
+                
+                for i in range(idx_peak_start, idx_peak_end, self.sampling_step):
+                    shift = np.random.randint(-self.sampling_step // 2, self.sampling_step // 2)
+                    start_index = max(0, i + shift)
+                    end_index = start_index + self.num_region_per_sample
+                    
+                    if end_index <= region_motif.shape[0]:
+                        self.sample_indices.append((data_key, start_index, end_index))
+                        
     def __len__(self):
-        return len(self.region_motif)
+        return len(self.sample_indices)
 
     def __getitem__(self, index):
-        region_motif = self.region_motif[index]
-        peak = self.peaks[index]
-        target = self.targets[index]
-        tssidx = self.tssidxs[index]
-        hic_matrix = self.hic_matrices[index]
+        data_key, start_index, end_index = self.sample_indices[index]
+        region_motif, peaks = self.data_dict[data_key]
+        
+        region_motif_i = region_motif[start_index:end_index]
+        peak_i = peaks.iloc[start_index:end_index]
+        
+        target_data = peaks[["Expression_positive", "Expression_negative"]].values
+        tssidx_data = peaks["TSS"].values
+        atpm = peaks['aTPM'].values
+        target_data[atpm < 0.05, :] = 0
+        
+        if not self.quantitative_atac:
+            region_motif_i = np.concatenate(
+                [region_motif_i, np.zeros((region_motif_i.shape[0], 1))+1], axis=1)
+        else:
+            region_motif_i = np.concatenate(
+                [region_motif_i, atpm[start_index:end_index].reshape(-1, 1)/atpm[start_index:end_index].reshape(-1, 1).max()], axis=1)
+        
+        target_i = coo_matrix(target_data[start_index:end_index])
+        tssidx_i = tssidx_data[start_index:end_index]
+        
+        if self.zarr_dataset.datapool.hic_obj is not None:
+            hic_matrix_i = get_hic_from_idx(self.zarr_dataset.datapool.hic_obj, peak_i)
+            if hic_matrix_i is None:
+                # return a matrix with all zeros
+                hic_matrix_i = np.zeros((self.num_region_per_sample, self.num_region_per_sample))
+        else:
+            hic_matrix_i = 0
+        
         if self.mask_ratio > 0:
             mask = np.hstack(
                 [
-                    np.zeros(int(self.num_region_per_sample -
-                                 self.num_region_per_sample*self.mask_ratio)),
+                    np.zeros(int(self.num_region_per_sample - self.num_region_per_sample*self.mask_ratio)),
                     np.ones(int(self.num_region_per_sample*self.mask_ratio)),
                 ]
             )
             np.random.shuffle(mask)
         else:
-            mask = tssidx
+            mask = tssidx_i
+        
         if self.transform is not None:
-            region_motif, mask, target = self.transform(region_motif, tssidx, target)
-        if region_motif.shape[0] == 1:
-            region_motif = region_motif.squeeze(0)
-        return {'region_motif': region_motif.toarray().astype(np.float32),
+            region_motif_i, mask, target_i = self.transform(region_motif_i, tssidx_i, target_i)
+        
+        if region_motif_i.shape[0] == 1:
+            region_motif_i = region_motif_i.squeeze(0)
+        
+        data = {'region_motif': region_motif_i.astype(np.float32),
                 'mask': mask,
-                'chromosome': peak['Chromosome'].values[0],
-                'peak': peak[['Start', 'End']].values,
-                'exp_label': target.toarray().astype(np.float32),
-                'hic_matrix': hic_matrix}
+                'chromosome': peak_i['Chromosome'].values[0],
+                'peak_coord': peak_i[['Start', 'End']].values,
+                'exp_label': target_i.toarray().astype(np.float32),
+                'hic_matrix': hic_matrix_i}
 
+        return data
 
 class InferenceReferenceRegionDataset(Dataset):
     def __init__(self, reference_region_motif: ReferenceRegionMotif,
@@ -1984,7 +2055,7 @@ class InferenceReferenceRegionDataset(Dataset):
         region_motif, peaks = self.data_dict[celltype_id]
         region_motif = region_motif[peak_start:peak_end]
         chromosome = peaks['Chromosome'].values[peak_start]
-        peaks_coord = peaks[['Start', 'End']].values[peak_start:peak_end]
+        peak_coord = peaks[['Start', 'End']].values[peak_start:peak_end]
         atpm = peaks['aTPM'].values[peak_start:peak_end]
         # append binary or quantitative atac signal
         if not self.quantitative_atac:
@@ -1994,17 +2065,30 @@ class InferenceReferenceRegionDataset(Dataset):
             region_motif = np.concatenate(
                 [region_motif, atpm.reshape(-1, 1)/atpm.reshape(-1, 1).max()], axis=1)
 
+        # right zero padding
+        pad_length = self.num_region_per_sample - region_motif.shape[0]
+        max_tss_count = 100
+
+        region_motif = np.pad(region_motif, ((0, pad_length), (0, 0)), mode='constant')
+        peak_coord = np.pad(peak_coord, ((0, pad_length), (0, 0)), mode='constant')
+        mask = np.pad(mask, (0, pad_length), mode='constant')
+        exp_label = np.pad(target, ((0, pad_length), (0, 0)), mode='constant')
+        tss_peak = sample['metadata']['tss_peak']
+        if tss_peak.shape == ():
+            tss_peak = np.array([tss_peak])
+        all_tss_peak = np.pad(sample['metadata']['all_tss_peak'], (0, max_tss_count - len(sample['metadata']['all_tss_peak'])), mode='constant', constant_values=-1)
+
         return {'region_motif': region_motif.astype(np.float32),
                 'chromosome': chromosome,
-                'peak_coord': peaks_coord,
+                'peak_coord': peak_coord,
                 'mask': mask,
-                'exp_label': target.astype(np.float32),
+                'exp_label': exp_label.astype(np.float32),
                 'hic_matrix': hic_matrix,
                 'strand': strand,
                 'gene_name': gene_name,
-                'tss_peak': sample['metadata']['tss_peak'],
-                'all_tss_peak': sample['metadata']['all_tss_peak']}
-
+                'tss_peak': tss_peak,
+                'all_tss_peak': all_tss_peak,
+        }
 
 class PerturbationInferenceReferenceRegionDataset(Dataset):
     """
