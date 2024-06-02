@@ -2,7 +2,7 @@ defaults:
   - base_ref_region_config
   - model/DistanceContactMap@_here_
   - machine/pc
-  - dataset/tfatlas_eval@dataset
+  - dataset/k562_ref_eval@dataset
   - _self_
 
 assembly: "hg38"
