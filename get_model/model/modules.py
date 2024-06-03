@@ -7,10 +7,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import nn
+from torch.nn.init import trunc_normal_
 
 from get_model.model.motif import parse_meme_file
-from torch.nn.init import trunc_normal_
 
 
 def dict_to_device(dict, device):
