@@ -879,11 +879,13 @@ class GETRegionFinetuneExpHiCABC(BaseGETModel):
         # test if batch['hic_matrix'] has shape and not a scalar
         if len(batch['hic_matrix'][0].shape) >= 2:
             hic = batch['hic_matrix'].float()
+            real_hic=True
         else:
             logging.info(
                 f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
             hic = self.distance_contact_map(
                 batch['distance_map']).detach().squeeze(1)
+            real_hic=False
         abc = atac * hic
         pred = {
             'exp': exp,
@@ -895,8 +897,8 @@ class GETRegionFinetuneExpHiCABC(BaseGETModel):
             # 'hic': hic,
             'abc': abc,
         }
-        if (batch['hic_matrix'].sum(1).sum(1) == 0).any():
-            mask = batch['hic_matrix'].sum(1).sum(1) != 0
+        if real_hic:
+            mask = hic.sum(1).sum(1) != 0
             # obs['hic'][mask] = pred['hic'][mask].detach()
             obs['abc'][mask] = pred['abc'][mask].detach()
         return pred, obs

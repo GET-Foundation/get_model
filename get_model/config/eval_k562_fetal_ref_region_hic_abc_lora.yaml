@@ -52,7 +52,7 @@ finetune:
     "encoder.cls_token": "cls_token"
     "head.": "head_exp.head."
   additional_checkpoints:
-    - checkpoint: DistanceMap/62tw2500/checkpoints/best.ckpt
+    - checkpoint: /home/xf2217/Projects/get_checkpoints/distance_map.k562_peak.h1_micro_c.best.ckpt
       model_key: 'state_dict'
       strict: false
       rename_config:
