@@ -190,6 +190,8 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_idx)
       breakpoint()
   one_hot_seq_batch = np.reshape(one_hot_seq_col, (len(batch_df), SEQUENCE_LENGTH, 4))
   predictions = model.predict_on_batch(one_hot_seq_batch)['human'][:,:,track_idx]
+
+  breakpoint()
   
   mean_preds = []
   for idx, row in batch_df.iterrows():
@@ -218,6 +220,8 @@ if __name__=="__main__":
   # get indices for tss True on either strand
   tss_indices = np.where(tss_array[:,0] | tss_array[:,1])[0]
 
+  breakpoint()
+
   # filter astrocyte_df to rows where TSS is True on either strand
   astrocyte_df = astrocyte_df.iloc[tss_indices]
   astrocyte_df["tss_idx"] = astrocyte_df.index
@@ -239,13 +243,12 @@ if __name__=="__main__":
   astrocyte_df = astrocyte_df.dropna()
   astrocyte_df["Start_hg38"] = astrocyte_df["Start_hg38"].astype(int)
   astrocyte_df["End_hg38"] = astrocyte_df["End_hg38"].astype(int)
-  
+
   print(f"Predicting for {len(astrocyte_df)} regions.")
-    
+      
   batch_preds = []
   num_batches = 0
-  # interrupted at start=3600
-  for start in tqdm(range(3600, len(astrocyte_df), BATCH_SIZE)):
+  for start in tqdm(range(0, len(astrocyte_df), BATCH_SIZE)):
     end = start + BATCH_SIZE
     batch_df = astrocyte_df[start:end].reset_index()
     mean_pred = compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, enformer_track_idx)
