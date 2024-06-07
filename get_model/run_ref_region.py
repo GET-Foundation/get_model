@@ -280,7 +280,26 @@ class RegionLitModel(LitModel):
             checkpoint_model = load_checkpoint(self.cfg.finetune.checkpoint, model_key=self.cfg.finetune.model_key)
             checkpoint_model = extract_state_dict(checkpoint_model)
             checkpoint_model = rename_state_dict(checkpoint_model, self.cfg.finetune.rename_config)
-            load_state_dict(model, checkpoint_model, strict=self.cfg.finetune.strict)
+            lora_config = {  # specify which layers to add lora to, by default only add to linear layers
+                nn.Linear: {
+                    "weight": partial(LoRAParametrization.from_linear, rank=8),
+                },
+                nn.Conv2d: {
+                    "weight": partial(LoRAParametrization.from_conv2d, rank=4),
+                },
+            }
+            if any("lora" in k for k in checkpoint_model.keys()) and self.cfg.finetune.use_lora:
+                add_lora_by_name(model, self.cfg.finetune.layers_with_lora, lora_config)
+                load_state_dict(model, checkpoint_model, strict=self.cfg.finetune.strict)
+            elif any("lora" in k for k in checkpoint_model.keys()) and not self.cfg.finetune.use_lora:
+                raise ValueError("Model checkpoint contains LoRA parameters but use_lora is set to False")
+            elif not any("lora" in k for k in checkpoint_model.keys()) and self.cfg.finetune.use_lora:
+                logging.info("Model checkpoint does not contain LoRA parameters but use_lora is set to True, using the checkpoint as base model")
+                load_state_dict(model, checkpoint_model, strict=self.cfg.finetune.strict)
+                add_lora_by_name(model, self.cfg.finetune.layers_with_lora, lora_config)
+            else:
+                load_state_dict(model, checkpoint_model, strict=self.cfg.finetune.strict)
+            
         
         # Load additional checkpoints
         if len(self.cfg.finetune.additional_checkpoints) > 0:
@@ -290,16 +309,7 @@ class RegionLitModel(LitModel):
                 checkpoint_model = rename_state_dict(checkpoint_model, checkpoint_config.rename_config)
                 load_state_dict(model, checkpoint_model, strict=checkpoint_config.strict)
         
-        # Add LoRA to the model if specified in the configuration
-        if self.cfg.finetune.use_lora:
-            lora_config = {  # specify which layers to add lora to, by default only add to linear layers
-                nn.Linear: {
-                    "weight": partial(LoRAParametrization.from_linear, rank=8),
-                },
-            }
-
-            add_lora_by_name(model, ['head_exp', 'region_embed', 'encoder'], lora_config)
-            
+        if self.cfg.finetune.use_lora:            
             # Load LoRA parameters based on the stage
             if self.cfg.stage == 'fit':
                 # Load LoRA parameters for training
