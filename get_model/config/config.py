@@ -133,6 +133,7 @@ class FinetuneConfig:
     use_lora: bool = False
     lora_checkpoint: str | None = None
     rename_config: dict | None = None
+    layers_with_lora: list = field(default_factory=lambda: ['region_embed', 'encoder', 'head_exp'])
     patterns_to_freeze: list = field(default_factory=lambda: [
         "motif_scanner"])
     patterns_to_drop: list = field(default_factory=lambda: [])

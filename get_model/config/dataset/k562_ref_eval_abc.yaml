@@ -27,4 +27,4 @@ reference_region_motif:
   root: "/home/xf2217/Projects/get_data/"
   data: "fetal_k562_peaks_motif.hg38.zarr"
   refdata: "fetal_union_peak_motif_v1.hg38.zarr"
-  motif_scaler: 1
+  motif_scaler: 1.3

@@ -2,6 +2,7 @@ defaults:
   - base_ref_region_config
   - model/GETRegionFinetuneExpHiCABC@_here_
   - machine/manitou
+  - finetune/lightning@finetune
   - dataset/k562_ref_eval_abc@dataset
   - _self_
 
@@ -38,19 +39,12 @@ wandb:
 
 finetune:
   pretrain_checkpoint: false
-  strict: false
+  strict: true
   use_lora: true
-  checkpoint: /home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth
+  layers_with_lora: ['region_embed', 'head_exp', 'encoder']
+  checkpoint: /home/xf2217/Projects/get_model/GETRegionFinetune_k562_abc/ah9um258/checkpoints/best.ckpt
   patterns_to_freeze: ['distance_contact_map']
   model_key: 'model'
-  rename_config:
-    "blocks.": "encoder.blocks."
-    "fc_norm.": "encoder.norm."
-    "encoder.head.": "head_mask."
-    "encoder.region_embed": "region_embed"
-    "region_embed.proj.": "region_embed.embed."
-    "encoder.cls_token": "cls_token"
-    "head.": "head_exp.head."
   additional_checkpoints:
     - checkpoint: /home/xf2217/Projects/get_checkpoints/distance_map.k562_peak.h1_micro_c.best.ckpt
       model_key: 'state_dict'
