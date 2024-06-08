@@ -147,14 +147,10 @@ class RegionLitModel(LitModel):
             result_df = []
             for batch_element in range(len(batch['gene_name'])):
                 goi_idx = batch['all_tss_peak'][batch_element]
-<<<<<<< HEAD
                 goi_idx = goi_idx[goi_idx > 0] # filter out PAD tokens (-1)
                 goi_idx = goi_idx[goi_idx < batch['region_motif'][batch_element].shape[0]] # filter out TSS that exceed number of regions
                 if len(goi_idx) == 0:
                     goi_idx = batch["tss_peak"][batch_element][0]
-=======
-                goi_idx = goi_idx[goi_idx > 0] # filter out pad (tss_peak = 0)
->>>>>>> c91d37e2b9602ec392611cd23f783ac1e04c1b21
                 strand = batch['strand'][batch_element]
                 atpm = batch['region_motif'][batch_element][goi_idx, -1].max().cpu().item()
                 gene_name = batch['gene_name'][batch_element]
