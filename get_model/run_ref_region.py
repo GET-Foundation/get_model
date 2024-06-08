@@ -147,6 +147,10 @@ class RegionLitModel(LitModel):
             result_df = []
             for batch_element in range(len(batch['gene_name'])):
                 goi_idx = batch['all_tss_peak'][batch_element]
+                goi_idx = goi_idx[goi_idx > 0] # filter out PAD tokens (-1)
+                goi_idx = goi_idx[goi_idx < batch['region_motif'][batch_element].shape[0]] # filter out TSS that exceed number of regions
+                if len(goi_idx) == 0:
+                    goi_idx = batch["tss_peak"][batch_element][0]
                 strand = batch['strand'][batch_element]
                 atpm = batch['region_motif'][batch_element][goi_idx, -1].max().cpu().item()
                 gene_name = batch['gene_name'][batch_element]
@@ -360,24 +364,25 @@ def run(cfg: DictConfig):
     inference_mode = True
     if 'interpret' in cfg.task.test_mode:
         inference_mode = False
+
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator=accelerator,
+        accelerator="cuda",
         num_sanity_val_steps=0,
         strategy=strategy,
-        devices=device,
+        devices=[0],
         logger=[
             wandb_logger,
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(
             monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
-        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+        # plugins=[][MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         log_every_n_steps=4,
         val_check_interval=0.5,
         default_root_dir=cfg.machine.output_dir,
-        inference_mode=inference_mode
+        inference_mode=inference_mode,
     )
     if cfg.stage == 'fit':
         trainer.fit(model, dm)

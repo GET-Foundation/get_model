@@ -22,7 +22,7 @@ padding: 0
 mask_ratio: 0
 insulation_subsample_ratio: 1
 reference_region_motif:
-  root: "/pmglocal/alb2281/get/get_data"
+  root: "/home/ubuntu/alb2281/get/get_data"
   data: "fetal_gbm_peak_motif_v1.hg38.zarr"
   refdata: "fetal_union_peak_motif_v1.hg38.zarr"
   motif_scaler: 1

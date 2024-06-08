@@ -250,7 +250,7 @@ class ZarrDataPool(object):
         logging.info('Initializing ZarrDataPool')
         self.sequence = sequence_obj if sequence_obj is not None else get_sequence_obj(
             genome_seq_zarr)
-        self.motif_mean_std_obj = motif_mean_std_obj
+        self.motif_mean_std_obj = None # motif_mean_std_obj
         self.zarr_dirs = zarr_dirs
         self.insulation_paths = insulation_paths
         self.insulation_subsample_ratio = insulation_subsample_ratio
@@ -397,10 +397,19 @@ class ZarrDataPool(object):
         item_insulation = item_insulation.reset_index(drop=True).reset_index()
 
         celltype_peaks = celltype_peaks.reset_index(drop=True).reset_index()
-        if self.motif_mean_std_obj is not None:
-            motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chr_chunk_idx:chr_chunk_idx+2].reshape(
-                2, 2, -1).mean(0)
+        motif_mean_std = None
 
+        # TODO: Fix instead of set motif_mean_std = None for v3
+        if self.motif_mean_std_obj is not None:
+            if chr_chunk_idx+1==self.motif_mean_std_obj.data_dict[chr_name].shape[0]:
+                # the final chunk in the chromosome
+                motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chr_chunk_idx:chr_chunk_idx+1].reshape(
+                2, 2, -1).mean(0)
+            elif chr_chunk_idx+2 <= self.motif_mean_std_obj.data_dict[chr_name].shape[0]:
+                motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chr_chunk_idx:chr_chunk_idx+2].reshape(
+                2, 2, -1).mean(0)
+            else:
+                raise ValueError('The chunk index is out of range. Something is wrong in identify the corresponding chunking of data loading process.')
         return chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
 
     def load_window_data(self, window_index=None):
@@ -1415,7 +1424,6 @@ class InferenceDataset(PretrainDataset):
         #     self.tss_chunk_idx = pd.read_feather(
         #         self.gencode_obj.feather_file.replace('.feather', '_tss_chunk_idx.feather'))
         #     return self.tss_chunk_idx
-
         self.tss_chunk_idx = self.gencode_obj.gtf.query(
             'gene_name in @self.gene_list').copy()
         for i, row in self.tss_chunk_idx.iterrows():
@@ -2018,7 +2026,10 @@ class InferenceReferenceRegionDataset(Dataset):
         tss_peak = sample['metadata']['tss_peak']
         if tss_peak.shape == ():
             tss_peak = np.array([tss_peak])
-        all_tss_peak = np.pad(sample['metadata']['all_tss_peak'], (0, max_tss_count - len(sample['metadata']['all_tss_peak'])), mode='constant')
+        
+        if len(sample["metadata"]["all_tss_peak"]) == 0:
+            raise ValueError("No TSS peaks found for the gene.")
+        all_tss_peak = np.pad(sample['metadata']['all_tss_peak'], (0, max_tss_count - len(sample['metadata']['all_tss_peak'])), mode='constant', constant_values=-1)
 
         return {'region_motif': region_motif.astype(np.float32),
                 'chromosome': chromosome,
