@@ -25,8 +25,10 @@ output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/pre
 
 SEQUENCE_LENGTH = 393216
 OUTPUT_SEQ_LENGTH = 114688
-BATCH_SIZE = 12
-SAVE_EVERY_N_BATCHES = 100
+BATCH_SIZE = 1
+SAVE_EVERY_N_BATCHES = 10
+PRED_LENGTH = 896
+NUM_TRACKS = 5313
 
 
 class Enformer:
@@ -179,7 +181,7 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_idx)
   # prepare one-hot batch
   one_hot_seq_col = []
   for idx, row in tqdm(batch_df.iterrows(), total=len(batch_df)):
-    target_interval = kipoiseq.Interval(row["chrTSS"], row["startTSS"], row["endTSS"]) 
+    target_interval = kipoiseq.Interval(row["chrTSS"], int(row["startTSS"]), int(row["endTSS"])) 
     sequence_one_hot = one_hot_encode(fasta_extractor.extract(target_interval.resize(SEQUENCE_LENGTH)))
     one_hot_seq_col.append(sequence_one_hot)
   
@@ -187,8 +189,7 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_idx)
     if item.shape[0] != SEQUENCE_LENGTH:
       breakpoint()
   one_hot_seq_batch = np.reshape(one_hot_seq_col, (len(batch_df), SEQUENCE_LENGTH, 4))
-  predictions = model.predict_on_batch(one_hot_seq_batch)['human'][:,:,track_idx]
-
+  predictions = model.predict_on_batch(one_hot_seq_batch)['human']
 
   breakpoint()
   
@@ -205,30 +206,33 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_idx)
   return mean_preds
 
 
-def compute_enformer_contribution_score_on_batch(model, fasta_extractor, batch_df, track_idx):
+def compute_enformer_contribution_score_on_batch(model, fasta_extractor, row, track_idx_set):
   # prepare one-hot batch
   one_hot_seq_col = []
-  for idx, row in tqdm(batch_df.iterrows(), total=len(batch_df)):
-    target_interval = kipoiseq.Interval(row["Chromosome_hg38"], row["startTSS"], row["endTSS"]) 
-    sequence_one_hot = one_hot_encode(fasta_extractor.extract(target_interval.resize(SEQUENCE_LENGTH)))
-    one_hot_seq_col.append(sequence_one_hot)
+  target_interval = kipoiseq.Interval(row["chrTSS"], int(row["startTSS"]), int(row["endTSS"]))
+  sequence_one_hot = one_hot_encode(fasta_extractor.extract(target_interval.resize(SEQUENCE_LENGTH)))
+  one_hot_seq_col.append(sequence_one_hot)
 
-  target_mask = np.zeros((len(batch_df), OUTPUT_SEQ_LENGTH))
-  
-  one_hot_seq_batch = np.reshape(one_hot_seq_col, (len(batch_df), SEQUENCE_LENGTH, 4))
-  contributions = model.contribution_input_grad(one_hot_seq_batch, np.ones((len(batch_df), OUTPUT_SEQ_LENGTH)))
+  one_hot_seq_batch = np.reshape(one_hot_seq_col, (SEQUENCE_LENGTH, 4))
+  target_mask = np.zeros((PRED_LENGTH, NUM_TRACKS))
 
-  mean_contributions = []
-  for idx, row in batch_df.iterrows():
-    output_start = (row["Start_hg38"] + row["End_hg38"])/2 - OUTPUT_SEQ_LENGTH/2
-    output_end = (row["Start_hg38"] + row["End_hg38"])/2 + OUTPUT_SEQ_LENGTH/2
-    interval_bins = np.linspace(output_start, output_end, num=896, endpoint=False)
-    exp_output_start = np.abs(interval_bins - row["Start_hg38"]).argmin()
-    exp_output_end = np.abs(interval_bins - row["End_hg38"]).argmin()
-    ret_contrib = contributions[idx, exp_output_start:exp_output_end]
-    mean_contributions.append([row["tss_idx"], ret_contrib.mean()])
+  for bin_idx in [447, 448, 449]: # middle three bins
+    for track_idx in track_idx_set:
+      target_mask[bin_idx, track_idx] = 1
   
-  return mean_contributions
+  contribution_scores = model.contribution_input_grad(one_hot_seq_batch.astype(np.float32), target_mask.astype(np.float32)).numpy()
+
+  output_start = row["startTSS"] - SEQUENCE_LENGTH/2
+  region_start = int(row["chromStart"] - output_start)
+  region_end = int(row["chromEnd"] - output_start)
+
+  if region_start > SEQUENCE_LENGTH or region_end < 0:
+    return [row["orig_idx"], None]
+  else:
+    region_start = max(region_start, 0)
+    region_end = min(region_end, SEQUENCE_LENGTH)
+    ret_contrib = contribution_scores[region_start:region_end]
+    return [row["orig_idx"], ret_contrib.mean()]
 
 
 def convert_chr(chromosome, start, ret_type=None):
@@ -250,27 +254,25 @@ if __name__=="__main__":
   k562_track_idx_set = [4828, 5111]
 
   exp_name = "k562_fulco_benchmark"
-  fulco_file = "/working/CRISPR_comparison/resources/crispr_data/EPCrisprBenchmark_ensemble_data_GRCh38.tsv"
+  fulco_file = "/pmglocal/alb2281/repos/CRISPR_comparison/resources/crispr_data/EPCrisprBenchmark_ensemble_data_GRCh38.tsv"
   fulco_df = pd.read_csv(fulco_file, sep="\t")
+  fulco_df["orig_idx"] = fulco_df.index
   print(f"Predicting for {len(fulco_df)} regions.")
   
   batch_preds = []
   num_batches = 0
 
-  for track_idx in k562_track_idx_set:
-    for start in tqdm(range(0, len(fulco_df), BATCH_SIZE)):
-      end = start + BATCH_SIZE
-      batch_df = fulco_df[start:end].reset_index()
-      mean_pred = compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_idx)
-      batch_preds.append(mean_pred)
+  for idx, row in tqdm(fulco_df.iterrows(), total=len(fulco_df)):
+    mean_pred = compute_enformer_contribution_score_on_batch(model, fasta_extractor, row, k562_track_idx_set)
+    batch_preds.append(mean_pred)
 
-      if (num_batches + 1) % SAVE_EVERY_N_BATCHES == 0:
-        flat_preds = [item for sublist in batch_preds for item in sublist]
-        np.save(f"{output_dir}/{exp_name}_track{track_idx}_{start+BATCH_SIZE}.npy", flat_preds)
-        batch_preds = []
+    if (num_batches + 1) % SAVE_EVERY_N_BATCHES == 0:
+      batch_preds = np.array(batch_preds)
+      np.save(f"{output_dir}/{exp_name}_{num_batches}.npy", batch_preds)
+      batch_preds = []
 
-      num_batches += 1
+    num_batches += 1
 
-    if batch_preds:
-      flat_preds = [item for sublist in batch_preds for item in sublist]
-      np.save(f"{output_dir}/{exp_name}_track{track_idx}_final.npy", flat_preds)
+  if batch_preds:
+    batch_preds = np.array(batch_preds)
+    np.save(f"{output_dir}/{exp_name}_final.npy", batch_preds)
