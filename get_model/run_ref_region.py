@@ -393,7 +393,8 @@ def run(cfg: DictConfig):
     dm = ReferenceRegionDataModule(cfg)
     model.dm = dm
     wandb_logger = WandbLogger(name=cfg.wandb.run_name,
-                               project=cfg.wandb.project_name)
+                               project=cfg.wandb.project_name,
+                               entity="get-v3")
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
     if cfg.machine.num_devices > 0:
         strategy = 'auto'

@@ -1,16 +1,16 @@
 defaults:
-  - base_config
-  - model/GETFinetune@_here_
+  - base_ref_region_config
+  - model/GETRegionFinetune@_here_
   - machine/manitou_alb2281
+  - finetune/v1_finetune@finetune
   - dataset/finetune_k562_cage@dataset
   - _self_
 
 assembly: "hg38"
 
 task:
-  layer_names: ["atac_attention"]
+  layer_names: []
   test_mode: "skip"
-  gene_list: "PPIF"
 
 training:
   save_ckpt_freq: 10
@@ -19,6 +19,12 @@ training:
   accumulate_grad_batches: 1
   clip_grad: null
   use_fp16: true
+
+dataset:
+  quantitative_atac: false
+  sampling_step: 450
+  mask_ratio: 0
+
 
 optimizer:
   lr: 0.0001
@@ -35,7 +41,11 @@ wandb:
 finetune:
   pretrain_checkpoint: false
   strict: true
-  checkpoint: "/burg/pmg/users/xf2217/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
   use_lora: true
   layers_with_lora: ['region_embed', 'head_exp', 'encoder']
+  checkpoint: "/pmglocal/alb2281/get/get_ckpts/checkpoint-best.pth"
   patterns_to_freeze: []
+  model_key: 'model'
+
+eval_tss: true
+log_image: false
