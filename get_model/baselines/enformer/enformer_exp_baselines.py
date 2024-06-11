@@ -14,19 +14,22 @@ import matplotlib as mpl
 import seaborn as sns
 from tqdm import tqdm
 import pyliftover
+import json
+import argparse
+
 
 transform_path = 'gs://dm-enformer/models/enformer.finetuned.SAD.robustscaler-PCA500-robustscaler.transform.pkl'
 model_path = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/ckpts/enformer-base"
 fasta_file = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/genome.fa'
 clinvar_vcf = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/clinvar.vcf.gz'
 targets_txt = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/targets_human.txt"
-output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds"
+output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds/k562_fulco_benchmark_per_nt"
 
 
 SEQUENCE_LENGTH = 393216
 OUTPUT_SEQ_LENGTH = 114688
 BATCH_SIZE = 1
-SAVE_EVERY_N_BATCHES = 10
+SAVE_EVERY_N_BATCHES = 100
 PRED_LENGTH = 896
 NUM_TRACKS = 5313
 
@@ -185,14 +188,9 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_idx)
     sequence_one_hot = one_hot_encode(fasta_extractor.extract(target_interval.resize(SEQUENCE_LENGTH)))
     one_hot_seq_col.append(sequence_one_hot)
   
-  for item in one_hot_seq_col:
-    if item.shape[0] != SEQUENCE_LENGTH:
-      breakpoint()
   one_hot_seq_batch = np.reshape(one_hot_seq_col, (len(batch_df), SEQUENCE_LENGTH, 4))
   predictions = model.predict_on_batch(one_hot_seq_batch)['human']
 
-  breakpoint()
-  
   mean_preds = []
   for idx, row in batch_df.iterrows():
     output_start = (row["Start_hg38"] + row["End_hg38"])/2 - OUTPUT_SEQ_LENGTH/2
@@ -206,8 +204,11 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_idx)
   return mean_preds
 
 
-def compute_enformer_contribution_score_on_batch(model, fasta_extractor, row, track_idx_set):
+def compute_enformer_contribution_score_on_batch(model, fasta_extractor, row, track_idx_set, window_len=2000):
   # prepare one-hot batch
+  if np.isnan(row["startTSS"]) or np.isnan(row["endTSS"]):
+    return [row["orig_idx"], None, (None, None)]
+
   one_hot_seq_col = []
   target_interval = kipoiseq.Interval(row["chrTSS"], int(row["startTSS"]), int(row["endTSS"]))
   sequence_one_hot = one_hot_encode(fasta_extractor.extract(target_interval.resize(SEQUENCE_LENGTH)))
@@ -216,23 +217,24 @@ def compute_enformer_contribution_score_on_batch(model, fasta_extractor, row, tr
   one_hot_seq_batch = np.reshape(one_hot_seq_col, (SEQUENCE_LENGTH, 4))
   target_mask = np.zeros((PRED_LENGTH, NUM_TRACKS))
 
-  for bin_idx in [447, 448, 449]: # middle three bins
+  for bin_idx in [447, 448, 449]: # middle three bins (TSS and two flanking)
     for track_idx in track_idx_set:
       target_mask[bin_idx, track_idx] = 1
   
   contribution_scores = model.contribution_input_grad(one_hot_seq_batch.astype(np.float32), target_mask.astype(np.float32)).numpy()
-
   output_start = row["startTSS"] - SEQUENCE_LENGTH/2
-  region_start = int(row["chromStart"] - output_start)
-  region_end = int(row["chromEnd"] - output_start)
+  region_midpoint = (row["chromStart"] + row["chromEnd"])/2
+  region_start = int(region_midpoint - window_len/2 - output_start)
+  region_end = int(region_midpoint + window_len/2 - output_start)
 
   if region_start > SEQUENCE_LENGTH or region_end < 0:
-    return [row["orig_idx"], None]
+    return [row["orig_idx"], None, (None, None)]
   else:
     region_start = max(region_start, 0)
     region_end = min(region_end, SEQUENCE_LENGTH)
     ret_contrib = contribution_scores[region_start:region_end]
-    return [row["orig_idx"], ret_contrib.mean()]
+    # return original index in fulco_df, the list of contribution scores, and the coords for the scores
+    return [row["orig_idx"], ret_contrib.tolist(), (region_start, region_end)]
 
 
 def convert_chr(chromosome, start, ret_type=None):
@@ -253,7 +255,7 @@ if __name__=="__main__":
   model = Enformer(model_path)
   k562_track_idx_set = [4828, 5111]
 
-  exp_name = "k562_fulco_benchmark"
+  exp_name = "k562_fulco_benchmark_per_nt"
   fulco_file = "/pmglocal/alb2281/repos/CRISPR_comparison/resources/crispr_data/EPCrisprBenchmark_ensemble_data_GRCh38.tsv"
   fulco_df = pd.read_csv(fulco_file, sep="\t")
   fulco_df["orig_idx"] = fulco_df.index
@@ -263,16 +265,16 @@ if __name__=="__main__":
   num_batches = 0
 
   for idx, row in tqdm(fulco_df.iterrows(), total=len(fulco_df)):
-    mean_pred = compute_enformer_contribution_score_on_batch(model, fasta_extractor, row, k562_track_idx_set)
-    batch_preds.append(mean_pred)
+    nt_preds = compute_enformer_contribution_score_on_batch(model, fasta_extractor, row, k562_track_idx_set)
+    batch_preds.append(nt_preds)
 
     if (num_batches + 1) % SAVE_EVERY_N_BATCHES == 0:
-      batch_preds = np.array(batch_preds)
-      np.save(f"{output_dir}/{exp_name}_{num_batches}.npy", batch_preds)
+      with open(f"{output_dir}/{exp_name}_{num_batches+1}.json", 'w') as f:
+        json.dump(batch_preds, f)
       batch_preds = []
 
     num_batches += 1
 
   if batch_preds:
-    batch_preds = np.array(batch_preds)
-    np.save(f"{output_dir}/{exp_name}_final.npy", batch_preds)
+    with open(f"{output_dir}/{exp_name}_{num_batches+1}.json", 'w') as f:
+      json.dump(batch_preds, f)
