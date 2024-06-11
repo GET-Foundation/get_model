@@ -1,8 +1,8 @@
 defaults:
   - base_config
   - model/GETFinetune@_here_
-  - machine/manitou
-  - dataset/finetune_k562_fetal@dataset
+  - machine/manitou_alb2281
+  - dataset/finetune_k562_cage@dataset
   - _self_
 
 assembly: "hg38"
@@ -14,7 +14,7 @@ task:
 
 training:
   save_ckpt_freq: 10
-  epochs: 2
+  epochs: 100
   warmup_epochs: 1
   accumulate_grad_batches: 1
   clip_grad: null
@@ -29,11 +29,13 @@ optimizer:
   opt_betas: [0.9, 0.95]
 
 wandb:
-  project_name: "debug_finetune"
-  run_name: "experiment_1"
+  project_name: "finetune_k562_cage"
+  run_name: "finetune_k562.encode_hg38atac.ENCFF128WZG_cage.max"
 
 finetune:
   pretrain_checkpoint: false
-  strict: false
-  checkpoint: "/pmglocal/xf2217/GET_STARTED/get_model/GETRegionFinetune_k562/9g198fd4/checkpoints/best.ckpt"
+  strict: true
+  checkpoint: "/burg/pmg/users/xf2217/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
+  use_lora: true
+  layers_with_lora: ['region_embed', 'head_exp', 'encoder']
   patterns_to_freeze: []
