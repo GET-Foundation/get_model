@@ -17,9 +17,14 @@ cd $ROOT_DIR
 # Define the directory where the codebase will be located
 CODEBASE_DIR=$ROOT_DIR/get_model
 
-# Clone the get_model repository into the codebase directory
-git clone git@github.com:fuxialexander/get_model.git
-cd $CODEBASE_DIR
+# Clone the get_model repository into the codebase directory, if exist, pull the latest code
+if [ -d $CODEBASE_DIR ]; then
+    cd $CODEBASE_DIR
+    git pull
+else
+    git clone git@github.com:fuxialexander/get_model.git
+    cd $CODEBASE_DIR
+fi
 
 # Switch to a specific branch of the cloned repository
 git checkout refactor_with_hydra
@@ -34,22 +39,34 @@ source activate ${ROOT_DIR}/mambaforge/get_started
 #cp -r $DATA_DIR ${ROOT_DIR}/get_data
 
 # Navigate to the data directory and decompress all .tar files
-cd ${ROOT_DIR}/get_data
+# cd ${ROOT_DIR}/get_data
 #for f in *.tar; do tar -xvf $f; done
 
 # Return to the codebase directory and install the package in editable mode
 cd $CODEBASE_DIR
 pip install -e .
 
-# Clone the caesar repository into the project directory and install it
+# Clone the caesar repository into the project directory and install it, if exist, pull the latest code
 cd $ROOT_DIR
-git clone git@github.com:fuxialexander/caesar.git
+if [ -d $ROOT_DIR/caesar ]; then
+    cd $ROOT_DIR/caesar
+    git pull
+else
+    git clone git@github.com:fuxialexander/caesar.git
+fi
+
 cd $ROOT_DIR/caesar
 pip install -e .
 
-# Clone the atac_rna_data_processing repository into the project directory and install it
+# Clone the atac_rna_data_processing repository into the project directory and install it, if exist, pull the latest code
 cd $ROOT_DIR
-git clone git@github.com:fuxialexander/atac_rna_data_processing.git
+if [ -d $ROOT_DIR/atac_rna_data_processing ]; then
+    cd $ROOT_DIR/atac_rna_data_processing
+    git pull
+else
+    git clone git@github.com:fuxialexander/atac_rna_data_processing.git
+fi 
+
 cd $ROOT_DIR/atac_rna_data_processing
 pip install -e .
 
