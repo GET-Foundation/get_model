@@ -23,7 +23,7 @@ model_path = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/ckp
 fasta_file = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/genome.fa'
 clinvar_vcf = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/clinvar.vcf.gz'
 targets_txt = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/targets_human.txt"
-output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds/k562_fulco_benchmark_per_nt"
+output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds/k562_fulco_benchmark_per_nt_norm"
 
 
 SEQUENCE_LENGTH = 393216
@@ -228,13 +228,13 @@ def compute_enformer_contribution_score_on_batch(model, fasta_extractor, row, tr
   region_end = int(region_midpoint + window_len/2 - output_start)
 
   if region_start > SEQUENCE_LENGTH or region_end < 0:
-    return [row["orig_idx"], None, (None, None)]
+    return [row["orig_idx"], None, None, (None, None)]
   else:
     region_start = max(region_start, 0)
     region_end = min(region_end, SEQUENCE_LENGTH)
     ret_contrib = contribution_scores[region_start:region_end]
     # return original index in fulco_df, the list of contribution scores, and the coords for the scores
-    return [row["orig_idx"], ret_contrib.tolist(), (region_start, region_end)]
+    return [row["orig_idx"], ret_contrib.tolist(), contribution_scores.tolist(), (region_start, region_end)]
 
 
 def convert_chr(chromosome, start, ret_type=None):
@@ -250,6 +250,11 @@ def convert_chr(chromosome, start, ret_type=None):
 
 
 if __name__=="__main__":
+  argparser = argparse.ArgumentParser()
+  argparser.add_argument("--start_idx", type=int, default=0)
+  argparser.add_argument("--end_idx", type=int, default=None)
+  args = argparser.parse_args()
+
   pyfaidx.Faidx(fasta_file)
   fasta_extractor = FastaStringExtractor(fasta_file)
   model = Enformer(model_path)
@@ -265,6 +270,12 @@ if __name__=="__main__":
   num_batches = 0
 
   for idx, row in tqdm(fulco_df.iterrows(), total=len(fulco_df)):
+    if idx < args.start_idx:
+      num_batches += 1
+      continue
+    if args.end_idx and idx >= args.end_idx:
+      break
+
     nt_preds = compute_enformer_contribution_score_on_batch(model, fasta_extractor, row, k562_track_idx_set)
     batch_preds.append(nt_preds)
 
