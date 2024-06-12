@@ -930,12 +930,12 @@ class GETRegionFinetuneExpHiCAxial(BaseGETModel):
         self.region_embed = RegionEmbed(cfg.region_embed)
         self.encoder = GETTransformerWithContactMapAxial(**cfg.encoder)
         self.head_exp = ExpressionHead(cfg.head_exp)
-        self.hic_header = ContactMapHead(cfg.header_hic)
-        self.abc_header = ContactMapHead(cfg.header_abc)
+        # self.hic_header = ContactMapHead(cfg.header_hic)
+        # self.abc_header = ContactMapHead(cfg.header_abc)
         self.distance_contact_map = DistanceContactHead(
             cfg.distance_contact_map)
         self.distance_contact_map.eval()
-        self.proj_distance = nn.Linear(cfg.embed_dim, 128)
+        self.proj_distance = nn.Linear(cfg.embed_dim, 1)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
         logging.info(
             f"GETRegionFinetuneExpHiCABC can only be used with quantitative_atac=True in order to generate the ABC score.")
@@ -971,13 +971,13 @@ class GETRegionFinetuneExpHiCAxial(BaseGETModel):
         x = x[:, 1:]
         exp = nn.Softplus()(self.head_exp(x))
         fused_distance_map = self.proj_distance(
-            fused_distance_map).transpose(1, 3).transpose(2, 3)
-        hic = self.hic_header(fused_distance_map).squeeze(1)
-        abc = self.abc_header(fused_distance_map).squeeze(1)
-        return exp, hic, abc
+            fused_distance_map)#.transpose(1, 3).transpose(2, 3)
+        # hic = self.hic_header(fused_distance_map).squeeze(1)
+        # abc = self.abc_header(fused_distance_map).squeeze(1)
+        return exp, fused_distance_map.squeeze(3)
 
     def before_loss(self, output, batch):
-        exp, hic_contact_map, abc_contact_map = output
+        exp, hic_contact_map = output
         atac = batch['region_motif'][:, :, -1]
         # outer sum of atac and itself
         atac = torch.sqrt(atac.unsqueeze(1) * atac.unsqueeze(2))
@@ -1001,7 +1001,7 @@ class GETRegionFinetuneExpHiCAxial(BaseGETModel):
         }
         obs = {
             'exp': batch['exp_label'],
-            'hic': hic - hic_1d,
+            'hic': ((hic - hic_1d)**3),
             # 'abc': abc,
         }
         if real_hic:
@@ -1011,11 +1011,11 @@ class GETRegionFinetuneExpHiCAxial(BaseGETModel):
             # obs['abc'][-1, :] = pred['abc'][-1, :].detach()
             # obs['abc'][:, 0] = pred['abc'][:, 0].detach()
             # obs['abc'][:, -1] = pred['abc'][:, -1].detach()
-            obs['hic'][mask] = pred['hic'][mask].detach()
-            obs['hic'][0, :] = pred['hic'][0, :].detach()
-            obs['hic'][-1, :] = pred['hic'][-1, :].detach()
-            obs['hic'][:, 0] = pred['hic'][:, 0].detach()
-            obs['hic'][:, -1] = pred['hic'][:, -1].detach()
+            obs['hic'][mask] = pred['hic'][mask].detach().float()
+            # obs['hic'][0, :] = pred['hic'][0, :].detach()
+            # obs['hic'][-1, :] = pred['hic'][-1, :].detach()
+            # obs['hic'][:, 0] = pred['hic'][:, 0].detach()
+            # obs['hic'][:, -1] = pred['hic'][:, -1].detach()
         return pred, obs
 
     def generate_dummy_data(self):
