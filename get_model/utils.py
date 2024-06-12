@@ -482,7 +482,6 @@ def load_state_dict(model, state_dict, strict=True, patterns_to_drop=[]):
     # Remove keys matching the patterns_to_drop
     for pattern in patterns_to_drop:
         state_dict = {k: v for k, v in state_dict.items() if pattern not in k}
-    
     model.load_state_dict(state_dict, strict=strict)
 
 
@@ -504,7 +503,7 @@ def recursive_numpy(tensors):
     elif isinstance(tensors, list):
         return [recursive_numpy(v) for v in tensors]
     elif isinstance(tensors, torch.Tensor):
-        return tensors.detach().cpu().numpy()
+        return tensors.detach().cpu().float().numpy()
     else:
         return tensors
 

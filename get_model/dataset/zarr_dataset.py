@@ -154,7 +154,7 @@ def get_hic_from_idx(hic, csv, start=None, end=None, resolution=5000, method='ob
             return None
         hic_idx = np.array([row.Start // resolution - start +
                         1 for _, row in csv_region.iterrows()])
-        mzd = hic.getMatrixZoomData(chrom, chrom, method, "KR", "BP", resolution)
+        mzd = hic.getMatrixZoomData('chr' + chrom, 'chr' + chrom, method, "SCALE", "BP", resolution)
         numpy_matrix = mzd.getRecordsAsMatrix(
             start * resolution, end * resolution, start * resolution, end * resolution)
         numpy_matrix = np.nan_to_num(numpy_matrix)
@@ -1418,8 +1418,14 @@ class InferenceDataset(PretrainDataset):
     def accessible_genes(self):
         """Find overlap between self.tss_chunk_idx and self.datapool.peaks_dict"""
         if not hasattr(self, '_accessible_genes'):
-            _accessible_genes = {key: pr(self.tss_chunk_idx).join(
-                pr(peak)).df['gene_name'].unique() for key, peak in self.datapool.peaks_dict.items()}
+            _accessible_genes = {}
+            for key, peak in self.datapool.peaks_dict.items():
+                _join = pr(self.tss_chunk_idx).join(
+                    pr(peak)).df
+                if _join.empty:
+                    continue
+                else:
+                    _accessible_genes[key] = _join['gene_name'].unique()
             if self.gene_list is not None:
                 _accessible_genes = {key: np.intersect1d(
                     genes, self.gene_list) for key, genes in _accessible_genes.items()}
