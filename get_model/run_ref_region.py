@@ -143,7 +143,15 @@ class RegionLitModel(LitModel):
                 # obs[key] = (obs[key] * tss_idx)
             pred['exp'] = pred['exp'][tss_idx > 0].flatten()
             obs['exp'] = obs['exp'][tss_idx > 0].flatten()
-
+        # error handling in metric when there is no TSS, or all TSS is not expressed in batch.
+        if pred['exp'].shape[0] == 0:
+            return
+        if obs['exp'].sum() == 0:
+            return
+        # check for nan
+        if torch.isnan(pred['exp']).any() or torch.isnan(obs['exp']).any():
+            return
+        
         metrics = self.metrics(pred, obs)
         if batch_idx == 0 and self.cfg.log_image:
             # log one example as scatter plot
