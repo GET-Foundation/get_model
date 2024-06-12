@@ -7,7 +7,10 @@ DATA_DIR=/burg/pmg/users/xf2217/get_data
 if [ ! -d $ROOT_DIR ]; then
     mkdir -p $ROOT_DIR  # Create the root directory if it does not exist
 fi
-
+# if conda env exist, remove and recreate
+if [ -d $ROOT_DIR/mambaforge ]; then
+    rm -rf $ROOT_DIR/mambaforge
+fi
 # Navigate into the project root directory
 cd $ROOT_DIR
 
