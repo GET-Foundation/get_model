@@ -50,5 +50,7 @@ git clone git@github.com:fuxialexander/atac_rna_data_processing.git
 cd $ROOT_DIR/atac_rna_data_processing
 pip install -e .
 
+pip install git+https://github.com/pyranges/pyranges@master
+pip install git+https://github.com/cccntu/minLoRA.git@master
 # Return to the codebase directory
 cd $CODEBASE_DIR
