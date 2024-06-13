@@ -1,36 +1,30 @@
 defaults:
-  - base_config
-  - model/GETFinetuneGBM@_here_
+  - base_ref_region_config
+  - model/GETRegionFinetune@_here_
   - machine/manitou_alb2281
-  - dataset/gbm@dataset
+  - finetune/v1_finetune@finetune
+  - dataset/finetune_gbm@dataset
   - _self_
 
 assembly: "hg38"
-dataset:
-  data_set: "Pretrain.GBM_eval"
-  zarr_dirs:
-    - "htan_gbm_dense.zarr"
-  leave_out_celltypes: "Tumor.htan_gbm.C3N-01814_CPT0167860015_snATAC_GBM_Tumor.16384"
-  dataset_size: 4096
-  n_peaks_upper_bound: 200
-  random_shift_peak: null
-  additional_peak_columns:
-    ["Expression_positive", "Expression_negative", "aTPM", "TSS"]
 
 task:
-  layer_names: ["atac_attention"]
-  test_mode: "perturb_interpret"
-  gene_list: 
-    - "PPIF"
-  mutations: "/burg/pmg/users/xf2217/get_revision/PPIF/prepared_data.tsv"
-   
+  layer_names: []
+  test_mode: "skip"
+
 training:
   save_ckpt_freq: 10
-  epochs: 2
+  epochs: 100
   warmup_epochs: 1
   accumulate_grad_batches: 1
   clip_grad: null
   use_fp16: true
+
+dataset:
+  quantitative_atac: true
+  sampling_step: 450
+  mask_ratio: 0
+
 
 optimizer:
   lr: 0.0001
@@ -41,10 +35,17 @@ optimizer:
   opt_betas: [0.9, 0.95]
 
 wandb:
-  project_name: "debug_finetune"
-  run_name: "experiment_1"
+  project_name: "finetune_gbm_lora"
+  run_name: "finetune_Tumor.htan_gbm.C3L-03405_CPT0224600013_snATAC_GBM_Tumor.2048_lora_watac"
 
 finetune:
-  checkpoint: "/pmglocal/alb2281/get/get_ckpts/pretrain/R200L500-with-atac-loss-GBM-leaveout-Tumor.htan_gbm.C3N-01814_CPT0167860015-chr11.pth"
-  model_prefix: "model."
+  pretrain_checkpoint: false
+  strict: true
+  use_lora: true
+  layers_with_lora: ['region_embed', 'encoder']
+  checkpoint: "/pmglocal/alb2281/get/get_ckpts/fetal_v1_astrocyte_watac.pth"
   patterns_to_freeze: []
+  model_key: 'model'
+
+eval_tss: true
+log_image: false
