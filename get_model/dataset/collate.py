@@ -5,6 +5,7 @@ import torch
 
 from get_model.dataset.transforms import rev_comp
 from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
+from torch.utils.data.dataloader import default_collate
 
 
 def sparse_coo_to_tensor(coo):
@@ -183,3 +184,12 @@ def get_perturb_collate_fn(perturbation_batch):
     WT_batch = get_rev_collate_fn(WT_batch, reverse_complement=False)
     MUT_batch = get_rev_collate_fn(MUT_batch, reverse_complement=False)
     return {'WT': WT_batch, 'MUT': MUT_batch}
+
+
+def everything_collate(batch):
+    batch = batch_dict_list_to_dict(batch)
+    zarr_batch = get_rev_collate_fn(batch['zarr'], reverse_complement=False)
+    rrd_batch = default_collate(batch['rrd'])
+    # merge the two batches
+    rrd_batch.update(zarr_batch)
+    return rrd_batch
