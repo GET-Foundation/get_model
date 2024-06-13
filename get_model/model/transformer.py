@@ -1,3 +1,4 @@
+import dis
 from functools import partial
 
 import torch
@@ -9,7 +10,7 @@ try:
     from flash_attn import flash_attn_qkvpacked_func
 except ImportError:
     flash_attn_qkvpacked_func = None
-
+from axial_attention import AxialAttention
 
 class Attention(nn.Module):
     def __init__(
@@ -254,6 +255,40 @@ class Block(nn.Module):
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
         return x, attn
 
+class PairedBlock(nn.Module):
+    """A block that will perform the axial attention and mlp on the paired embedding."""
+    def __init__(
+        self,
+        dim,
+        num_heads,
+        mlp_ratio=4.0,
+        drop=0,
+        act_layer=nn.GELU,
+        norm_layer=nn.LayerNorm,
+    ):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.axial_attn = AxialAttention(
+            dim,
+            num_dimensions=2,
+            heads=num_heads,
+        )
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(
+            in_features=dim,
+            hidden_features=mlp_hidden_dim,
+            act_layer=act_layer,
+            drop=drop,
+        )
+
+    def forward(self, x, attention_mask=None, attention_bias=None):
+        x_attn = self.axial_attn(self.norm1(
+            x))
+        x = x + x_attn
+        x = x + self.mlp(self.norm2(x))
+        return x
+
 
 class GETTransformer(nn.Module):
     """A transformer module for GET model."""
@@ -377,6 +412,82 @@ class GETTransformerWithContactMap(GETTransformer):
             distance_map = distance_map + outer_sum/len(self.blocks)
 
         x = self.norm(x)
+        if self.fc_norm is not None:
+            x = self.fc_norm(x.mean(1))
+
+        return x, distance_map, attn_output
+
+
+class GETTransformerWithContactMapAxial(GETTransformer):
+    """A transformer module for GET model that takes a distance map as an additional input and it will fuse every layer of GET base model pairwise embedding to the distance map."""
+    def __init__(
+        self,
+        embed_dim,
+        num_heads=8,
+        num_layers=8,
+        mlp_ratio=4,
+        qkv_bias=True,
+        qk_scale=None,
+        drop_rate=0,
+        attn_drop_rate=0,
+        drop_path_rate=0.1,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        init_values=0,
+        use_mean_pooling=False,
+        flash_attn=False,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(
+            embed_dim,
+            num_heads,
+            num_layers,
+            mlp_ratio,
+            qkv_bias,
+            qk_scale,
+            drop_rate,
+            attn_drop_rate,
+            drop_path_rate,
+            norm_layer,
+            init_values,
+            use_mean_pooling,
+            flash_attn,
+            *args,
+            **kwargs,
+        )
+        self.paired_blocks = nn.ModuleList(
+            [
+                PairedBlock(
+                    dim=embed_dim,
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratio,
+                    drop=drop_rate,
+                    act_layer=nn.GELU,
+                    norm_layer=norm_layer,
+                )
+                for i in range(num_layers//2)
+            ]
+        )
+    def forward(self, x, distance_map, mask=None, return_attns=False, bias=None):
+        attn_output = [] if return_attns else None
+        distance_map = distance_map.squeeze(1).unsqueeze(3)
+        for i, blk in enumerate(self.blocks):
+            x, attn = blk(x, mask, bias)
+            if return_attns:
+                attn_output.append(attn)
+
+            # Perform outer sum of x
+            if i % 2 == 0 and i < len(self.paired_blocks):
+                outer_sum = x[:, 1:].unsqueeze(
+                    2).detach() + x[:, :-1].unsqueeze(1).detach()
+                # Sum the outer_sum with distance_map with stop_grad to prevent backpropagation from distance map to embedding
+                distance_map = distance_map + outer_sum 
+                # add axial attention
+                distance_map = self.paired_blocks[i//2](distance_map)
+
+
+        x = self.norm(x)
+        distance_map = F.gelu(distance_map)
         if self.fc_norm is not None:
             x = self.fc_norm(x.mean(1))
 

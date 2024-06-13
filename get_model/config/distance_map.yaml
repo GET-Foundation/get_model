@@ -2,7 +2,7 @@ defaults:
   - base_ref_region_config
   - model/DistanceContactMap@_here_
   - machine/pc
-  - dataset/k562_ref_eval@dataset
+  - dataset/k562_hic_distance_map@dataset
   - _self_
 
 assembly: "hg38"
@@ -34,7 +34,7 @@ optimizer:
 
 wandb:
   project_name: "DistanceMap"
-  run_name: "H1_ESC_MicroC"
+  run_name: "k562_hic_distance_map.ENCFF621AIY"
 
 finetune:
   pretrain_checkpoint: false

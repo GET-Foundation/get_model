@@ -37,14 +37,17 @@ logging.disable(logging.WARN)
 
 # Wrapper model for Captum
 class WrapperModel(torch.nn.Module):
-    def __init__(self, model, focus):
+    def __init__(self, model, focus, output_key=None):
         super(WrapperModel, self).__init__()
         self.model = model
         self.focus = focus
+        self.output_key = output_key
 
     def forward(self, input, strand, *args, **kwargs):
         output = self.model.forward(input)
-        print('output shape: ', output.shape)
+        if isinstance(output, dict):
+            print("output is dict with keys" + str(output.keys()))
+            return output[self.output_key][:, self.focus, strand]
         return output[:, self.focus, strand]
 
 def extract_peak_df(batch):
@@ -287,7 +290,8 @@ class LitModel(L.LightningModule):
     def interpret_captum_step(self, batch, batch_idx, focus, start, end, shift=0):
         import torch
         from captum.attr import DeepLift, IntegratedGradients, InputXGradient, Saliency
-        
+        if len(batch['gene_name']) > 1:
+            raise ValueError("Only one sample is supported for interpretation")
         gene_name = batch['gene_name'][0]
         input_data = batch['region_motif'][0][start+shift:end+shift+1].unsqueeze(0).cuda()
         strand = batch['strand'][0]

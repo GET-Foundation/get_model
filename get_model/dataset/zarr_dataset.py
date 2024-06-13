@@ -154,7 +154,7 @@ def get_hic_from_idx(hic, csv, start=None, end=None, resolution=5000, method='ob
             return None
         hic_idx = np.array([row.Start // resolution - start +
                         1 for _, row in csv_region.iterrows()])
-        mzd = hic.getMatrixZoomData(chrom, chrom, method, "KR", "BP", resolution)
+        mzd = hic.getMatrixZoomData('chr' + chrom, 'chr' + chrom, method, "SCALE", "BP", resolution)
         numpy_matrix = mzd.getRecordsAsMatrix(
             start * resolution, end * resolution, start * resolution, end * resolution)
         numpy_matrix = np.nan_to_num(numpy_matrix)
@@ -293,6 +293,7 @@ class ZarrDataPool(object):
         self.hic_obj = None
         self.initialize_datasets()
         self.calculate_metadata()
+        self.celltype_to_data_key
         logging.info('ZarrDataPool initialized')
 
     @property
@@ -443,8 +444,10 @@ class ZarrDataPool(object):
             elif chr_chunk_idx+2 <= self.motif_mean_std_obj.data_dict[chr_name].shape[0]:
                 motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chr_chunk_idx:chr_chunk_idx+2].reshape(
                 2, 2, -1).mean(0)
-            else:
-                raise ValueError('The chunk index is out of range. Something is wrong in identify the corresponding chunking of data loading process.')
+            else: # TODO need to check the best way to handle this!!!!!
+                motif_mean_std = np.zeros((2, 2, 1))
+        else:
+            motif_mean_std = np.zeros((2, 2, 1))
         return chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
 
     def load_window_data(self, window_index=None):
@@ -771,6 +774,8 @@ class ZarrDataPool(object):
         hic_matrix = 0
         if self.hic_obj is not None:
             hic_matrix = get_hic_from_idx(self.hic_obj, celltype_peaks)
+            if hic_matrix is None:
+                hic_matrix = np.zeros((len(celltype_peaks), len(celltype_peaks)))
 
         if self.additional_peak_columns is not None:
             # assume numeric columns
@@ -1045,7 +1050,10 @@ class PreloadDataPack(object):
         if self.zarr_data_pool.hic_obj is not None:
             hic_matrix = get_hic_from_idx(
                 self.zarr_data_pool.hic_obj, celltype_peaks)
-
+            if hic_matrix is None:
+                hic_matrix = np.zeros(
+                    (self.n_peaks_upper_bound, self.n_peaks_upper_bound))
+                
         celltype_peaks = celltype_peaks[[
             'Start', 'End']].to_numpy().astype(np.int64)
 
@@ -1328,7 +1336,10 @@ class PretrainDataset(Dataset):
             self.use_insulation = False
         self.sequence = sequence_obj if sequence_obj is not None else get_sequence_obj(
             genome_seq_zarr)
-        self.mms = MotifMeanStd(genome_motif_zarr)
+        if genome_motif_zarr is None:
+            self.mms=None
+        else:
+            self.mms = MotifMeanStd(genome_motif_zarr)
         self.datapool = ZarrDataPool(zarr_dirs=zarr_dirs, genome_seq_zarr=genome_seq_zarr,
                                      insulation_paths=insulation_paths, peak_name=peak_name,
                                      negative_peak_name=negative_peak_name,
@@ -1419,13 +1430,21 @@ class InferenceDataset(PretrainDataset):
         self.gene_list = gene_list if gene_list is not None else self.gencode_obj.gtf['gene_name'].unique(
         )
         self.tss_chunk_idx = self._generate_tss_chunk_idx()
+        self.accessible_genes
+        self.gene_celltype_pair
 
     @property
     def accessible_genes(self):
         """Find overlap between self.tss_chunk_idx and self.datapool.peaks_dict"""
         if not hasattr(self, '_accessible_genes'):
-            _accessible_genes = {key: pr(self.tss_chunk_idx).join(
-                pr(peak)).df['gene_name'].unique() for key, peak in self.datapool.peaks_dict.items()}
+            _accessible_genes = {}
+            for key, peak in self.datapool.peaks_dict.items():
+                _join = pr(self.tss_chunk_idx).join(
+                    pr(peak)).df
+                if _join.empty:
+                    continue
+                else:
+                    _accessible_genes[key] = _join['gene_name'].unique()
             if self.gene_list is not None:
                 _accessible_genes = {key: np.intersect1d(
                     genes, self.gene_list) for key, genes in _accessible_genes.items()}
@@ -1860,6 +1879,7 @@ class ReferenceRegionDataset(Dataset):
 
         self.peak_names = reference_region_motif.peak_names
         self.setup()
+        self.data_dict
 
     @property
     def data_dict(self):
@@ -2042,6 +2062,7 @@ class InferenceReferenceRegionDataset(Dataset):
         self.peak_names = reference_region_motif.peak_names
 
         self.zarr_dataset = zarr_dataset
+        self.data_dict
 
     @property
     def data_dict(self):
@@ -2852,3 +2873,29 @@ class InferenceRegionDataset(RegionDataset):
                 'tss_peak': tss_peak_mask,
                 'strand': strand,
                 'exp_label': target.toarray().astype(np.float32)}
+
+class EverythingDataset(ReferenceRegionDataset):
+    def __init__(self, reference_region_motif: ReferenceRegionMotif,
+                 zarr_dataset: PretrainDataset,
+                 transform=None,
+                 quantitative_atac: bool = False,
+                 sampling_step: int = 50,
+                 ) -> None:
+        super().__init__(reference_region_motif, zarr_dataset, transform, quantitative_atac, sampling_step)
+    
+    def __getitem__(self, index):
+        rrd_item = super().__getitem__(index)
+        zarr_item = self.zarr_dataset[index]
+        return {'rrd': rrd_item, 'zarr': zarr_item}
+
+class InferenceEverythingDataset(InferenceReferenceRegionDataset):
+    def __init__(self, reference_region_motif: ReferenceRegionMotif,
+                 zarr_dataset: InferenceDataset,
+                 quantitative_atac: bool = False,
+                 sampling_step: int = 50) -> None:
+        super().__init__(reference_region_motif, zarr_dataset, quantitative_atac, sampling_step)
+
+    def __getitem__(self, index):
+        rrd_item = super().__getitem__(index)
+        zarr_item = self.zarr_dataset[index]
+        return {'rrd': rrd_item, 'zarr': zarr_item}

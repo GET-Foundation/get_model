@@ -1,0 +1,31 @@
+zarr_dirs:
+  - "encode_hg38atac_dense.zarr"
+keep_celltypes: "k562.encode_hg38atac.ENCFF257HEE.max"
+leave_out_celltypes: null
+leave_out_chromosomes: "chr10,chr11"
+peak_name: "peaks_q0.05_fetal_joint_tissue_open_exp"
+dataset_size: 40960
+eval_dataset_size: 512
+additional_peak_columns:
+  ["Expression_positive", "Expression_negative", "aTPM", "TSS"]
+center_expand_target: 0
+n_peaks_lower_bound: 1
+n_peaks_upper_bound: 200
+negative_peak_name: null
+negative_peak_ratio: 0
+random_shift_peak: 0
+max_peak_length: 5000
+peak_count_filter: 10
+use_insulation: False
+preload_count: 10
+pin_mem: True
+n_packs: 1
+padding: 0
+mask_ratio: 0
+insulation_subsample_ratio: 1
+hic_path: /home/xf2217/Projects/encode_hg38atac/raw/ENCFF621AIY.hic
+reference_region_motif:
+  root: "/home/xf2217/Projects/get_data/"
+  data: "k562.ENCFF257HEE.encode_hg38atac.peak_motif.zarr"
+  refdata: "fetal_union_peak_motif_v1.hg38.zarr"
+  motif_scaler: 1.3

@@ -19,7 +19,7 @@ from get_model.model.modules import (ATACHead, ContactMapHead, ContactMapHeadCon
                                      MotifScanner, MotifScannerConfig,
                                      RegionEmbed, RegionEmbedConfig)
 from get_model.model.position_encoding import AbsolutePositionalEncoding
-from get_model.model.transformer import GETTransformer, GETTransformerWithContactMap
+from get_model.model.transformer import GETTransformer, GETTransformerWithContactMap, GETTransformerWithContactMapAxial
 
 
 class MNLLLoss(nn.Module):
@@ -898,9 +898,124 @@ class GETRegionFinetuneExpHiCABC(BaseGETModel):
             'abc': abc,
         }
         if real_hic:
-            mask = hic.sum(1).sum(1) != 0
+            mask = hic.sum(1).sum(1) == 0
             # obs['hic'][mask] = pred['hic'][mask].detach()
             obs['abc'][mask] = pred['abc'][mask].detach()
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+            'distance_map': torch.randn(B, R, R).float(),
+        }
+
+@dataclass
+class GETRegionFinetuneExpHiCAxialModelConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    header_hic: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    header_abc: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    distance_contact_map: DistanceContactHeadConfig = field(
+        default_factory=DistanceContactHeadConfig)
+
+
+class GETRegionFinetuneExpHiCAxial(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneExpHiCAxialModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformerWithContactMapAxial(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        # self.hic_header = ContactMapHead(cfg.header_hic)
+        # self.abc_header = ContactMapHead(cfg.header_abc)
+        self.distance_contact_map = DistanceContactHead(
+            cfg.distance_contact_map)
+        self.distance_contact_map.eval()
+        self.proj_distance = nn.Linear(cfg.embed_dim, 1)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        logging.info(
+            f"GETRegionFinetuneExpHiCABC can only be used with quantitative_atac=True in order to generate the ABC score.")
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+        peak_coord = batch['peak_coord']
+        peak_coord_mean = peak_coord[:, :, 0]
+        # pair-wise distance using torch
+        # Add new dimensions to create column and row vectors
+        peak_coord_mean_col = peak_coord_mean.unsqueeze(
+            2)  # Adds a new axis (column vector)
+        peak_coord_mean_row = peak_coord_mean.unsqueeze(
+            1)  # Adds a new axis (row vector)
+
+        # Compute the pairwise difference
+        distance = torch.log10(
+            (peak_coord_mean_col - peak_coord_mean_row).abs() + 1).unsqueeze(1)
+        region_model = batch['region_motif'].clone()
+        batch['distance_map'] = distance
+        # region_model[:, :, -1] = 1 # set atac to binary
+        return {
+            'region_motif': region_model,
+            'distance_map': distance,
+        }
+
+    def forward(self, region_motif, distance_map):
+        x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, fused_distance_map, _ = self.encoder(x, distance_map)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        fused_distance_map = self.proj_distance(
+            fused_distance_map)#.transpose(1, 3).transpose(2, 3)
+        # hic = self.hic_header(fused_distance_map).squeeze(1)
+        # abc = self.abc_header(fused_distance_map).squeeze(1)
+        return exp, fused_distance_map.squeeze(3)
+
+    def before_loss(self, output, batch):
+        exp, hic_contact_map = output
+        atac = batch['region_motif'][:, :, -1]
+        # outer sum of atac and itself
+        atac = torch.sqrt(atac.unsqueeze(1) * atac.unsqueeze(2))
+        hic_1d = self.distance_contact_map(
+                batch['distance_map']).detach().squeeze(1)
+        # test if batch['hic_matrix'] has shape and not a scalar
+        if len(batch['hic_matrix'][0].shape) >= 2:
+            hic = batch['hic_matrix'].float()
+            real_hic=True
+        else:
+            logging.info(
+                f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
+            hic = self.distance_contact_map(
+                batch['distance_map']).detach().squeeze(1)
+            real_hic=False
+        # abc = atac * hic
+        pred = {
+            'exp': exp,
+            'hic': hic_contact_map,
+            # 'abc': abc_contact_map,
+        }
+        obs = {
+            'exp': batch['exp_label'],
+            'hic': ((hic - hic_1d)**3),
+            # 'abc': abc,
+        }
+        if real_hic:
+            mask = hic.sum(1).sum(1) == 0
+            # obs['abc'][mask] = pred['abc'][mask].detach()
+            # obs['abc'][0, :] = pred['abc'][0, :].detach()
+            # obs['abc'][-1, :] = pred['abc'][-1, :].detach()
+            # obs['abc'][:, 0] = pred['abc'][:, 0].detach()
+            # obs['abc'][:, -1] = pred['abc'][:, -1].detach()
+            obs['hic'][mask] = pred['hic'][mask].detach().float()
+            # obs['hic'][0, :] = pred['hic'][0, :].detach()
+            # obs['hic'][-1, :] = pred['hic'][-1, :].detach()
+            # obs['hic'][:, 0] = pred['hic'][:, 0].detach()
+            # obs['hic'][:, -1] = pred['hic'][:, -1].detach()
         return pred, obs
 
     def generate_dummy_data(self):

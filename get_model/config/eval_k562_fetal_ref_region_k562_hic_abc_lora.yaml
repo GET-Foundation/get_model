@@ -1,0 +1,61 @@
+defaults:
+  - base_ref_region_config
+  - model/GETRegionFinetuneExpHiCABC@_here_
+  - machine/manitou
+  - finetune/v1_finetune@finetune
+  - dataset/k562_hic_distance_map@dataset
+  - _self_
+
+assembly: "hg38"
+
+task:
+  layer_names: []
+  test_mode: "interpret"
+
+training:
+  save_ckpt_freq: 1
+  epochs: 100
+  warmup_epochs: 1
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: false
+
+dataset:
+  quantitative_atac: true
+  sampling_step: 100
+  mask_ratio: 0
+
+optimizer:
+  lr: 0.0001
+  min_lr: 0.000001
+  weight_decay: 0.05
+  opt: "adamw"
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.999]
+
+wandb:
+  project_name: "GETRegionFinetune_k562_abc"
+  run_name: "debug"
+
+finetune:
+  pretrain_checkpoint: false
+  strict: true
+  use_lora: true
+  layers_with_lora: ['region_embed', 'head_exp', 'encoder']
+  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth"
+  patterns_to_freeze: ['distance_contact_map']
+  model_key: 'model'
+  additional_checkpoints:
+    - checkpoint: DistanceMap/kp6cfqkc/checkpoints/best.ckpt
+      model_key: 'state_dict'
+      strict: false
+      rename_config:
+        model.: distance_contact_map.
+  #   - checkpoint: GETRegionFinetune_k562_abc/k6tj3d9k/checkpoints/best.ckpt
+  #     model_key: 'state_dict'
+  #     strict: false
+  #     rename_config:
+  #       model.: abc.contact_map.
+
+eval_tss: true
+log_image: false

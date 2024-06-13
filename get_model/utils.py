@@ -503,7 +503,7 @@ def recursive_numpy(tensors):
     elif isinstance(tensors, list):
         return [recursive_numpy(v) for v in tensors]
     elif isinstance(tensors, torch.Tensor):
-        return tensors.detach().cpu().numpy()
+        return tensors.detach().cpu().float().numpy()
     else:
         return tensors
 
