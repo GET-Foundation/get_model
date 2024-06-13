@@ -1,0 +1,11 @@
+checkpoint: "path/to/checkpoint.ckpt"
+model_key: "model"
+rename_config:
+  "blocks.": "encoder.blocks."
+  "fc_norm.": "encoder.norm."
+  "encoder.head.": "head_mask."
+  "encoder.region_embed": "region_embed"
+  "region_embed.proj.": "region_embed.embed."
+  "encoder.cls_token": "cls_token"
+  "head.": "head_exp.head."
+strict: True

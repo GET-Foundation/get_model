@@ -1,7 +1,7 @@
 defaults:
   - base_ref_region_config
-  - model/GETRegionFinetunePositional@_here_
-  - machine/manitou
+  - model/DistanceContactMap@_here_
+  - machine/pc
   - dataset/k562_ref_eval@dataset
   - _self_
 
@@ -10,8 +10,6 @@ assembly: "hg38"
 task:
   layer_names: []
   test_mode: "interpret"
-  gene_list: /burg/pmg/users/xf2217/CRISPR_comparison/genes.txt
-  mutations: /burg/pmg/users/xf2217/CRISPR_comparison/regions.txt
 
 training:
   save_ckpt_freq: 1
@@ -27,7 +25,7 @@ dataset:
   mask_ratio: 0
 
 optimizer:
-  lr: 0.0001
+  lr: 0.001
   min_lr: 0.000001
   weight_decay: 0.05
   opt: "adamw"
@@ -35,15 +33,15 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetuneLoRA_k562"
-  run_name: "Positional-only"
+  project_name: "DistanceMap"
+  run_name: "H1_ESC_MicroC"
 
 finetune:
   pretrain_checkpoint: false
   strict: true
-  use_lora: true
-  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth"
+  use_lora: false
+  checkpoint: null
   patterns_to_freeze: []
 
-eval_tss: true
+eval_tss: false
 log_image: false

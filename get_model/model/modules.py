@@ -7,10 +7,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import nn
+from torch.nn.init import trunc_normal_
 
 from get_model.model.motif import parse_meme_file
-from torch.nn.init import trunc_normal_
 
 
 def dict_to_device(dict, device):
@@ -369,6 +368,92 @@ class HiCHead(BaseModule):
 
     def forward(self, x, mask=None):
         return self.outer_product(x, mask)
+
+
+@dataclass
+class ContactMapHeadConfig(BaseConfig):
+    """Configuration class for the ContactMapHead module.
+
+    Args:
+        input_dim (int): Dimension of the input.
+        hidden_dim (int): Dimension of the hidden layer.
+        output_dim (int): Dimension of the output."""
+    _target_: str = "get_model.model.modules.ContactMapHeadConfig"
+    input_dim: int = 128
+    hidden_dim: int = 64
+    output_dim: int = 1
+
+
+class ContactMapHead(BaseModule):
+    """A simple and small ResNet model to predict the contact map from the log distance map.
+    The output has the same shape as the input distance map.
+    """
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.conv1 = nn.Conv2d(cfg.input_dim, cfg.hidden_dim, 3, padding=1)
+        self.conv2 = nn.Conv2d(cfg.hidden_dim, cfg.hidden_dim, 3, padding=1)
+        self.conv3 = nn.Conv2d(cfg.hidden_dim, cfg.hidden_dim, 3, padding=1)
+        self.conv4 = nn.Conv2d(cfg.hidden_dim, cfg.output_dim, 3, padding=1)
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Conv2d):
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, distance_map):
+        # First layer
+        x = F.gelu(self.conv1(distance_map))
+        residual = x
+
+        # Second layer
+        x = F.gelu(self.conv2(x))
+        x = x + residual
+        residual = x
+
+        # Third layer
+        x = F.gelu(self.conv3(x))
+        x = x + residual
+
+        # Fourth layer
+        x = self.conv4(x)
+        hic = F.softplus(x)
+
+        return hic
+
+
+@dataclass
+class DistanceContactHeadConfig(BaseConfig):
+    """Configuration class for the DistanceContactHead module."""
+    _target_: str = "get_model.model.modules.DistanceContactHeadConfig"
+    pass
+
+
+class DistanceContactHead(BaseModule):
+    """A simple and small ResNet model to predict the contact map from the log distance map.
+    The output has the same shape as the input distance map.
+    """
+
+    def __init__(self, cfg: DistanceContactHeadConfig):
+        super().__init__(cfg)
+        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.conv3 = nn.Conv2d(64, 1, 3, padding=1)
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Conv2d):
+            nn.init.xavier_uniform_(m.weight)
+            if isinstance(m, nn.Conv2d) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, distance_map):
+        x = F.gelu(self.conv1(distance_map))
+        x = F.gelu(self.conv2(x))
+        x = self.conv3(x)
+        hic = F.softplus(x)
+        return hic
 
 
 def pool(x, method='mean'):

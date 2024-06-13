@@ -33,5 +33,4 @@ wandb:
 
 finetune:
   checkpoint: null
-  model_prefix: "model."
   patterns_to_freeze: []

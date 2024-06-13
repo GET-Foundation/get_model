@@ -322,3 +322,62 @@ class GETTransformer(nn.Module):
         if self.fc_norm is not None:
             x = self.fc_norm(x.mean(1))
         return x, attn_output
+
+
+class GETTransformerWithContactMap(GETTransformer):
+    """A transformer module for GET model that takes a distance map as an additional input and it will fuse every layer of GET base model pairwise embedding to the distance map."""
+    def __init__(
+        self,
+        embed_dim,
+        num_heads=8,
+        num_layers=8,
+        mlp_ratio=4,
+        qkv_bias=True,
+        qk_scale=None,
+        drop_rate=0,
+        attn_drop_rate=0,
+        drop_path_rate=0.1,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        init_values=0,
+        use_mean_pooling=False,
+        flash_attn=False,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(
+            embed_dim,
+            num_heads,
+            num_layers,
+            mlp_ratio,
+            qkv_bias,
+            qk_scale,
+            drop_rate,
+            attn_drop_rate,
+            drop_path_rate,
+            norm_layer,
+            init_values,
+            use_mean_pooling,
+            flash_attn,
+            *args,
+            **kwargs,
+        )
+
+    def forward(self, x, distance_map, mask=None, return_attns=False, bias=None):
+        attn_output = [] if return_attns else None
+        distance_map = distance_map.squeeze(1).unsqueeze(3)
+        for blk in self.blocks:
+            x, attn = blk(x, mask, bias)
+            if return_attns:
+                attn_output.append(attn)
+
+            # Perform outer sum of x
+            outer_sum = x[:, 1:].unsqueeze(
+                2).detach() + x[:, :-1].unsqueeze(1).detach()
+            # Sum the outer_sum with distance_map with stop_grad to prevent backpropagation from distance map to embedding
+            distance_map = distance_map + outer_sum/len(self.blocks)
+
+        x = self.norm(x)
+        if self.fc_norm is not None:
+            x = self.fc_norm(x.mean(1))
+
+        return x, distance_map, attn_output

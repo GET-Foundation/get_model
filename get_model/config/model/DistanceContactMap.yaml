@@ -1,0 +1,16 @@
+model:
+  _target_: get_model.model.model_refactored.DistanceContactMap
+  cfg:
+    cfg:
+    num_layers: 12
+    loss:
+      components:
+        hic:
+          _target_: torch.nn.PoissonNLLLoss
+          reduction: "mean"
+          log_input: False
+      weights:
+        hic: 1.0
+    metrics:
+      components:
+        hic: ["pearson", "spearman", "r2"]

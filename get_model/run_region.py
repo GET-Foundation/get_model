@@ -172,7 +172,7 @@ class RegionLitModel(LitModel):
                         checkpoint_model)
                     model.load_state_dict(checkpoint_model, strict=strict)
         model.freeze_layers(
-            patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
+          patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         print("Model = %s" % str(model))
         return model
 

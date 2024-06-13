@@ -36,7 +36,6 @@ finetune:
   pretrain_checkpoint: false
   strict: true
   checkpoint: "/burg/pmg/users/xf2217/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
-  model_prefix: "model."
   patterns_to_freeze: []
 
 eval_tss: true

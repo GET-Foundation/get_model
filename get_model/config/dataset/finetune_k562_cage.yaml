@@ -1,10 +1,10 @@
 zarr_dirs:
   - "encode_hg38atac_dense.zarr"
-keep_celltypes: "k562.encode_hg38atac.ENCFF128WZG.max"
+keep_celltypes: "k562.encode_hg38atac.ENCFF128WZG_cage.max"
 leave_out_celltypes: null
 leave_out_chromosomes: "chr10,chr11"
 peak_name: "peaks_q0.05_fetal_joint_tissue_open_exp"
-dataset_size: 40960
+dataset_size: 4096
 eval_dataset_size: 512
 additional_peak_columns:
   ["Expression_positive", "Expression_negative", "aTPM", "TSS"]
@@ -15,7 +15,6 @@ negative_peak_name: null
 negative_peak_ratio: 0
 random_shift_peak: 0
 max_peak_length: 5000
-peak_count_filter: 10
 use_insulation: False
 preload_count: 10
 pin_mem: True
@@ -23,9 +22,8 @@ n_packs: 1
 padding: 0
 mask_ratio: 0
 insulation_subsample_ratio: 1
-hic_path: /home/xf2217/Projects/geneformer_nat/data/H1_ESC.hic
 reference_region_motif:
-  root: "/home/xf2217/Projects/get_data/"
+  root: "/pmglocal/alb2281/get/get_data"
   data: "fetal_k562_peaks_motif.hg38.zarr"
   refdata: "fetal_union_peak_motif_v1.hg38.zarr"
   motif_scaler: 1.3

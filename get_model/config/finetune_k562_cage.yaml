@@ -1,49 +1,51 @@
 defaults:
   - base_ref_region_config
   - model/GETRegionFinetune@_here_
-  - machine/manitou
-  - dataset/k562_ref_eval@dataset
+  - machine/manitou_alb2281
+  - finetune/v1_finetune@finetune
+  - dataset/finetune_k562_cage@dataset
   - _self_
 
 assembly: "hg38"
 
 task:
   layer_names: []
-  test_mode: "interpret"
-  gene_list: /burg/pmg/users/xf2217/CRISPR_comparison/genes.txt
-  mutations: /burg/pmg/users/xf2217/CRISPR_comparison/regions.txt
+  test_mode: "skip"
 
 training:
-  save_ckpt_freq: 1
+  save_ckpt_freq: 10
   epochs: 100
   warmup_epochs: 1
   accumulate_grad_batches: 1
   clip_grad: null
-  use_fp16: false
+  use_fp16: true
 
 dataset:
   quantitative_atac: true
-  sampling_step: 100
+  sampling_step: 450
   mask_ratio: 0
+
 
 optimizer:
   lr: 0.0001
-  min_lr: 0.000001
+  min_lr: 0.0001
   weight_decay: 0.05
   opt: "adamw"
   opt_eps: 1e-8
-  opt_betas: [0.9, 0.999]
+  opt_betas: [0.9, 0.95]
 
 wandb:
-  project_name: "GETRegionFinetune_k562"
-  run_name: "k562_ref_fit"
+  project_name: "finetune_k562_cage_lora"
+  run_name: "finetune_k562.encode_hg38atac.ENCFF128WZG_cage.watac_from_scratch"
 
 finetune:
   pretrain_checkpoint: false
   strict: true
   use_lora: true
-  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth"
+  layers_with_lora: ['region_embed', 'encoder']
+  checkpoint: null
   patterns_to_freeze: []
+  model_key: 'model'
 
 eval_tss: true
 log_image: false

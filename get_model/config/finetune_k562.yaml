@@ -35,6 +35,5 @@ wandb:
 
 finetune:
   checkpoint: "/home/xf2217/Projects/get_checkpoints/Expression_Finetune_K562_HSC.Chr4_14.conv50.atac_loss.from_pretrain_399.nofreeze.use_insulation.nodepth.gap50.shift10.R100L1000.augmented.20240225.best.pth"
-  model_prefix: "model."
   patterns_to_freeze: []
 

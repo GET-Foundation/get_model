@@ -36,5 +36,4 @@ finetune:
   pretrain_checkpoint: false
   strict: false
   checkpoint: "/pmglocal/xf2217/GET_STARTED/get_model/GETRegionFinetune_k562/9g198fd4/checkpoints/best.ckpt"
-  model_prefix: "model."
   patterns_to_freeze: []

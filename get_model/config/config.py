@@ -129,13 +129,15 @@ class FinetuneConfig:
     pretrain_checkpoint: bool = False
     checkpoint: str | None = None
     strict: bool = True
-    model_prefix: str = "model."
+    model_key: str = "state_dict"
     use_lora: bool = False
     lora_checkpoint: str | None = None
+    rename_config: dict | None = None
+    layers_with_lora: list = field(default_factory=lambda: ['region_embed', 'encoder', 'head_exp'])
     patterns_to_freeze: list = field(default_factory=lambda: [
         "motif_scanner"])
     patterns_to_drop: list = field(default_factory=lambda: [])
-
+    additional_checkpoints: list = field(default_factory=lambda: [])
 
 @dataclass
 class MachineConfig:

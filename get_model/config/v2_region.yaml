@@ -42,5 +42,4 @@ wandb:
 
 finetune:
   checkpoint: 'GETRegionPretrain/jd2g64mg/checkpoints/best.ckpt'
-  model_prefix: "model."
   patterns_to_freeze: []

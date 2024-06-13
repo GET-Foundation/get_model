@@ -1,20 +1,20 @@
 zarr_dirs:
   - "joung_tfatlas_dense.zarr"
-keep_celltypes: null
-leave_out_celltypes: "6_0.joung_tfatlas.L10M"
-leave_out_chromosomes: null
+keep_celltypes: "0.joung_tfatlas.L10M"
+leave_out_celltypes: null
+leave_out_chromosomes: "chr10,chr11"
 peak_name: "fetal_tfatlas_peaks_tissue_open_exp"
 dataset_size: 40960
 eval_dataset_size: 512
 additional_peak_columns: ['Expression_positive', 'Expression_negative', 'aTPM', 'TSS']
 center_expand_target: 0
 n_peaks_lower_bound: 1
-n_peaks_upper_bound: 900
+n_peaks_upper_bound: 200
 negative_peak_name: null
 negative_peak_ratio: 0
 random_shift_peak: 0
 max_peak_length: 5000
-peak_count_filter: 0
+peak_count_filter: 1
 use_insulation: False
 preload_count: 10
 pin_mem: True
@@ -22,7 +22,8 @@ n_packs: 1
 padding: 0
 mask_ratio: 0
 insulation_subsample_ratio: 1
+hic_path: /home/xf2217/Projects/geneformer_nat/data/H1_ESC.hic
 reference_region_motif:
   data: 'fetal_tfatlas_peaks_motif.hg38.zarr'
   refdata: 'fetal_union_peak_motif_v1.hg38.zarr'
-  motif_scaler: 1
+  motif_scaler: 1.3
