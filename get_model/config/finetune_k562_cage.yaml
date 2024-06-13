@@ -21,7 +21,7 @@ training:
   use_fp16: true
 
 dataset:
-  quantitative_atac: false
+  quantitative_atac: true
   sampling_step: 450
   mask_ratio: 0
 
@@ -35,15 +35,15 @@ optimizer:
   opt_betas: [0.9, 0.95]
 
 wandb:
-  project_name: "finetune_k562_cage"
-  run_name: "finetune_k562.encode_hg38atac.ENCFF128WZG_cage.max"
+  project_name: "finetune_k562_cage_lora"
+  run_name: "finetune_k562.encode_hg38atac.ENCFF128WZG_cage.watac_from_scratch"
 
 finetune:
   pretrain_checkpoint: false
   strict: true
   use_lora: true
-  layers_with_lora: ['region_embed', 'head_exp', 'encoder']
-  checkpoint: "/pmglocal/alb2281/get/get_ckpts/checkpoint-best.pth"
+  layers_with_lora: ['region_embed', 'encoder']
+  checkpoint: null
   patterns_to_freeze: []
   model_key: 'model'
 
