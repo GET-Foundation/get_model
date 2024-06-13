@@ -482,7 +482,6 @@ def load_state_dict(model, state_dict, strict=True, patterns_to_drop=[]):
     # Remove keys matching the patterns_to_drop
     for pattern in patterns_to_drop:
         state_dict = {k: v for k, v in state_dict.items() if pattern not in k}
-    
     model.load_state_dict(state_dict, strict=strict)
 
 
