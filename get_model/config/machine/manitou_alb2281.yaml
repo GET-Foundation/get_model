@@ -2,5 +2,5 @@ data_path: "/pmglocal/alb2281/get/get_data"
 codebase: "/pmglocal/alb2281/repos/get_model"
 output_dir: "/pmglocal/alb2281/get/output"
 num_devices: 1
-num_workers: 4
-batch_size: 128
+num_workers: 8
+batch_size: 32
