@@ -13,7 +13,7 @@ mapfile -t samples < "$sample_list_file"
 for sample in "${samples[@]}"; do
     run_name="gbm_oneshot_gene_dea_${sample}_watac"
     echo "Starting [$run_name]..."
-    CUDA_VISIBLE_DEVICES=0 python get_model/debug/debug_run_ref_region_gbm.py \
+    CUDA_VISIBLE_DEVICES=1 python get_model/debug/debug_run_ref_region_gbm.py \
         +machine=manitou_alb2281 \
         stage=predict \
         dataset.peak_count_filter=10 \

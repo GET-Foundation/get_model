@@ -36,14 +36,14 @@ optimizer:
 
 wandb:
   project_name: "finetune_gbm_lora"
-  run_name: "finetune_Tumor.htan_gbm.C3L-03405_CPT0224600013_snATAC_GBM_Tumor.2048_lora_watac"
+  run_name: "finetune_Tumor.htan_gbm.C3L-03405_CPT0224600013_snATAC_GBM_Tumor.2048_lora_natac"
 
 finetune:
   pretrain_checkpoint: false
   strict: true
   use_lora: true
   layers_with_lora: ['region_embed', 'encoder']
-  checkpoint: "/pmglocal/alb2281/get/get_ckpts/fetal_v1_astrocyte_watac.pth"
+  checkpoint: "/pmglocal/alb2281/get/get_ckpts/natac_checkpoint_best.pth"
   patterns_to_freeze: []
   model_key: 'model'
 
