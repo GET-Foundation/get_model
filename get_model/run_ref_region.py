@@ -490,7 +490,7 @@ def _run(cfg: DictConfig, dm: ReferenceRegionDataModule):
         accelerator = 'gpu'
         device = cfg.machine.num_devices
         if cfg.machine.num_devices > 1:
-            strategy = 'ddp_spawn'
+            strategy = 'ddp'
     else:
         strategy = 'auto'
         accelerator = 'cpu'
@@ -521,7 +521,7 @@ def _run(cfg: DictConfig, dm: ReferenceRegionDataModule):
         trainer.fit(model, datamodule=dm, ckpt_path=cfg.finetune.resume_ckpt)
     if cfg.stage == 'validate':
         trainer.validate(model, datamodule=dm,
-                         ckpt_path=cfg.fintune.resume_ckpt)
+                         ckpt_path=cfg.finetune.resume_ckpt)
     if cfg.stage == 'predict':
         trainer.predict(model, datamodule=dm,
                         ckpt_path=cfg.finetune.resume_ckpt)

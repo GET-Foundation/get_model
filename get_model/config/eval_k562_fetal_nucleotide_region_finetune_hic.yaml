@@ -22,7 +22,7 @@ training:
 
 dataset:
   quantitative_atac: true
-  sampling_step: 10
+  sampling_step: 100
   mask_ratio: 0
 
 optimizer:
