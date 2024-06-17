@@ -1,9 +1,9 @@
 defaults:
   - base_ref_region_config
-  - model/GETRegionFinetuneExpHiCAxial@_here_
-  - machine/manitou
+  - model/GETNucleotideRegionFinetuneExpHiCABC@_here_
+  - machine/pc
   - finetune/v1_finetune@finetune
-  - dataset/k562_hic_distance_map@dataset
+  - dataset/k562_nucleotide_region_finetune_hic@dataset
   - _self_
 
 assembly: "hg38"
@@ -22,11 +22,11 @@ training:
 
 dataset:
   quantitative_atac: true
-  sampling_step: 100
+  sampling_step: 10
   mask_ratio: 0
 
 optimizer:
-  lr: 0.0001
+  lr: 0.001
   min_lr: 0.000001
   weight_decay: 0.05
   opt: "adamw"
@@ -34,14 +34,14 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune_k562_abc_axial"
-  run_name: "debug"
+  project_name: "nucleotide_region_finetune"
+  run_name: "NTToHiC"
 
 finetune:
   pretrain_checkpoint: false
-  strict: true
+  strict: false
   use_lora: true
-  layers_with_lora: ['region_embed', 'head_exp', 'encoder.blocks']
+  layers_with_lora: ['head_exp', 'encoder']
   checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth"
   patterns_to_freeze: ['distance_contact_map']
   model_key: 'model'
@@ -51,11 +51,15 @@ finetune:
       strict: false
       rename_config:
         model.: distance_contact_map.
-  #   - checkpoint: GETRegionFinetune_k562_abc/k6tj3d9k/checkpoints/best.ckpt
-  #     model_key: 'state_dict'
-  #     strict: false
-  #     rename_config:
-  #       model.: abc.contact_map.
+    - checkpoint: "nucleotide_motif_adaptor/04tta98y/checkpoints/best.ckpt"
+      model_key: 'state_dict'
+      strict: false
+      rename_config:
+        model.motif_scanner.: motif_scanner.
+        model.conv_blocks.: conv_blocks.
+        model.atac_attention.: atac_attention.
+        model.proj.: proj.
+
 
 eval_tss: true
 log_image: false

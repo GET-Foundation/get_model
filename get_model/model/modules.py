@@ -208,7 +208,7 @@ class MotifScanner(BaseModule):
         elif self.include_reverse_complement:
             x = x[:, :637, :] + x[:, 637:, :]  # output should be 637 dim
         x = x.permute(0, 2, 1)
-        if motif_mean_std is not None:
+        if motif_mean_std is not None and self.motif_prior:
             x = self.normalize_motif(x, motif_mean_std)
         x = F.relu(x)
         return x
@@ -1014,3 +1014,21 @@ class ATACSplitPoolMaxNorm(ATACSplitPool):
             x = self.final_bn(x.transpose(1, 2)).transpose(1, 2)
 
         return x
+
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+        """A resnet block"""
+        super(ConvBlock, self).__init__()
+        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.batch_norm1 = nn.BatchNorm1d(out_channels)
+        self.batch_norm2 = nn.BatchNorm1d(out_channels)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.batch_norm1(out)
+        out = F.relu(out)
+        out = self.conv2(out)
+        out = self.batch_norm2(out)
+        out = F.relu(out+x)
+        return out

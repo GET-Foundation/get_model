@@ -465,7 +465,7 @@ class GETTransformerWithContactMapAxial(GETTransformer):
                     act_layer=nn.GELU,
                     norm_layer=norm_layer,
                 )
-                for i in range(num_layers//2)
+                for i in range(num_layers//3)
             ]
         )
     def forward(self, x, distance_map, mask=None, return_attns=False, bias=None):

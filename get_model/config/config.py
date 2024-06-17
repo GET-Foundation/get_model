@@ -126,6 +126,7 @@ class WandbConfig:
 
 @dataclass
 class FinetuneConfig:
+    resume_ckpt: str | None = None
     pretrain_checkpoint: bool = False
     checkpoint: str | None = None
     strict: bool = True

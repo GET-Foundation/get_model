@@ -1,0 +1,71 @@
+model:
+  _target_: get_model.model.model_refactored.GETNucleotideRegionFinetuneExpHiCABC
+  cfg:
+    num_regions: 200
+    num_motif: 283
+    embed_dim: 768
+    num_layers: 12
+    num_heads: 12
+    dropout: 0.1
+    output_dim: 2
+    flash_attn: false
+    pool_method: "mean"
+    distance_contact_map:
+      freezed: true
+    motif_scanner:
+      num_motif: 128
+      include_reverse_complement: false
+      bidirectional_except_ctcf: false
+      motif_prior: false
+      learnable: true
+      has_bias: true
+    atac_attention:
+      motif_dim: 128 
+      pool_method: "sum"
+    encoder:
+      num_heads: ${model.cfg.num_heads}
+      embed_dim: ${model.cfg.embed_dim}
+      num_layers: ${model.cfg.num_layers}
+      drop_path_rate: ${model.cfg.dropout}
+      drop_rate: 0
+      attn_drop_rate: 0
+      use_mean_pooling: false
+      flash_attn: ${model.cfg.flash_attn}
+    head_exp:
+      embed_dim: ${model.cfg.embed_dim}
+      output_dim: ${model.cfg.output_dim}
+      use_atac: false
+    header_hic:
+      input_dim: 128
+      hidden_dim: 64
+      output_dim: 1
+    header_abc:
+      input_dim: 128
+      hidden_dim: 64
+      output_dim: 1
+    mask_token:
+      embed_dim: ${model.cfg.embed_dim}
+      std: 0.02
+    loss:
+      components:
+        exp:
+          _target_: torch.nn.PoissonNLLLoss
+          reduction: "mean"
+          log_input: False
+        hic:
+          _target_: torch.nn.PoissonNLLLoss
+          reduction: "mean"
+          log_input: False
+        # abc:
+        #   _target_: torch.nn.PoissonNLLLoss
+        #   reduction: "mean"
+        #   log_input: False
+      weights:
+        exp: 0.1
+        hic: 1.0
+        # abc: 1.0
+    metrics:
+      components:
+        exp: ["pearson", "spearman", "r2"]
+        hic: ["pearson", "spearman", "r2"]
+        # abc: ["pearson", "spearman", "r2"]

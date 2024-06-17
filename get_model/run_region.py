@@ -120,7 +120,7 @@ class RegionLitModel(LitModel):
         # check for nan
         if torch.isnan(pred['exp']).any() or torch.isnan(obs['exp']).any():
             return
-        
+
         metrics = self.metrics(pred, obs)
         if batch_idx == 0 and self.cfg.log_image:
             # log one example as scatter plot
@@ -180,7 +180,7 @@ class RegionLitModel(LitModel):
                         checkpoint_model)
                     model.load_state_dict(checkpoint_model, strict=strict)
         model.freeze_layers(
-          patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
+            patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         print("Model = %s" % str(model))
         return model
 
