@@ -191,5 +191,5 @@ def everything_collate(batch):
     zarr_batch = get_rev_collate_fn(batch['zarr'], reverse_complement=False)
     rrd_batch = default_collate(batch['rrd'])
     # merge the two batches
-    rrd_batch.update(zarr_batch)
-    return rrd_batch
+    zarr_batch.update(rrd_batch)
+    return zarr_batch

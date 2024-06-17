@@ -210,7 +210,10 @@ class RegionLitModel(LitModel):
                 return
             # check for nan
             if torch.isnan(pred['exp']).any() or torch.isnan(obs['exp']).any():
-                return
+                # nan to 0
+                pred['exp'][torch.isnan(pred['exp'])] = 0
+                obs['exp'][torch.isnan(pred['exp'])] = 0
+                # return
         metrics = self.metrics(pred, obs)
         if batch_idx == 0 and self.cfg.log_image:
             # log one example as scatter plot
