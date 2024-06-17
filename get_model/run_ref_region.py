@@ -52,6 +52,28 @@ class ReferenceRegionDataModule(GETDataModule):
     def build_inference_reference_region_dataset(self, zarr_dataset):
         return InferenceReferenceRegionDataset(self.reference_region_motif, zarr_dataset, quantitative_atac=self.cfg.dataset.quantitative_atac, sampling_step=self.cfg.dataset.sampling_step)
 
+    def setup(self, stage=None):
+        super().setup(stage)
+        if stage == 'fit' or stage is None:
+            self.dataset_train = self.build_from_zarr_dataset(
+                self.dataset_train)
+            self.dataset_val = self.build_from_zarr_dataset(self.dataset_val)
+        if stage == 'predict':
+            if self.cfg.task.test_mode == 'predict':
+                self.dataset_predict = self.build_from_zarr_dataset(
+                    self.dataset_predict)
+            elif self.cfg.task.test_mode == 'inference' or self.cfg.task.test_mode == 'interpret' or self.cfg.task.test_mode == 'interpret_captum':
+                self.dataset_predict = self.build_inference_reference_region_dataset(
+                    self.dataset_predict)
+            elif 'perturb' in self.cfg.task.test_mode:
+                self.mutations = pd.read_csv(self.cfg.task.mutations, sep='\t')
+                perturb_mode = 'mutation' if 'mutation' in self.cfg.task.test_mode else 'peak_inactivation'
+                self.dataset_predict = self.build_perturbation_inference_dataset(
+                    self.dataset_predict.inference_dataset, self.mutations, mode=perturb_mode
+                )
+        if stage == 'validate':
+            self.dataset_val = self.build_from_zarr_dataset(self.dataset_val)
+
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
             self.dataset_train,
@@ -105,7 +127,7 @@ class EverythingDataModule(ReferenceRegionDataModule):
         return PerturbationInferenceReferenceRegionDataset(inference_dataset, perturbations, mode=mode)
 
     def setup(self, stage=None):
-        super().setup(stage)
+        super().super().setup(stage)
         if stage == 'fit' or stage is None:
             self.dataset_train = self.build_from_zarr_dataset(
                 self.dataset_train)
@@ -170,7 +192,7 @@ class RegionLitModel(LitModel):
         super().__init__(cfg)
         self.min_exp_loss = float('inf')
         self.exp_overfit_count = 0
-        self.exp_overfit_threshold = 1
+        self.exp_overfit_threshold = 4
 
     def validation_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='val')
