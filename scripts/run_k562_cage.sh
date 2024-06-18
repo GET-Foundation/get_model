@@ -1,7 +1,7 @@
 #!/bin/bash
-project_name="get-gbm-dea-lora_watac"
-checkpoint="/pmglocal/alb2281/get/get_ckpts/gbm_Tumor_C3L-03405_lora_watac.ckpt"
-output_dir="/pmglocal/alb2281/get/output/watac-oneshot-gbm"
+project_name="get-k562-cage-lora_watac"
+checkpoint="/pmglocal/alb2281/get/get_ckpts/k562_cage_lora_watac_best.ckpt"
+output_dir="/pmglocal/alb2281/get/output/"
 
 sample_list_file="/pmglocal/alb2281/get/get_data/gbm_samples.txt"
 # read the sample list file into an array

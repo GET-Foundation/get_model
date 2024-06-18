@@ -42,7 +42,7 @@ finetune:
   pretrain_checkpoint: false
   strict: false
   use_lora: true
-  layers_with_lora: ['region_embed', 'encoder']
+  layers_with_lora: ['region_embed', 'head_exp', 'encoder']
   checkpoint: "/pmglocal/alb2281/get/get_ckpts/watac_checkpoint_best.pth"
   patterns_to_freeze: []
   model_key: 'model'

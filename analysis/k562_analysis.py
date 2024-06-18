@@ -20,6 +20,15 @@ cage_peaks = cdz.get_peaks('k562.encode_hg38atac.ENCFF128WZG_cage.max', name='pe
 #%%
 cage_values = cage_peaks[['Expression_positive', 'Expression_negative']].values
 
+# %%
+merged_df = rna_peaks.merge(cage_peaks, on=['Chromosome', 'Start', 'End'], suffixes=('_rna', '_cage'))
+
+# %%
+sns.scatterplot(data=merged_df, x='Expression_positive_cage', y='Expression_positive_rna', s=1)
+
+# Compute pearson between cage and rna expression
+merged_df[['Expression_positive_cage', 'Expression_positive_rna']].corr()
+merged_df[['Expression_negative_cage', 'Expression_negative_rna']].corr()
 #%%
 chr_order = ['chr1', 'chr2', 'chr3', 'chr4', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9', 'chr10', 'chr11', 'chr12', 'chr13', 'chr14', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chrX']
 # reorder cage_peaks
