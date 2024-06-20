@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETNucleotideRegionFinetuneExpHiCABC
+  _target_: get_model.model.model_refactored.GETNucleotideRegionFinetuneATAC
   cfg:
     num_regions: 200
     num_motif: 283
@@ -7,11 +7,9 @@ model:
     num_layers: 12
     num_heads: 12
     dropout: 0.1
-    output_dim: 2
+    output_dim: 1
     flash_attn: false
     pool_method: "mean"
-    distance_contact_map:
-      freezed: true
     motif_scanner:
       num_motif: 128
       include_reverse_complement: false
@@ -35,46 +33,23 @@ model:
       attn_drop_rate: 0
       use_mean_pooling: false
       flash_attn: ${model.cfg.flash_attn}
-    head_exp:
+    head_atpm:
       embed_dim: ${model.cfg.embed_dim}
       output_dim: ${model.cfg.output_dim}
-      use_atac: false
-    header_hic:
-      input_dim: 128
-      hidden_dim: 64
-      output_dim: 1
-    header_abc:
-      input_dim: 128
-      hidden_dim: 64
-      output_dim: 1
+      hidden_dim: 256
+      drop: ${model.cfg.dropout}
     mask_token:
       embed_dim: ${model.cfg.embed_dim}
       std: 0.02
     loss:
       components:
-        exp:
+        atpm:
           _target_: torch.nn.PoissonNLLLoss
           reduction: "mean"
           log_input: False
-        hic:
-          _target_: torch.nn.PoissonNLLLoss
-          reduction: "mean"
-          log_input: False
-        motif:
-          _target_: torch.nn.MSELoss
-          reduction: "mean"
-        # abc:
-        #   _target_: torch.nn.PoissonNLLLoss
-        #   reduction: "mean"
-        #   log_input: False
+
       weights:
-        exp: 1.0
-        hic: 1.0
-        motif: 1.0
-        # abc: 1.0
+        atpm: 1.0
     metrics:
       components:
-        exp: ["pearson", "spearman", "r2"]
-        hic: ["pearson", "spearman", "r2"]
-        motif: ["pearson", "spearman", "r2"]
-        # abc: ["pearson", "spearman", "r2"]
+        atpm: ["pearson", "spearman", "r2"]

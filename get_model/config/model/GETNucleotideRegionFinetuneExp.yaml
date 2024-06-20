@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETNucleotideRegionFinetuneExpHiCABC
+  _target_: get_model.model.model_refactored.GETNucleotideRegionFinetuneExp
   cfg:
     num_regions: 200
     num_motif: 283
@@ -39,14 +39,6 @@ model:
       embed_dim: ${model.cfg.embed_dim}
       output_dim: ${model.cfg.output_dim}
       use_atac: false
-    header_hic:
-      input_dim: 128
-      hidden_dim: 64
-      output_dim: 1
-    header_abc:
-      input_dim: 128
-      hidden_dim: 64
-      output_dim: 1
     mask_token:
       embed_dim: ${model.cfg.embed_dim}
       std: 0.02
@@ -56,25 +48,9 @@ model:
           _target_: torch.nn.PoissonNLLLoss
           reduction: "mean"
           log_input: False
-        hic:
-          _target_: torch.nn.PoissonNLLLoss
-          reduction: "mean"
-          log_input: False
-        motif:
-          _target_: torch.nn.MSELoss
-          reduction: "mean"
-        # abc:
-        #   _target_: torch.nn.PoissonNLLLoss
-        #   reduction: "mean"
-        #   log_input: False
+
       weights:
         exp: 1.0
-        hic: 1.0
-        motif: 1.0
-        # abc: 1.0
     metrics:
       components:
         exp: ["pearson", "spearman", "r2"]
-        hic: ["pearson", "spearman", "r2"]
-        motif: ["pearson", "spearman", "r2"]
-        # abc: ["pearson", "spearman", "r2"]

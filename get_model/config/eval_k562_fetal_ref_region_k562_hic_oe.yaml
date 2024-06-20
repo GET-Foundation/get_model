@@ -1,9 +1,9 @@
 defaults:
   - base_ref_region_config
-  - model/GETNucleotideMotifAdaptor@_here_
+  - model/GETRegionFinetuneHiCOE@_here_
   - machine/pc
   - finetune/v1_finetune@finetune
-  - dataset/k562_nucleotide_adaptor@dataset
+  - dataset/k562_hic_oe@dataset
   - _self_
 
 assembly: "hg38"
@@ -21,12 +21,12 @@ training:
   use_fp16: false
 
 dataset:
-  quantitative_atac: true
-  sampling_step: 10
+  quantitative_atac: false
+  sampling_step: 100
   mask_ratio: 0
 
 optimizer:
-  lr: 0.001
+  lr: 0.0001
   min_lr: 0.000001
   weight_decay: 0.05
   opt: "adamw"
@@ -34,17 +34,23 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "nucleotide_motif_adaptor"
-  run_name: "NTToQATAC_ENCFF998SLH"
+  project_name: "GETRegionFinetune_k562_hic_oe"
+  run_name: "debug"
 
 finetune:
-  pretrain_checkpoint: false
+  pretrain_checkpoint: true
   strict: false
   use_lora: false
-  checkpoint: /home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth
-  patterns_to_freeze: []
+  layers_with_lora: ['region_embed', 'encoder']
+  checkpoint: null
+  patterns_to_freeze: ['distance_contact_map']
   model_key: 'model'
 
+  #   - checkpoint: GETRegionFinetune_k562_abc/k6tj3d9k/checkpoints/best.ckpt
+  #     model_key: 'state_dict'
+  #     strict: false
+  #     rename_config:
+  #       model.: abc.contact_map.
 
 eval_tss: true
 log_image: false

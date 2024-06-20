@@ -10,7 +10,7 @@ from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig
 from torch.nn.init import trunc_normal_
 
-from get_model.model.modules import (ATACHead, ContactMapHead, ContactMapHeadConfig, ConvBlock, DistanceContactHead, DistanceContactHeadConfig, HiCHead, HiCHeadConfig,
+from get_model.model.modules import (ATACHead, ATACHeadConfig, ContactMapHead, ContactMapHeadConfig, ConvBlock, DistanceContactHead, DistanceContactHeadConfig, HiCHead, HiCHeadConfig,
                                      ATACSplitPool,
                                      ATACSplitPoolConfig, ATACSplitPoolMaxNorm,
                                      ATACSplitPoolMaxNormConfig, BaseConfig,
@@ -19,7 +19,7 @@ from get_model.model.modules import (ATACHead, ContactMapHead, ContactMapHeadCon
                                      MotifScanner, MotifScannerConfig,
                                      RegionEmbed, RegionEmbedConfig, SplitPool, SplitPoolConfig)
 from get_model.model.position_encoding import AbsolutePositionalEncoding
-from get_model.model.transformer import GETTransformer, GETTransformerWithContactMap, GETTransformerWithContactMapAxial
+from get_model.model.transformer import GETTransformer, GETTransformerWithContactMap, GETTransformerWithContactMapAxial, GETTransformerWithContactMapOE
 
 
 class MNLLLoss(nn.Module):
@@ -879,28 +879,28 @@ class GETRegionFinetuneExpHiCABC(BaseGETModel):
         # test if batch['hic_matrix'] has shape and not a scalar
         if len(batch['hic_matrix'][0].shape) >= 2:
             hic = batch['hic_matrix'].float()
-            real_hic=True
+            real_hic = True
         else:
             logging.info(
                 f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
             hic = self.distance_contact_map(
                 batch['distance_map']).detach().squeeze(1)
-            real_hic=False
-        abc = atac * hic
+            real_hic = False
+        # abc = atac * hic
         pred = {
             'exp': exp,
-            # 'hic': hic_contact_map,
-            'abc': abc_contact_map,
+            'hic': hic_contact_map,
+            # 'abc': abc_contact_map,
         }
         obs = {
             'exp': batch['exp_label'],
-            # 'hic': hic,
-            'abc': abc,
+            'hic': hic,
+            # 'abc': abc,
         }
         if real_hic:
             mask = hic.sum(1).sum(1) == 0
-            # obs['hic'][mask] = pred['hic'][mask].detach()
-            obs['abc'][mask] = pred['abc'][mask].detach()
+            obs['hic'][mask] = pred['hic'][mask].detach()
+            # obs['abc'][mask] = pred['abc'][mask].detach()
         return pred, obs
 
     def generate_dummy_data(self):
@@ -909,6 +909,95 @@ class GETRegionFinetuneExpHiCABC(BaseGETModel):
             'region_motif': torch.randn(B, R, M).float().abs(),
             'distance_map': torch.randn(B, R, R).float(),
         }
+
+
+@dataclass
+class GETRegionFinetuneHiCOEConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    header_hic: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    distance_contact_map: DistanceContactHeadConfig = field(
+        default_factory=DistanceContactHeadConfig)
+
+
+class GETRegionFinetuneHiCOE(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneHiCOEConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformerWithContactMapOE(**cfg.encoder)
+        self.hic_header = ContactMapHead(cfg.header_hic, activation='none')
+        self.distance_contact_map = DistanceContactHead(
+            cfg.distance_contact_map)
+        self.distance_contact_map.eval()
+        self.proj_distance = nn.Linear(cfg.embed_dim, 128)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        logging.info(
+            f"GETRegionFinetuneExpHiCABC can only be used with quantitative_atac=True in order to generate the ABC score.")
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+        peak_coord = batch['peak_coord']
+        peak_coord_mean = peak_coord[:, :, 0]
+        # pair-wise distance using torch
+        # Add new dimensions to create column and row vectors
+        peak_coord_mean_col = peak_coord_mean.unsqueeze(
+            2)  # Adds a new axis (column vector)
+        peak_coord_mean_row = peak_coord_mean.unsqueeze(
+            1)  # Adds a new axis (row vector)
+
+        # Compute the pairwise difference
+        distance = torch.log10(
+            (peak_coord_mean_col - peak_coord_mean_row).abs() + 1).unsqueeze(1)
+        region_model = batch['region_motif'].clone()
+        batch['distance_map'] = distance
+        # region_model[:, :, -1] = 1 # set atac to binary
+        return {
+            'region_motif': region_model,
+            'distance_map': distance,
+        }
+
+    def forward(self, region_motif, distance_map):
+        x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, fused_distance_map, _ = self.encoder(x, distance_map)
+        # x = x[:, 1:]
+        fused_distance_map = self.proj_distance(
+            fused_distance_map).transpose(1, 3).transpose(2, 3)
+        hic = self.hic_header(fused_distance_map).squeeze(1)
+        return hic
+
+    def before_loss(self, output, batch):
+        hic_contact_map = output
+        if len(batch['hic_matrix'][0].shape) >= 2:
+            hic = batch['hic_matrix'].to(torch.float16)
+            real_hic = True
+        else:
+            logging.info(
+                f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
+            hic = self.distance_contact_map(
+                batch['distance_map']).detach().squeeze(1)
+            real_hic = False
+        pred = {
+            'hic': hic_contact_map,
+        }
+        obs = {
+            'hic': hic,
+        }
+        if real_hic:
+            mask = (hic==0)
+            obs['hic'][mask] = pred['hic'][mask].detach()
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+            'distance_map': torch.randn(B, R, R).float(),
+        }
+
 
 @dataclass
 class GETRegionFinetuneExpHiCAxialModelConfig(BaseGETModelConfig):
@@ -971,7 +1060,7 @@ class GETRegionFinetuneExpHiCAxial(BaseGETModel):
         x = x[:, 1:]
         exp = nn.Softplus()(self.head_exp(x))
         fused_distance_map = self.proj_distance(
-            fused_distance_map)#.transpose(1, 3).transpose(2, 3)
+            fused_distance_map)  # .transpose(1, 3).transpose(2, 3)
         # hic = self.hic_header(fused_distance_map).squeeze(1)
         # abc = self.abc_header(fused_distance_map).squeeze(1)
         return exp, fused_distance_map.squeeze(3)
@@ -984,13 +1073,13 @@ class GETRegionFinetuneExpHiCAxial(BaseGETModel):
         # test if batch['hic_matrix'] has shape and not a scalar
         if len(batch['hic_matrix'][0].shape) >= 2:
             hic = batch['hic_matrix'].float()
-            real_hic=True
+            real_hic = True
         else:
             logging.info(
                 f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
             hic = self.distance_contact_map(
                 batch['distance_map']).detach().squeeze(1)
-            real_hic=False
+            real_hic = False
         # abc = atac * hic
         pred = {
             'exp': exp,
@@ -1156,6 +1245,7 @@ class GETChrombpNet(GETChrombpNetBias):
             aprofile = aprofile + bias_aprofile
         return {'atpm': atpm, 'aprofile': aprofile}
 
+
 @dataclass
 class GETNucleotideMotifAdaptor(BaseGETModelConfig):
     motif_scanner: MotifScannerConfig = field(
@@ -1163,21 +1253,26 @@ class GETNucleotideMotifAdaptor(BaseGETModelConfig):
     atac_attention: SplitPoolConfig = field(
         default_factory=SplitPoolConfig)
     region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
-    
+
+
 class GETNucleotideMotifAdaptor(BaseGETModel):
     def __init__(self, cfg: GETNucleotideMotifAdaptor):
         super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
         self.conv_blocks = nn.ModuleList([
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
             ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif)
         ])
         self.atac_attention = SplitPool(cfg.atac_attention)
         self.region_embed = RegionEmbed(cfg.region_embed)
         self.region_embed.eval()
-        self.proj = nn.Linear(cfg.motif_scanner.num_motif, cfg.region_embed.embed_dim)
+        self.proj = nn.Linear(cfg.motif_scanner.num_motif,  # (B,R,M ->B,R,D)
+                              cfg.region_embed.embed_dim)
         self.apply(self._init_weights)
 
     def get_input(self, batch):
@@ -1186,7 +1281,6 @@ class GETNucleotideMotifAdaptor(BaseGETModel):
                 'chunk_size': batch['chunk_size'],
                 'n_peaks': batch['n_peaks'],
                 'max_n_peaks': batch['max_n_peaks']}
-
 
     def forward(self, sample_peak_sequence, sample_track, chunk_size, n_peaks, max_n_peaks):
         x = self.motif_scanner(sample_peak_sequence)
@@ -1213,35 +1307,41 @@ class GETNucleotideMotifAdaptor(BaseGETModel):
             'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
         }
 
-from dataclasses import dataclass, field
-import torch
-import torch.nn as nn
-import logging
 
 @dataclass
 class GETNucleotideRegionFinetuneExpHiCAxialModelConfig(BaseGETModelConfig):
-    motif_scanner: MotifScannerConfig = field(default_factory=MotifScannerConfig)
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
     atac_attention: SplitPoolConfig = field(default_factory=SplitPoolConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
-    head_exp: ExpressionHeadConfig = field(default_factory=ExpressionHeadConfig)
-    header_hic: ContactMapHeadConfig = field(default_factory=ContactMapHeadConfig)
-    header_abc: ContactMapHeadConfig = field(default_factory=ContactMapHeadConfig)
-    distance_contact_map: DistanceContactHeadConfig = field(default_factory=DistanceContactHeadConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    header_hic: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    header_abc: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    distance_contact_map: DistanceContactHeadConfig = field(
+        default_factory=DistanceContactHeadConfig)
+
 
 class GETNucleotideRegionFinetuneExpHiCAxial(BaseGETModel):
     def __init__(self, cfg: GETNucleotideRegionFinetuneExpHiCAxialModelConfig):
         super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
         self.conv_blocks = nn.ModuleList([
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
             ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif)
         ])
         self.atac_attention = SplitPool(cfg.atac_attention)
         self.encoder = GETTransformerWithContactMapAxial(**cfg.encoder)
         self.head_exp = ExpressionHead(cfg.head_exp)
-        self.distance_contact_map = DistanceContactHead(cfg.distance_contact_map)
+        self.distance_contact_map = DistanceContactHead(
+            cfg.distance_contact_map)
         self.distance_contact_map.eval()
         self.proj_distance = nn.Linear(cfg.embed_dim, 1)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
@@ -1263,7 +1363,7 @@ class GETNucleotideRegionFinetuneExpHiCAxial(BaseGETModel):
         chunk_size = batch['chunk_size']
         n_peaks = batch['n_peaks']
         max_n_peaks = batch['max_n_peaks']
-        
+
         batch['distance_map'] = distance
         return {
             'sample_peak_sequence': sample_peak_sequence,
@@ -1303,7 +1403,8 @@ class GETNucleotideRegionFinetuneExpHiCAxial(BaseGETModel):
         else:
             logging.info(
                 f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
-            hic = self.distance_contact_map(batch['distance_map']).detach().squeeze(1)
+            hic = self.distance_contact_map(
+                batch['distance_map']).detach().squeeze(1)
             real_hic = False
 
         pred = {
@@ -1330,35 +1431,223 @@ class GETNucleotideRegionFinetuneExpHiCAxial(BaseGETModel):
             'peak_coord': torch.randn(B, R, 1).float(),
             'distance_map': torch.randn(B, R, R).float(),
         }
+
+@dataclass
+class GETNucleotideRegionFinetuneExpConfig(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: SplitPoolConfig = field(default_factory=SplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
     
+
+class GETNucleotideRegionFinetuneExp(BaseGETModel):
+    def __init__(self, cfg: GETNucleotideRegionFinetuneExpConfig):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        self.conv_blocks = nn.ModuleList([
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif)
+        ])
+        self.atac_attention = SplitPool(cfg.atac_attention)
+        self.proj = nn.Linear(cfg.motif_scanner.num_motif, cfg.embed_dim)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+
+        sample_peak_sequence = batch['sample_peak_sequence']
+        sample_track = batch['sample_track']
+        chunk_size = batch['chunk_size']
+        n_peaks = batch['n_peaks']
+        max_n_peaks = batch['max_n_peaks']
+
+        return {
+            'sample_peak_sequence': sample_peak_sequence,
+            'sample_track': sample_track,
+            'chunk_size': chunk_size,
+            'n_peaks': n_peaks,
+            'max_n_peaks': max_n_peaks,
+        }
+
+    def forward(self, sample_peak_sequence, sample_track, chunk_size, n_peaks, max_n_peaks):
+        x = self.motif_scanner(sample_peak_sequence)
+        x = x.permute(0, 2, 1)
+        for conv in self.conv_blocks:
+            x = conv(x)
+        x = x.permute(0, 2, 1)
+        x = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+        x = self.proj(x)
+
+
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, _ = self.encoder(x)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        return exp
+
+    def before_loss(self, output, batch):
+        pred = {
+            'exp': output,
+        }
+        obs = {
+            'exp': batch['exp_label'],
+        }
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, L = 2, 1, 2000
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'sample_track': torch.randn(B, R, 283).float(),
+            'chunk_size': torch.tensor([R]),
+            'n_peaks': torch.tensor([R]),
+            'max_n_peaks': torch.tensor([R]),
+            'peak_coord': torch.randn(B, R, 1).float(),
+            'distance_map': torch.randn(B, R, R).float(),
+        }
+
+
+
+@dataclass
+class GETNucleotideRegionFinetuneATACConfig(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: SplitPoolConfig = field(default_factory=SplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_atpm: ATACHeadConfig = field(
+        default_factory=ATACHeadConfig)
+    
+
+class GETNucleotideRegionFinetuneATAC(BaseGETModel):
+    def __init__(self, cfg: GETNucleotideRegionFinetuneATACConfig):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        self.conv_blocks = nn.ModuleList([
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif)
+        ])
+        self.atac_attention = SplitPool(cfg.atac_attention)
+        self.proj = nn.Linear(cfg.motif_scanner.num_motif, cfg.embed_dim)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_atpm = ATACHead(cfg.head_atpm)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+
+        sample_peak_sequence = batch['sample_peak_sequence']
+        sample_track = batch['sample_track']
+        chunk_size = batch['chunk_size']
+        n_peaks = batch['n_peaks']
+        max_n_peaks = batch['max_n_peaks']
+
+        return {
+            'sample_peak_sequence': sample_peak_sequence,
+            'sample_track': sample_track,
+            'chunk_size': chunk_size,
+            'n_peaks': n_peaks,
+            'max_n_peaks': max_n_peaks,
+        }
+
+    def forward(self, sample_peak_sequence, sample_track, chunk_size, n_peaks, max_n_peaks):
+        x = self.motif_scanner(sample_peak_sequence)
+        x = x.permute(0, 2, 1)
+        for conv in self.conv_blocks:
+            x = conv(x)
+        x = x.permute(0, 2, 1)
+        x = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+        x = self.proj(x)
+
+
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, _ = self.encoder(x)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_atpm(x))
+        return exp
+
+    def before_loss(self, output, batch):
+        pred = {
+            'atpm': output.squeeze(2),
+        }
+        obs = {
+            'atpm': batch['atpm'],
+        }
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, L = 2, 1, 2000
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'sample_track': torch.randn(B, R, 283).float(),
+            'chunk_size': torch.tensor([R]),
+            'n_peaks': torch.tensor([R]),
+            'max_n_peaks': torch.tensor([R]),
+            'peak_coord': torch.randn(B, R, 1).float(),
+            'distance_map': torch.randn(B, R, R).float(),
+        }
+
+
 
 @dataclass
 class GETNucleotideRegionFinetuneExpHiCABCConfig(BaseGETModelConfig):
-    motif_scanner: MotifScannerConfig = field(default_factory=MotifScannerConfig)
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
     atac_attention: SplitPoolConfig = field(default_factory=SplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
-    head_exp: ExpressionHeadConfig = field(default_factory=ExpressionHeadConfig)
-    header_hic: ContactMapHeadConfig = field(default_factory=ContactMapHeadConfig)
-    header_abc: ContactMapHeadConfig = field(default_factory=ContactMapHeadConfig)
-    distance_contact_map: DistanceContactHeadConfig = field(default_factory=DistanceContactHeadConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    header_hic: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    header_abc: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    distance_contact_map: DistanceContactHeadConfig = field(
+        default_factory=DistanceContactHeadConfig)
+
 
 class GETNucleotideRegionFinetuneExpHiCABC(BaseGETModel):
     def __init__(self, cfg: GETNucleotideRegionFinetuneExpHiCABCConfig):
         super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
         self.conv_blocks = nn.ModuleList([
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
             ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif)
         ])
         self.atac_attention = SplitPool(cfg.atac_attention)
         self.proj = nn.Linear(cfg.motif_scanner.num_motif, cfg.embed_dim)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.region_embed.eval()
         self.encoder = GETTransformerWithContactMap(**cfg.encoder)
         self.head_exp = ExpressionHead(cfg.head_exp)
         self.hic_header = ContactMapHead(cfg.header_hic)
         self.abc_header = ContactMapHead(cfg.header_abc)
-        self.distance_contact_map = DistanceContactHead(cfg.distance_contact_map)
+        self.distance_contact_map = DistanceContactHead(
+            cfg.distance_contact_map)
         self.distance_contact_map.eval()
         self.proj_distance = nn.Linear(cfg.embed_dim, 128)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
@@ -1379,7 +1668,7 @@ class GETNucleotideRegionFinetuneExpHiCABC(BaseGETModel):
         chunk_size = batch['chunk_size']
         n_peaks = batch['n_peaks']
         max_n_peaks = batch['max_n_peaks']
-        
+
         batch['distance_map'] = distance
         return {
             'sample_peak_sequence': sample_peak_sequence,
@@ -1398,6 +1687,8 @@ class GETNucleotideRegionFinetuneExpHiCABC(BaseGETModel):
         x = x.permute(0, 2, 1)
         x = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
         x = self.proj(x)
+        motif = x.clone()
+
 
         B, N, C = x.shape
         cls_tokens = self.cls_token.expand(B, -1, -1)
@@ -1405,13 +1696,14 @@ class GETNucleotideRegionFinetuneExpHiCABC(BaseGETModel):
         x, fused_distance_map, _ = self.encoder(x, distance_map)
         x = x[:, 1:]
         exp = nn.Softplus()(self.head_exp(x))
-        fused_distance_map = self.proj_distance(fused_distance_map).transpose(1, 3).transpose(2, 3)
+        fused_distance_map = self.proj_distance(
+            fused_distance_map).transpose(1, 3).transpose(2, 3)
         hic = self.hic_header(fused_distance_map).squeeze(1)
         abc = self.abc_header(fused_distance_map).squeeze(1)
-        return exp, hic, abc
+        return exp, hic, abc, motif
 
     def before_loss(self, output, batch):
-        exp, hic_contact_map, abc_contact_map = output
+        exp, hic_contact_map, abc_contact_map, motif = output
         # atac = batch['sample_track'][:, :, -1]
         # atac = torch.sqrt(atac.unsqueeze(1) * atac.unsqueeze(2))
 
@@ -1421,17 +1713,20 @@ class GETNucleotideRegionFinetuneExpHiCABC(BaseGETModel):
         else:
             logging.info(
                 f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
-            hic = self.distance_contact_map(batch['distance_map']).detach().squeeze(1)
+            hic = self.distance_contact_map(
+                batch['distance_map']).detach().squeeze(1)
             real_hic = False
         # abc = atac * hic
         pred = {
             'exp': exp,
             'hic': hic_contact_map,
+            'motif': motif,
             # 'abc': abc_contact_map,
         }
         obs = {
             'exp': batch['exp_label'],
             'hic': hic,
+            'motif': self.region_embed(batch['region_motif']).detach()
             # 'abc': abc,
         }
         if real_hic:

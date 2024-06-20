@@ -2,7 +2,7 @@ zarr_dirs:
   - "encode_hg38atac_dense.zarr"
 keep_celltypes: "k562.encode_hg38atac.ENCFF257HEE.max"
 leave_out_celltypes: null
-leave_out_chromosomes: "chr14"
+leave_out_chromosomes: "chr10"
 peak_name: "peaks_q0.05_fetal_joint_tissue_open_exp"
 dataset_size: 40960
 eval_dataset_size: 512
@@ -23,7 +23,7 @@ n_packs: 1
 padding: 0
 mask_ratio: 0
 insulation_subsample_ratio: 1
-hic_path: /home/xf2217/Projects/encode_hg38atac/raw/ENCFF621AIY.hic
+hic_path: null #/home/xf2217/Projects/encode_hg38atac/raw/ENCFF621AIY.hic
 reference_region_motif:
   root: "/home/xf2217/Projects/get_data/"
   data: "k562.ENCFF257HEE.encode_hg38atac.peak_motif.zarr"

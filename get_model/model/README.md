@@ -241,4 +241,4 @@ The model loading process is supported by several utility functions:
 - `load_checkpoint`: Loads the checkpoint from the specified path, supporting both URLs and local files. It also allows for selecting a specific key within the checkpoint dictionary using the `model_key` parameter.
 - `load_state_dict`: Loads the state dictionary into the model, with support for dropping specific keys based on the provided `patterns_to_drop` parameter.
 
-By leveraging this model loading process, the GET framework enables users to easily load and initialize models from checkpoints, handle LoRA parameters, rename state dictionary keys, and freeze specific layers for fine-tuning.
+By following the guidelines and best practices outlined in this document, you can effectively customize and construct models using the GET framework, enabling you to tackle a wide range of genomics and epigenomics tasks with ease and efficiency.

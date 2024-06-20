@@ -3,14 +3,14 @@ zarr_dirs:
 keep_celltypes: "k562.encode_hg38atac.ENCFF128WZG.max"
 leave_out_celltypes: null
 leave_out_chromosomes: "chr10,chr11"
-peak_name: "peaks_q0.05_fetal_joint_tissue_open_exp"
+peak_name: "peaks_q0.05_tissue_open_exp"
 dataset_size: 4096
 eval_dataset_size: 512
 additional_peak_columns:
   ["Expression_positive", "Expression_negative", "aTPM", "TSS"]
-center_expand_target: 0
+center_expand_target: 500
 n_peaks_lower_bound: 1
-n_peaks_upper_bound: 900
+n_peaks_upper_bound: 200
 negative_peak_name: null
 negative_peak_ratio: 0
 random_shift_peak: 0

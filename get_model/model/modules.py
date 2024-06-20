@@ -388,12 +388,15 @@ class ContactMapHead(BaseModule):
     """A simple and small ResNet model to predict the contact map from the log distance map.
     The output has the same shape as the input distance map.
     """
-    def __init__(self, cfg):
+    def __init__(self, cfg, activation='softplus'):
         super().__init__(cfg)
         self.conv1 = nn.Conv2d(cfg.input_dim, cfg.hidden_dim, 3, padding=1)
         self.conv2 = nn.Conv2d(cfg.hidden_dim, cfg.hidden_dim, 3, padding=1)
         self.conv3 = nn.Conv2d(cfg.hidden_dim, cfg.hidden_dim, 3, padding=1)
         self.conv4 = nn.Conv2d(cfg.hidden_dim, cfg.output_dim, 3, padding=1)
+        if activation == 'softplus':
+            self.activation = nn.Softplus()
+
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -418,8 +421,10 @@ class ContactMapHead(BaseModule):
 
         # Fourth layer
         x = self.conv4(x)
-        hic = F.softplus(x)
-
+        if hasattr(self, 'activation'):
+            hic = self.activation(x)
+        else:
+            hic = x
         return hic
 
 

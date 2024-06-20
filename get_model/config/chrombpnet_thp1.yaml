@@ -8,8 +8,7 @@ defaults:
 task:
   layer_names: []
   test_mode: "perturb"
-  gene_list:
-    - "PPIF"
+  gene_list: null
   mutations: "/home/xf2217/Projects/get_data/prepared_data.tsv"
 
 assembly: "hg38"
@@ -35,5 +34,5 @@ wandb:
   run_name: "atac"
 
 finetune:
-  checkpoint: /home/xf2217/Projects/get_model/logs/chrombpnet_thp1_atac/version_8/checkpoints/last.ckpt
+  checkpoint: null #/home/xf2217/Projects/get_model/logs/chrombpnet_thp1_atac/version_8/checkpoints/last.ckpt
   patterns_to_freeze: []

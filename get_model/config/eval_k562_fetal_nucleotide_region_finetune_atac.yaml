@@ -1,6 +1,6 @@
 defaults:
   - base_ref_region_config
-  - model/GETNucleotideRegionFinetuneExp@_here_
+  - model/GETNucleotideRegionFinetuneATAC@_here_
   - machine/pc
   - finetune/v1_finetune@finetune
   - dataset/k562_nucleotide_region_finetune_hic@dataset
@@ -43,7 +43,7 @@ finetune:
   use_lora: false
   layers_with_lora: []
   checkpoint: null #"/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
-  patterns_to_freeze: ['distance_contact_map', 'motif_scanner', 'conv_blocks', 'atac_attention']
+  patterns_to_freeze: []
   model_key: 'model'
   additional_checkpoints:
     - checkpoint: DistanceMap/kp6cfqkc/checkpoints/best.ckpt
