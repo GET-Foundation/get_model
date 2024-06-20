@@ -18,7 +18,10 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 
 import wandb
 from get_model.config.config import *
+from get_model.dataset.collate import everything_collate
 from get_model.dataset.zarr_dataset import (
+    EverythingDataset,
+    InferenceEverythingDataset,
     InferenceReferenceRegionDataset,
     PerturbationInferenceReferenceRegionDataset, ReferenceRegionDataset,
     ReferenceRegionMotif, ReferenceRegionMotifConfig)
@@ -32,7 +35,7 @@ from get_model.utils import (cosine_scheduler, extract_state_dict,
                              recursive_save_to_zarr, rename_state_dict)
 
 
-class ReferenceRegionDataModule(GETDataModule):
+class EverythingDataModule(GETDataModule):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
         logging.info("Init ReferenceRegionDataModule")
@@ -44,10 +47,16 @@ class ReferenceRegionDataModule(GETDataModule):
         print(self.reference_region_motif)
 
     def build_from_zarr_dataset(self, zarr_dataset):
-        return ReferenceRegionDataset(self.reference_region_motif, zarr_dataset, quantitative_atac=self.cfg.dataset.quantitative_atac, sampling_step=self.cfg.dataset.sampling_step)
+        return EverythingDataset(self.reference_region_motif, zarr_dataset, quantitative_atac=self.cfg.dataset.quantitative_atac, sampling_step=self.cfg.dataset.sampling_step)
 
     def build_inference_reference_region_dataset(self, zarr_dataset):
-        return InferenceReferenceRegionDataset(self.reference_region_motif, zarr_dataset, quantitative_atac=self.cfg.dataset.quantitative_atac, sampling_step=self.cfg.dataset.sampling_step)
+        return InferenceEverythingDataset(self.reference_region_motif, zarr_dataset, quantitative_atac=self.cfg.dataset.quantitative_atac, sampling_step=self.cfg.dataset.sampling_step)
+
+    def build_perturbation_inference_dataset(self, zarr_dataset, perturbations, mode='peak_inactivation'):
+        inference_dataset = self.build_inference_reference_region_dataset(
+            zarr_dataset)
+        print("Perturbations mode", mode)
+        return PerturbationInferenceReferenceRegionDataset(inference_dataset, perturbations, mode=mode)
 
     def setup(self, stage=None):
         super().setup(stage)
@@ -78,6 +87,7 @@ class ReferenceRegionDataModule(GETDataModule):
             num_workers=self.cfg.machine.num_workers,
             drop_last=True,
             shuffle=True,
+            collate_fn=everything_collate
         )
 
     def val_dataloader(self):
@@ -86,6 +96,7 @@ class ReferenceRegionDataModule(GETDataModule):
             batch_size=self.cfg.machine.batch_size,
             num_workers=self.cfg.machine.num_workers,
             drop_last=True,
+            collate_fn=everything_collate
         )
 
     def test_dataloader(self):
@@ -94,6 +105,7 @@ class ReferenceRegionDataModule(GETDataModule):
             batch_size=self.cfg.machine.batch_size,
             num_workers=self.cfg.machine.num_workers,
             drop_last=True,
+            collate_fn=everything_collate
         )
 
     def predict_dataloader(self):
@@ -103,6 +115,7 @@ class ReferenceRegionDataModule(GETDataModule):
             num_workers=self.cfg.machine.num_workers,
             drop_last=False,
             shuffle=False,
+            collate_fn=everything_collate
         )
 
 
@@ -424,10 +437,11 @@ class RegionLitModel(LitModel):
         return [optimizer], [lr_scheduler]
 
 
+
 def run(cfg: DictConfig):
     model = RegionLitModel(cfg)
-    dm = ReferenceRegionDataModule(cfg)
     print(OmegaConf.to_yaml(cfg))
+    dm = EverythingDataModule(cfg)
     model.dm = dm
     wandb_logger = WandbLogger(name=cfg.wandb.run_name,
                                project=cfg.wandb.project_name)
@@ -474,38 +488,3 @@ def run(cfg: DictConfig):
                         ckpt_path=cfg.finetune.resume_ckpt)
 
 
-
-
-
-
-# def run_downstream(cfg: DictConfig):
-#     torch.set_float32_matmul_precision('medium')
-#     model = LitModel(cfg)
-#     # move the model to the gpu
-#     model.to('cuda')
-#     dm = GETDataModule(cfg)
-#     model.dm = dm
-#     if cfg.machine.num_devices > 0:
-#         strategy = 'auto'
-#         accelerator = 'gpu'
-#         device = cfg.machine.num_devices
-#         if cfg.machine.num_devices > 1:
-#             strategy = 'ddp_spawn'
-#     else:
-#         strategy = 'auto'
-#         accelerator = 'cpu'
-#         device = 'auto'
-#     trainer = L.Trainer(
-#         max_epochs=cfg.training.epochs,
-#         accelerator=accelerator,
-#         num_sanity_val_steps=10,
-#         strategy=strategy,
-#         devices=device,
-#         # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
-#         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
-#         gradient_clip_val=cfg.training.clip_grad,
-#         log_every_n_steps=100,
-#         deterministic=True,
-#         default_root_dir=cfg.machine.output_dir,
-#     )
-#     print(run_ppif_task(trainer, model))

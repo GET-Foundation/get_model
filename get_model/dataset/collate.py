@@ -138,10 +138,10 @@ def get_rev_collate_fn(batch, reverse_complement=True):
             # assuming the third column is aTPM, use aTPM to thresholding the expression
             additional_peak_features = additional_peak_features.reshape(
                 -1, n_peak_labels)
-            # additional_peak_features[additional_peak_features[:, 2]
-            #  < 0.01, 0] = 0
-            # additional_peak_features[additional_peak_features[:, 2]
-            #  < 0.01, 1] = 0
+            additional_peak_features[additional_peak_features[:, 2]
+             < 0.1, 0] = 0
+            additional_peak_features[additional_peak_features[:, 2]
+             < 0.1, 1] = 0
             additional_peak_features = additional_peak_features.reshape(
                 batch_size, -1, n_peak_labels)
             other_peak_labels = additional_peak_features[:, :, 2:]
@@ -187,8 +187,8 @@ def get_perturb_collate_fn(perturbation_batch):
 
 
 def everything_collate(batch):
-    batch = batch_dict_list_to_dict(batch)
-    zarr_batch = get_rev_collate_fn(batch['zarr'], reverse_complement=False)
+    batch = batch_dict_list_to_dict(batch) 
+    zarr_batch = get_rev_collate_fn(batch['zarr'], reverse_complement=True)
     rrd_batch = default_collate(batch['rrd'])
     # merge the two batches
     zarr_batch.update(rrd_batch)

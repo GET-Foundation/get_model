@@ -2,7 +2,7 @@ import hydra
 import sys
 import gc
 import torch
-from get_model.run_ref_region import run_everything as run
+from get_model.run_everything import run 
 
 from get_model.config.config import *
 

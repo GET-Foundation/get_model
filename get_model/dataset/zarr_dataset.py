@@ -138,7 +138,7 @@ def apply_indel(arr, start, end, alt_sequence):
     return arr
 
 
-def get_hic_from_idx(hic, csv, start=None, end=None, resolution=5000, method='observed'):
+def get_hic_from_idx(hic, csv, start=None, end=None, resolution=5000, method='oe'):
     # if from hic straw
     if hasattr(hic, 'getMatrixZoomData'):
         if start is not None and end is not None:
@@ -438,9 +438,9 @@ class ZarrDataPool(object):
                 motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chr_chunk_idx:chr_chunk_idx+2].reshape(
                 2, 2, -1).mean(0)
             except: # TODO need to check the best way to handle this!!!!!
-                motif_mean_std = np.zeros((2, 2, 1))
+                motif_mean_std = np.zeros((2, 639))+1
         else:
-            motif_mean_std = np.zeros((2, 2, 1))
+            motif_mean_std = np.zeros((2, 639))+1
         return chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
 
     def load_window_data(self, window_index=None):
@@ -752,81 +752,86 @@ class ZarrDataPool(object):
         """
         Convenient handler for generate a single sample.
         """
-        chr_name, start, end, celltype_id, track, _, celltype_peaks, motif_mean_std = self.load_data(
-            data_key, celltype_id, chr_name, start, end)
-        track_start = celltype_peaks['Start'].min() - padding
-        track_end = celltype_peaks['End'].max() + padding
-        assert track_start >= start and track_end <= end, f"Celltype peaks after padding is not within the input range {chr_name}:{start}-{end}"
+        try:
+            chr_name, start, end, celltype_id, track, _, celltype_peaks, motif_mean_std = self.load_data(
+                data_key, celltype_id, chr_name, start, end)
+            track_start = celltype_peaks['Start'].min() - padding
+            track_end = celltype_peaks['End'].max() + padding
+            assert track_start >= start and track_end <= end, f"Celltype peaks after padding is not within the input range {chr_name}:{start}-{end}"
 
-        if peak_inactivation is not None:
-            inactivated_peak_idx = self._inactivated_peaks(
-                celltype_peaks, peak_inactivation)
-        else:
-            inactivated_peak_idx = None
+            if peak_inactivation is not None:
+                inactivated_peak_idx = self._inactivated_peaks(
+                    celltype_peaks, peak_inactivation)
+            else:
+                inactivated_peak_idx = None
 
-        hic_matrix = 0
-        if self.hic_obj is not None:
-            hic_matrix = get_hic_from_idx(self.hic_obj, celltype_peaks)
-            if hic_matrix is None:
-                hic_matrix = np.zeros((len(celltype_peaks), len(celltype_peaks)))
+            hic_matrix = 0
+            if self.hic_obj is not None:
+                hic_matrix = get_hic_from_idx(self.hic_obj, celltype_peaks)
+                if hic_matrix is None:
+                    hic_matrix = np.zeros((len(celltype_peaks), len(celltype_peaks)))
 
-        if self.additional_peak_columns is not None:
-            # assume numeric columns
-            additional_peak_features = celltype_peaks[self.additional_peak_columns].to_numpy(
-            ).astype(np.float32)
-        else:
-            additional_peak_features = None
+            if self.additional_peak_columns is not None:
+                # assume numeric columns
+                additional_peak_features = celltype_peaks[self.additional_peak_columns].to_numpy(
+                ).astype(np.float32)
+            else:
+                additional_peak_features = None
 
-        assembly = self.assembly_dict[data_key]
-        sequence = self.sequence[assembly].get_track(
-            chr_name, track_start, track_end, sparse=False)
-        if mutations is not None:
-            # filter the mutation data with celltype_peaks
-            mut_peak = pr(mutations.query('Chromosome==@chr_name')
-                          ).join(pr(celltype_peaks)).df
-            if mut_peak.shape[0] > 0:
-                sequence_mut, sequence = get_sequence_with_mutations(
-                    sequence, track_start, track_end, mut_peak)
-                logging.info(
-                    f"Mutated sequence for {chr_name}:{start}-{end} has been generated")
-                logging.info(
-                    f"Mutated sequence is different from the original sequence: {not np.array_equal(sequence, sequence_mut)}")
-                sequence = sequence_mut
+            assembly = self.assembly_dict[data_key]
+            sequence = self.sequence[assembly].get_track(
+                chr_name, track_start, track_end, sparse=False)
+            if mutations is not None:
+                # filter the mutation data with celltype_peaks
+                mut_peak = pr(mutations.query('Chromosome==@chr_name')
+                            ).join(pr(celltype_peaks)).df
+                if mut_peak.shape[0] > 0:
+                    sequence_mut, sequence = get_sequence_with_mutations(
+                        sequence, track_start, track_end, mut_peak)
+                    logging.info(
+                        f"Mutated sequence for {chr_name}:{start}-{end} has been generated")
+                    logging.info(
+                        f"Mutated sequence is different from the original sequence: {not np.array_equal(sequence, sequence_mut)}")
+                    sequence = sequence_mut
 
-        celltype_peaks = celltype_peaks[[
-            'Start', 'End']].to_numpy().astype(np.int64)
+            celltype_peaks = celltype_peaks[[
+                'Start', 'End']].to_numpy().astype(np.int64)
 
-        sample_peak_sequence = self._generate_peak_sequence(
-            celltype_peaks, sequence, track_start, track_end)
+            sample_peak_sequence = self._generate_peak_sequence(
+                celltype_peaks, sequence, track_start, track_end)
 
-        # where the track locates in the window
-        _start, _end = track_start - start, track_end - start
-        # where the peaks locate in the track
-        celltype_peaks = celltype_peaks - track_start
+            # where the track locates in the window
+            _start, _end = track_start - start, track_end - start
+            # where the peaks locate in the track
+            celltype_peaks = celltype_peaks - track_start
 
-        sample_track = track[_start:_end]
+            sample_track = track[_start:_end]
 
-        sample_peak_sequence = _stack_tracks_with_padding_and_inactivation(
-            celltype_peaks, sample_peak_sequence, padding, inactivated_peak_idx)
-        sample_track = _stack_tracks_with_padding_and_inactivation(
-            celltype_peaks, sample_track, padding, inactivated_peak_idx)
-        # remove atac and expression from inactivated peak
-        if inactivated_peak_idx is not None:
-            # keep the TSS column but set aTPM and expression to 0
-            additional_peak_features[inactivated_peak_idx, 0:3] = 0
+            sample_peak_sequence = _stack_tracks_with_padding_and_inactivation(
+                celltype_peaks, sample_peak_sequence, padding, inactivated_peak_idx)
+            sample_track = _stack_tracks_with_padding_and_inactivation(
+                celltype_peaks, sample_track, padding, inactivated_peak_idx)
+            # remove atac and expression from inactivated peak
+            if inactivated_peak_idx is not None:
+                # keep the TSS column but set aTPM and expression to 0
+                additional_peak_features[inactivated_peak_idx, 0:3] = 0
 
-        sample = {
-            'sample_track': sample_track, 'sample_peak_sequence': sample_peak_sequence,
-            'celltype_peaks': celltype_peaks, 'motif_mean_std': motif_mean_std,
-            'additional_peak_features': additional_peak_features, 'hic_matrix': hic_matrix,
-            'metadata': {
-                'celltype_id': celltype_id, 'chr_name': chr_name, 'libsize': self.zarr_dict[data_key].libsize[celltype_id],
-                'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': 0,
+            sample = {
+                'sample_track': sample_track, 'sample_peak_sequence': sample_peak_sequence,
+                'celltype_peaks': celltype_peaks, 'motif_mean_std': motif_mean_std,
+                'additional_peak_features': additional_peak_features, 'hic_matrix': hic_matrix,
+                'metadata': {
+                    'celltype_id': celltype_id, 'chr_name': chr_name, 'libsize': self.zarr_dict[data_key].libsize[celltype_id],
+                    'start': start, 'end': end, 'i_start': _start, 'i_end': _end, 'mask_ratio': 0,
+                }
+
             }
 
-        }
+            return sample
+        except Exception as e:
+            print(f"When generating sample for {chr_name}:{start}-{end}, in {data_key} for {celltype_id}, the following error occurred: {e}")
+            raise e
 
-        return sample
 
 
 class PreloadDataPack(object):
@@ -1877,8 +1882,8 @@ class ReferenceRegionDataset(Dataset):
     @property
     def data_dict(self):
         if not hasattr(self, '_data_dict'):
-            self._data_dict = {data_key: self.reference_region_motif.map_peaks_to_motifs(
-                peaks) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
+            self._data_dict = {celltype_id: self.reference_region_motif.map_peaks_to_motifs(
+                peaks) for celltype_id, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
         return self._data_dict
 
     def extract_data_list(self, region_motif, peaks):
@@ -1920,7 +1925,7 @@ class ReferenceRegionDataset(Dataset):
                 if celltype_peak_annot_i.iloc[-1].End - celltype_peak_annot_i.iloc[0].Start > 5000000:
                     end_index = celltype_peak_annot_i[celltype_peak_annot_i.End -
                                                       celltype_peak_annot_i.Start < 5000000].index[-1]
-                if celltype_peak_annot_i["Start"].min() < 0 or celltype_peak_annot_i.shape[0] != self.num_region_per_sample:
+                if celltype_peak_annot_i["Start"].min() < 0 or celltype_peak_annot_i.shape[0] != self.num_region_per_sample or celltype_peak_annot_i["Start"].values[0]>celltype_peak_annot_i["End"].values[-1] or len(celltype_peak_annot_i.Chromosome.unique()) > 1:
                     continue
 
                 region_motif_i = coo_matrix(
@@ -1951,8 +1956,8 @@ class ReferenceRegionDataset(Dataset):
 
     def setup(self):
         self.sample_indices = []
-        
-        for data_key, (region_motif, peaks) in tqdm(self.data_dict.items()):
+        for celltype_id, (region_motif, peaks) in tqdm(self.data_dict.items()):
+            peaks = peaks.reset_index(drop=True)
             all_chromosomes = peaks["Chromosome"].unique().tolist()
             input_chromosomes = _chromosome_splitter(
                 all_chromosomes, self.leave_out_chromosomes, is_train=self.is_train
@@ -1967,17 +1972,21 @@ class ReferenceRegionDataset(Dataset):
                     shift = np.random.randint(-self.sampling_step // 2, self.sampling_step // 2)
                     start_index = max(0, i + shift)
                     end_index = start_index + self.num_region_per_sample
-                    
-                    if end_index <= region_motif.shape[0]:
-                        self.sample_indices.append((data_key, start_index, end_index))
+                    celltype_peak_annot_i = peaks.iloc[start_index:end_index, :]
+                    if end_index>=peaks.shape[0]:
+                        continue
+                    if peaks.iloc[end_index].End - peaks.iloc[start_index].Start > 5000000 or peaks.iloc[end_index].End - peaks.iloc[start_index].Start < 0:
+                        continue
+                    if end_index < region_motif.shape[0]:
+                        self.sample_indices.append((celltype_id, start_index, end_index))
                         
     def __len__(self):
         return len(self.sample_indices)
 
     def __getitem__(self, index):
-        data_key, start_index, end_index = self.sample_indices[index]
-        region_motif, peaks = self.data_dict[data_key]
-        
+        celltype_id, start_index, end_index = self.sample_indices[index]
+        region_motif, peaks = self.data_dict[celltype_id]
+        peaks = peaks.reset_index(drop=True)
         region_motif_i = region_motif[start_index:end_index]
         peak_i = peaks.iloc[start_index:end_index]
         
@@ -2026,7 +2035,10 @@ class ReferenceRegionDataset(Dataset):
                 'chromosome': peak_i['Chromosome'].values[0],
                 'peak_coord': peak_i[['Start', 'End']].values,
                 'exp_label': target_i.toarray().astype(np.float32),
-                'hic_matrix': hic_matrix_i}
+                'hic_matrix': hic_matrix_i,
+                'celltype_id': celltype_id,
+                'data_key': self.zarr_dataset.datapool._get_data_key(celltype_id),
+                }
 
         return data
 
@@ -2108,6 +2120,8 @@ class InferenceReferenceRegionDataset(Dataset):
                 'gene_name': gene_name,
                 'tss_peak': tss_peak,
                 'all_tss_peak': all_tss_peak,
+                'celltype_id': celltype_id,
+                'data_key': self.zarr_dataset.datapool._get_data_key(celltype_id),
         }
 
 class PerturbationInferenceReferenceRegionDataset(Dataset):
@@ -2230,7 +2244,9 @@ class PerturbationInferenceReferenceRegionDataset(Dataset):
             'strand': sample['metadata']['strand'],
             'gene_name': sample['metadata']['gene_name'],
             'tss_peak': sample['metadata']['tss_peak'],
-            'all_tss_peak': sample['metadata']['all_tss_peak']
+            'all_tss_peak': sample['metadata']['all_tss_peak'],
+            'celltype_id': celltype_id,
+            'data_key': data_key,
         }
 
     def _apply_peak_inactivation(self, region_motif, perturbation, peaks, atpm):
@@ -2863,7 +2879,13 @@ class EverythingDataset(ReferenceRegionDataset):
     
     def __getitem__(self, index):
         rrd_item = super().__getitem__(index)
-        zarr_item = self.zarr_dataset[index]
+        zarr_item = self.zarr_dataset.datapool.generate_sample(
+            chr_name=rrd_item['chromosome'],
+            start=rrd_item['peak_coord'][0,0]-50,
+            end=rrd_item['peak_coord'][-1,1]+50,
+            data_key=rrd_item['data_key'],
+            celltype_id=rrd_item['celltype_id'],
+        )
         return {'rrd': rrd_item, 'zarr': zarr_item}
 
 class InferenceEverythingDataset(InferenceReferenceRegionDataset):
