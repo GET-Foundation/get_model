@@ -2007,8 +2007,8 @@ class ReferenceRegionDataset(Dataset):
         target_data = peaks[["Expression_positive", "Expression_negative"]].values
         tssidx_data = peaks["TSS"].values
         atpm = peaks['aTPM'].values
-        if len(atpm) == len(target_data): # TODO sometimes there are bugs like IndexError: index 90159954249795 is out of bounds for axis 0 with size 973711. Weird stuff。
-            target_data[atpm < 0.05, :] = 0
+        # if len(atpm) == len(target_data): # TODO sometimes there are bugs like IndexError: index 90159954249795 is out of bounds for axis 0 with size 973711. Weird stuff。
+            # target_data[atpm < 0.05, :] = 0
         
         if not self.quantitative_atac:
             region_motif_i = np.concatenate(
