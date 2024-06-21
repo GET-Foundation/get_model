@@ -21,7 +21,7 @@ training:
   use_fp16: false
 
 dataset:
-  quantitative_atac: true
+  quantitative_atac: false
   sampling_step: 10
   mask_ratio: 0
 
@@ -35,13 +35,13 @@ optimizer:
 
 wandb:
   project_name: "nucleotide_motif_adaptor"
-  run_name: "NTToQATAC_ENCFF998SLH"
+  run_name: "NTToBATAC_ENCFF998SLH"
 
 finetune:
   pretrain_checkpoint: false
   strict: false
   use_lora: false
-  checkpoint: /home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth
+  checkpoint: /home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth
   patterns_to_freeze: []
   model_key: 'model'
 

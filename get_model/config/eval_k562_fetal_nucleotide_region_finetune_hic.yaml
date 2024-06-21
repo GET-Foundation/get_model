@@ -40,9 +40,9 @@ wandb:
 finetune:
   pretrain_checkpoint: false
   strict: false
-  use_lora: false
-  layers_with_lora: []
-  checkpoint: null #"/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
+  use_lora: true
+  layers_with_lora: ['encoder', 'head_exp']
+  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
   patterns_to_freeze: ['distance_contact_map', 'motif_scanner', 'conv_blocks', 'atac_attention']
   model_key: 'model'
   additional_checkpoints:
@@ -51,7 +51,7 @@ finetune:
       strict: false
       rename_config:
         model.: distance_contact_map.
-    - checkpoint: "nucleotide_motif_adaptor/vs6fatsx/checkpoints/best.ckpt"
+    - checkpoint: "nucleotide_motif_adaptor/j46yohrw/checkpoints/best.ckpt"
       model_key: 'state_dict'
       strict: false
       rename_config:

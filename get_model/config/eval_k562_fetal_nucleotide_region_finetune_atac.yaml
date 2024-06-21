@@ -34,7 +34,7 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "nucleotide_region_finetune"
+  project_name: "nucleotide_region_finetune_atac"
   run_name: "fix_motif_scanner"
 
 finetune:
@@ -51,7 +51,7 @@ finetune:
       strict: false
       rename_config:
         model.: distance_contact_map.
-    - checkpoint: "nucleotide_motif_adaptor/vs6fatsx/checkpoints/best.ckpt"
+    - checkpoint: "nucleotide_motif_adaptor/wur5fuje/checkpoints/best.ckpt"
       model_key: 'state_dict'
       strict: false
       rename_config:

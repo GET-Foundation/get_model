@@ -1878,6 +1878,7 @@ class ReferenceRegionDataset(Dataset):
         self.peak_names = reference_region_motif.peak_names
         self.setup()
         self.data_dict
+        self.idx_dict
 
     @property
     def data_dict(self):
@@ -1885,74 +1886,25 @@ class ReferenceRegionDataset(Dataset):
             self._data_dict = {celltype_id: self.reference_region_motif.map_peaks_to_motifs(
                 peaks) for celltype_id, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
         return self._data_dict
+    
+    @property
+    def idx_dict(self):
+        if not hasattr(self, '_idx_dict'):
+            idx_dict = {}
+            for celltype_id, (region_motif, peaks) in self.data_dict.items():
+                idx_dict[celltype_id] = {}
+                # a dict from 'Start' to iloc index in peaks
+                peaks = peaks.reset_index(drop=True)
+                for chromosome in peaks['Chromosome'].unique():
+                    idx_dict[celltype_id][chromosome] = {}
+                    idx = peaks.query('Chromosome==@chromosome').index.values
+                    start = peaks.loc[idx, 'Start'].values
+                    end = peaks.loc[idx, 'End'].values
+                    idx_dict[celltype_id][chromosome]['Start'] = {s: i for s, i in zip(start, idx)}
+                    idx_dict[celltype_id][chromosome]['End'] = {e: i for e, i in zip(end, idx)}
+            self._idx_dict = idx_dict
+        return self._idx_dict
 
-    def extract_data_list(self, region_motif, peaks):
-        region_motif_list = []
-        peak_list = []
-        target_list = []
-        tssidx_list = []
-        hic_matrix_list = []
-
-        all_chromosomes = peaks["Chromosome"].unique(
-        ).tolist()
-        input_chromosomes = _chromosome_splitter(
-            all_chromosomes, self.leave_out_chromosomes, is_train=self.is_train
-        )
-        target_data = peaks[["Expression_positive",
-                             "Expression_negative"]].values
-        tssidx_data = peaks["TSS"].values
-        atpm = peaks['aTPM'].values
-        target_data[atpm < 0.05, :] = 0
-        if not self.quantitative_atac:
-            region_motif = np.concatenate(
-                [region_motif, np.zeros((region_motif.shape[0], 1))+1], axis=1)
-        else:
-            region_motif = np.concatenate(
-                [region_motif, atpm.reshape(-1, 1)/atpm.reshape(-1, 1).max()], axis=1)
-        for chromosome in input_chromosomes:
-            idx_peak_list = peaks.query('Chromosome==@chromosome').index.values
-            idx_peak_start = idx_peak_list[0]
-            idx_peak_end = idx_peak_list[-1]
-            for i in range(idx_peak_start, idx_peak_end, self.sampling_step):
-                shift = np.random.randint(-self.sampling_step //
-                                          2, self.sampling_step // 2)
-                start_index = max(0, i + shift)
-                end_index = start_index + self.num_region_per_sample
-
-                celltype_peak_annot_i = peaks.iloc[start_index:end_index, :]
-                if celltype_peak_annot_i.shape[0] == 0:
-                    continue
-                if celltype_peak_annot_i.iloc[-1].End - celltype_peak_annot_i.iloc[0].Start > 5000000:
-                    end_index = celltype_peak_annot_i[celltype_peak_annot_i.End -
-                                                      celltype_peak_annot_i.Start < 5000000].index[-1]
-                if celltype_peak_annot_i["Start"].min() < 0 or celltype_peak_annot_i.shape[0] != self.num_region_per_sample or celltype_peak_annot_i["Start"].values[0]>celltype_peak_annot_i["End"].values[-1] or len(celltype_peak_annot_i.Chromosome.unique()) > 1:
-                    continue
-
-                region_motif_i = coo_matrix(
-                    region_motif[start_index:end_index])
-
-                target_i = coo_matrix(
-                    target_data[start_index:end_index])
-                tssidx_i = tssidx_data[start_index:end_index]
-
-                if region_motif_i.shape[0] == self.num_region_per_sample:
-
-                    # get hic matrix for celltype_peak_annot_i
-                    if self.zarr_dataset.datapool.hic_obj is not None:
-                        hic_matrix_i = get_hic_from_idx(
-                            self.zarr_dataset.datapool.hic_obj, celltype_peak_annot_i)
-                        if hic_matrix_i is None:
-                            continue
-                        else:
-                            hic_matrix_list.append(hic_matrix_i)
-                    else:
-                        hic_matrix_list.append(0)
-
-                    region_motif_list.append(region_motif_i)
-                    peak_list.append(celltype_peak_annot_i)
-                    target_list.append(target_i)
-                    tssidx_list.append(tssidx_i)
-        return peak_list, region_motif_list, target_list, tssidx_list, hic_matrix_list
 
     def setup(self):
         self.sample_indices = []
@@ -2040,6 +1992,64 @@ class ReferenceRegionDataset(Dataset):
                 'data_key': self.zarr_dataset.datapool._get_data_key(celltype_id),
                 }
 
+        return data
+
+    def get_item_from_coord(self, chr, start, end, celltype_id):
+        region_motif, peaks = self.data_dict[celltype_id]
+        start_index = self.idx_dict[celltype_id][chr]['Start'][start]
+        end_index = self.idx_dict[celltype_id][chr]['End'][end]+1
+        region_motif_i = region_motif[start_index:end_index]
+        peak_i = peaks.iloc[start_index:end_index]
+        
+        target_data = peaks[["Expression_positive", "Expression_negative"]].values
+        tssidx_data = peaks["TSS"].values
+        atpm = peaks['aTPM'].values
+        target_data[atpm < 0.05, :] = 0
+        
+        if not self.quantitative_atac:
+            region_motif_i = np.concatenate(
+                [region_motif_i, np.zeros((region_motif_i.shape[0], 1))+1], axis=1)
+        else:
+            region_motif_i = np.concatenate(
+                [region_motif_i, atpm[start_index:end_index].reshape(-1, 1)/atpm[start_index:end_index].reshape(-1, 1).max()], axis=1)
+        
+        target_i = coo_matrix(target_data[start_index:end_index])
+        tssidx_i = tssidx_data[start_index:end_index]
+        
+        if self.zarr_dataset.datapool.hic_obj is not None:
+            hic_matrix_i = get_hic_from_idx(self.zarr_dataset.datapool.hic_obj, peak_i)
+            if hic_matrix_i is None:
+                # return a matrix with all zeros
+                hic_matrix_i = np.zeros((self.num_region_per_sample, self.num_region_per_sample))
+        else:
+            hic_matrix_i = 0
+        
+        if self.mask_ratio > 0:
+            mask = np.hstack(
+                [
+                    np.zeros(int(self.num_region_per_sample - self.num_region_per_sample*self.mask_ratio)),
+                    np.ones(int(self.num_region_per_sample*self.mask_ratio)),
+                ]
+            )
+            np.random.shuffle(mask)
+        else:
+            mask = tssidx_i
+        
+        if self.transform is not None:
+            region_motif_i, mask, target_i = self.transform(region_motif_i, tssidx_i, target_i)
+
+        if region_motif_i.shape[0] == 1:
+            region_motif_i = region_motif_i.squeeze(0)
+
+        data = {'region_motif': region_motif_i.astype(np.float32),
+                'mask': mask,
+                'chromosome': peak_i['Chromosome'].values[0],
+                'peak_coord': peak_i[['Start', 'End']].values,
+                'exp_label': target_i.toarray().astype(np.float32),
+                'hic_matrix': hic_matrix_i,
+                'celltype_id': celltype_id,
+                'data_key': self.zarr_dataset.datapool._get_data_key(celltype_id),
+                }
         return data
 
 class InferenceReferenceRegionDataset(Dataset):
@@ -2878,14 +2888,12 @@ class EverythingDataset(ReferenceRegionDataset):
         super().__init__(reference_region_motif, zarr_dataset, transform, quantitative_atac, sampling_step)
     
     def __getitem__(self, index):
-        rrd_item = super().__getitem__(index)
-        zarr_item = self.zarr_dataset.datapool.generate_sample(
-            chr_name=rrd_item['chromosome'],
-            start=rrd_item['peak_coord'][0,0]-50,
-            end=rrd_item['peak_coord'][-1,1]+50,
-            data_key=rrd_item['data_key'],
-            celltype_id=rrd_item['celltype_id'],
-        )
+        zarr_item = self.zarr_dataset[index]
+        chr_name = zarr_item['metadata']['chr_name']
+        start = zarr_item['metadata']['start'] + zarr_item['metadata']['i_start'] 
+        end = zarr_item['metadata']['start'] + zarr_item['metadata']['i_end'] 
+        celltype_id = zarr_item['metadata']['celltype_id']
+        rrd_item = self.get_item_from_coord(chr_name, start, end, celltype_id)
         return {'rrd': rrd_item, 'zarr': zarr_item}
 
 class InferenceEverythingDataset(InferenceReferenceRegionDataset):
