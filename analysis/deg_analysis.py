@@ -4,7 +4,8 @@ import pandas as pd
 import seaborn as sns
 
 # %%
-data_dir = "/home/ubuntu/alb2281/get/output/complete"
+watac_oneshot_data_dir = "/burg/pmg/users/alb2281/get/results/gbm_deg_v2_lora/watac-oneshot-gbm"
+watac_zeroshot_data_dir = "/burg/pmg/users/alb2281/get/results/gbm_deg_v2_lora/watac-zeroshot-astrocyte"
 cols = ["gene", "value", "pred", "obs", "atpm"]
 
 # %%

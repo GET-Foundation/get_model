@@ -1,12 +1,9 @@
 zarr_dirs:
-  - "htan_gbm_dense.zarr"
-keep_celltypes: 
-  - Tumor.htan_gbm.C3L-02705_CPT0189650015_snATAC_GBM_Tumor.1024
-  - Tumor.htan_gbm.C3L-03968_CPT0228220004_snATAC_GBM_Tumor.4096
-  - Tumor.htan_gbm.C3N-01518_CPT0167640014_snATAC_GBM_Tumor.2048
+  - "encode_hg38atac_dense.zarr"
+keep_celltypes: "k562.encode_hg38atac.ENCFF128WZG_cage.max"
 leave_out_celltypes: null
-leave_out_chromosomes: "chr10,chr11"
-peak_name: "fetal_gbm_peaks_open_exp"
+leave_out_chromosomes: null
+peak_name: "peaks_q0.05_fetal_joint_tissue_open_exp"
 dataset_size: 4096
 eval_dataset_size: 512
 additional_peak_columns:
@@ -27,6 +24,6 @@ mask_ratio: 0
 insulation_subsample_ratio: 1
 reference_region_motif:
   root: "/pmglocal/alb2281/get/get_data"
-  data: "fetal_gbm_peak_motif_v1.hg38.zarr"
+  data: "fetal_k562_peaks_motif.hg38.zarr"
   refdata: "fetal_union_peak_motif_v1.hg38.zarr"
   motif_scaler: 1.3
