@@ -237,7 +237,7 @@ def run(cfg: DictConfig):
         accelerator = 'gpu'
         device = cfg.machine.num_devices
         if cfg.machine.num_devices > 1:
-            strategy = 'ddp_spawn'
+            strategy = 'ddp_find_unused_parameters_true'
     else:
         strategy = 'auto'
         accelerator = 'cpu'
