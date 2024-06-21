@@ -18,7 +18,7 @@ model:
       components:
         motif:
           _target_: torch.nn.MSELoss
-          reduction: "mean"
+          reduction: "sum"
       weights:
         motif: 1
     metrics:
