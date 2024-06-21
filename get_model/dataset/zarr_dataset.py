@@ -115,6 +115,9 @@ def _stack_tracks_with_padding_and_inactivation(celltype_peaks, track, padding, 
             padded_track = track[max(0, start-padding):end+padding]
             # check if the padded track is empty
             if padded_track.size == 0 or padded_track.shape[0] <= 1:
+                if end-start+2*padding <= 0:
+                    padded_track = csr_matrix(
+                        (2*padding, track_depth), dtype=track_dtype)
                 padded_track = csr_matrix(
                     (end-start+2*padding, track_depth), dtype=track_dtype)
             stacked_track_list.append(padded_track)

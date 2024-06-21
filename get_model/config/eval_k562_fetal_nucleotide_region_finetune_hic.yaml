@@ -35,7 +35,7 @@ optimizer:
 
 wandb:
   project_name: "nucleotide_region_finetune"
-  run_name: "fix_motif_scanner"
+  run_name: "motif_no_freeze"
 
 finetune:
   pretrain_checkpoint: false
@@ -43,7 +43,7 @@ finetune:
   use_lora: true
   layers_with_lora: ['encoder', 'head_exp']
   checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
-  patterns_to_freeze: ['distance_contact_map', 'motif_scanner', 'conv_blocks', 'atac_attention']
+  patterns_to_freeze: ['distance_contact_map']
   model_key: 'model'
   additional_checkpoints:
     - checkpoint: DistanceMap/kp6cfqkc/checkpoints/best.ckpt
