@@ -52,7 +52,7 @@ leaveout_df["Expression_sum"] = leaveout_df["Expression_positive"] + leaveout_df
 # %%
 leaveout_df["Expression_sum"].describe()
 #%%
-# leaveout_df = leaveout_df.query('TSS>0')
+leaveout_df = leaveout_df.query('TSS>0')
 # %%
 import numpy as np
 mean_preds_4828 = []
@@ -132,4 +132,11 @@ eval_df.dropna().plot(x="enformer_max_mean", y="Expression_sum", kind="scatter")
 eval_df.dropna().corr(method="pearson")
 # %%
 
-eval_df
+pearson_df = eval_df.dropna().corr(method="pearson")
+# %%
+spearman_df = eval_df.dropna().corr(method="spearman")
+# %%
+pearson_df = pearson_df[["Expression_sum"]]
+# %%
+pearson_df.to_csv("/burg/pmg/users/alb2281/enformer/results/enformer_k562_leaveout_corr_tss_only.csv")
+# %%
