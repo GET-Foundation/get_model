@@ -11,14 +11,14 @@ model:
     flash_attn: false
     pool_method: "mean"
     motif_scanner:
-      num_motif: 128
-      include_reverse_complement: false
-      bidirectional_except_ctcf: false
-      motif_prior: false
+      num_motif: 637
+      include_reverse_complement: true
+      bidirectional_except_ctcf: true
+      motif_prior: true
       learnable: true
       has_bias: true
     atac_attention:
-      motif_dim: 128 
+      motif_dim: 639 
       pool_method: "sum"
     region_embed:
       num_regions: 200

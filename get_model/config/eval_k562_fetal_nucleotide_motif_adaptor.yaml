@@ -1,6 +1,6 @@
 defaults:
   - base_ref_region_config
-  - model/GETNucleotideMotifAdaptor@_here_
+  - model/GETNucleotideV1MotifAdaptor@_here_
   - machine/pc
   - finetune/v1_finetune@finetune
   - dataset/k562_nucleotide_adaptor@dataset
@@ -35,16 +35,16 @@ optimizer:
 
 wandb:
   project_name: "nucleotide_motif_adaptor"
-  run_name: "NTToBATAC_ENCFF998SLH"
+  run_name: "NTToBATAC_ENCFF998SLH.motif_prior.V1Motif"
 
 finetune:
   pretrain_checkpoint: false
   strict: false
   use_lora: false
-  checkpoint: /home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth
+  checkpoint: null
   patterns_to_freeze: []
   model_key: 'model'
 
 
 eval_tss: true
-log_image: false
+log_image: true

@@ -2007,7 +2007,8 @@ class ReferenceRegionDataset(Dataset):
         target_data = peaks[["Expression_positive", "Expression_negative"]].values
         tssidx_data = peaks["TSS"].values
         atpm = peaks['aTPM'].values
-        target_data[atpm < 0.05, :] = 0
+        if len(atpm) == len(target_data): # TODO sometimes there are bugs like IndexError: index 90159954249795 is out of bounds for axis 0 with size 973711. Weird stuff。
+            target_data[atpm < 0.05, :] = 0
         
         if not self.quantitative_atac:
             region_motif_i = np.concatenate(
@@ -2890,6 +2891,9 @@ class EverythingDataset(ReferenceRegionDataset):
                  ) -> None:
         super().__init__(reference_region_motif, zarr_dataset, transform, quantitative_atac, sampling_step)
     
+    def __len__(self):
+        return self.zarr_dataset.__len__()
+
     def __getitem__(self, index):
         zarr_item = self.zarr_dataset[index]
         chr_name = zarr_item['metadata']['chr_name']

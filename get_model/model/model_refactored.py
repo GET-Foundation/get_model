@@ -1245,6 +1245,64 @@ class GETChrombpNet(GETChrombpNetBias):
             aprofile = aprofile + bias_aprofile
         return {'atpm': atpm, 'aprofile': aprofile}
 
+@dataclass
+class GETNucleotideV1MotifAdaptor(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: SplitPoolConfig = field(
+        default_factory=SplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+
+
+class GETNucleotideV1MotifAdaptor(BaseGETModel):
+    def __init__(self, cfg: GETNucleotideV1MotifAdaptor):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        conv_channel = cfg.motif_scanner.num_motif+2
+        self.conv_blocks = nn.ModuleList([
+            nn.Conv1d(conv_channel, 128, 3, padding=1),
+            ConvBlock(128,
+                      128),
+        ])
+        self.atac_attention = SplitPool(cfg.atac_attention)
+        self.proj = nn.Linear(128,  # (B,R,M ->B,R,D)
+                              cfg.region_embed.num_features)
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        return {'sample_peak_sequence': batch['sample_peak_sequence'],
+                'sample_track': batch['sample_track'],
+                'chunk_size': batch['chunk_size'],
+                'n_peaks': batch['n_peaks'],
+                'max_n_peaks': batch['max_n_peaks']}
+
+    def forward(self, sample_peak_sequence, sample_track, chunk_size, n_peaks, max_n_peaks):
+        x = self.motif_scanner(sample_peak_sequence)
+        x = x.permute(0, 2, 1)
+        for conv in self.conv_blocks:
+            x = conv(x)
+        x = x.permute(0, 2, 1)
+        # concat atac to x
+        # x = torch.cat([x, sample_track.unsqueeze(-1)], dim=-1)
+        x = self.atac_attention(
+            x, chunk_size, n_peaks, max_n_peaks)
+        # project D to 283
+        x = self.proj(x)  # B, R, 283
+        x = F.relu(x)
+        return x
+
+    def before_loss(self, output, batch):
+        pred = {'motif': output[:,:,:-1]}
+        obs = {'motif': batch['region_motif'][:,:,:-1]}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, L = 2, 1, 2000
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+        }
+
+
 
 @dataclass
 class GETNucleotideMotifAdaptor(BaseGETModelConfig):
@@ -1259,19 +1317,16 @@ class GETNucleotideMotifAdaptor(BaseGETModel):
     def __init__(self, cfg: GETNucleotideMotifAdaptor):
         super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        conv_channel = cfg.motif_scanner.num_motif+2
         self.conv_blocks = nn.ModuleList([
-            ConvBlock(cfg.motif_scanner.num_motif,
-                      cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif,
-                      cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif,
-                      cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif)
+            nn.Conv1d(conv_channel, 128, 3, padding=1),
+            ConvBlock(128,
+                      128),
         ])
         self.atac_attention = SplitPool(cfg.atac_attention)
         self.region_embed = RegionEmbed(cfg.region_embed)
         self.region_embed.eval()
-        self.proj = nn.Linear(cfg.motif_scanner.num_motif,  # (B,R,M ->B,R,D)
+        self.proj = nn.Linear(128,  # (B,R,M ->B,R,D)
                               cfg.region_embed.embed_dim)
         self.apply(self._init_weights)
 
@@ -1447,17 +1502,16 @@ class GETNucleotideRegionFinetuneExp(BaseGETModel):
     def __init__(self, cfg: GETNucleotideRegionFinetuneExpConfig):
         super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        conv_channel = cfg.motif_scanner.num_motif+2
         self.conv_blocks = nn.ModuleList([
-            ConvBlock(cfg.motif_scanner.num_motif,
-                      cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif,
-                      cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif,
-                      cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif)
+            nn.Conv1d(conv_channel, 128, 3, padding=1),
+            ConvBlock(128,
+                      128),
         ])
         self.atac_attention = SplitPool(cfg.atac_attention)
-        self.proj = nn.Linear(cfg.motif_scanner.num_motif, cfg.embed_dim)
+        self.proj = nn.Linear(128,  # (B,R,M ->B,R,D)
+                              cfg.region_embed.num_features)
+        self.region_embed = RegionEmbed(cfg.region_embed)
         self.encoder = GETTransformer(**cfg.encoder)
         self.head_exp = ExpressionHead(cfg.head_exp)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
@@ -1487,6 +1541,9 @@ class GETNucleotideRegionFinetuneExp(BaseGETModel):
         x = x.permute(0, 2, 1)
         x = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
         x = self.proj(x)
+        x = F.relu(x).detach()
+        x[:,:,282]=1
+        x = self.region_embed(x)
 
 
         B, N, C = x.shape
@@ -1535,17 +1592,15 @@ class GETNucleotideRegionFinetuneATAC(BaseGETModel):
     def __init__(self, cfg: GETNucleotideRegionFinetuneATACConfig):
         super().__init__(cfg)
         self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        conv_channel = cfg.motif_scanner.num_motif+2
         self.conv_blocks = nn.ModuleList([
-            ConvBlock(cfg.motif_scanner.num_motif,
-                      cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif,
-                      cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif,
-                      cfg.motif_scanner.num_motif),
-            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif)
+            nn.Conv1d(conv_channel, 128, 3, padding=1),
+            ConvBlock(128,
+                      128),
         ])
         self.atac_attention = SplitPool(cfg.atac_attention)
-        self.proj = nn.Linear(cfg.motif_scanner.num_motif, cfg.embed_dim)
+        self.proj = nn.Linear(128,  # (B,R,M ->B,R,D)
+                              cfg.region_embed.embed_dim)
         self.encoder = GETTransformer(**cfg.encoder)
         self.head_atpm = ATACHead(cfg.head_atpm)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))

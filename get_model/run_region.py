@@ -105,21 +105,21 @@ class RegionLitModel(LitModel):
         # print(pred['exp'].detach().cpu().numpy().flatten().max(),
         #       obs['exp'].detach().cpu().numpy().flatten().max())
 
-        if self.cfg.eval_tss:
+        if self.cfg.eval_tss and 'exp' in pred:
             tss_idx = batch['mask']
             for key in pred:
                 # pred[key] = (pred[key] * tss_idx)
                 # obs[key] = (obs[key] * tss_idx)
                 pred[key] = pred[key][tss_idx > 0].flatten()
                 obs[key] = obs[key][tss_idx > 0].flatten()
-        # error handling in metric when there is no TSS, or all TSS is not expressed in batch.
-        if pred['exp'].shape[0] == 0:
-            return
-        if obs['exp'].sum() == 0:
-            return
-        # check for nan
-        if torch.isnan(pred['exp']).any() or torch.isnan(obs['exp']).any():
-            return
+            # error handling in metric when there is no TSS, or all TSS is not expressed in batch.
+            if pred['exp'].shape[0] == 0:
+                return
+            if obs['exp'].sum() == 0:
+                return
+            # check for nan
+            if torch.isnan(pred['exp']).any() or torch.isnan(obs['exp']).any():
+                return
 
         metrics = self.metrics(pred, obs)
         if batch_idx == 0 and self.cfg.log_image:

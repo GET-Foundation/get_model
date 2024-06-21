@@ -35,23 +35,18 @@ optimizer:
 
 wandb:
   project_name: "nucleotide_region_finetune_atac"
-  run_name: "fix_motif_scanner"
+  run_name: "pb3b6jf4_BATAC"
 
 finetune:
   pretrain_checkpoint: false
   strict: false
-  use_lora: false
-  layers_with_lora: []
-  checkpoint: null #"/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
+  use_lora: true
+  layers_with_lora: ['encoder']
+  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
   patterns_to_freeze: []
   model_key: 'model'
   additional_checkpoints:
-    - checkpoint: DistanceMap/kp6cfqkc/checkpoints/best.ckpt
-      model_key: 'state_dict'
-      strict: false
-      rename_config:
-        model.: distance_contact_map.
-    - checkpoint: "nucleotide_motif_adaptor/wur5fuje/checkpoints/best.ckpt"
+    - checkpoint: "nucleotide_motif_adaptor/pb3b6jf4/checkpoints/best.ckpt"
       model_key: 'state_dict'
       strict: false
       rename_config:

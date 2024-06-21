@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETNucleotideMotifAdaptor
+  _target_: get_model.model.model_refactored.GETNucleotideV1MotifAdaptor
   cfg:
     motif_scanner:
       num_motif: 637

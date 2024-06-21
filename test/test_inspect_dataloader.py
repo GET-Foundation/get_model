@@ -1,4 +1,3 @@
-# utils.py
 #%%
 import hydra
 from get_model.config.config import Config
@@ -54,14 +53,14 @@ def inspect_dataloader(config_name, stage='fit', type='everything', num_batches=
 
 #%%
 # Specify the configuration name you want to use
-config_name = "eval_k562_fetal_nucleotide_motif_adaptor"
+config_name = "eval_k562_fetal_nucleotide_region_finetune_hic"
 
 # Inspect the dataloader for the 'fit' stage
-cfg, batch, dm = inspect_dataloader(config_name, stage='fit', type='everything', num_batches=50)
+cfg, batch, dm = inspect_dataloader(config_name, stage='validate', type='everything', num_batches=2)
 
 # %%
 # assert correlation of exp with atpm > 0.4
-for celltype_id, peak in dm.dataset_train.zarr_dataset.datapool.peaks_dict.items():
+for celltype_id, peak in dm.dataset_val.zarr_dataset.datapool.peaks_dict.items():
     peak_df = peak.copy()
     peak_df['exp'] = peak_df['Expression_positive'] + peak_df['Expression_negative']
     if peak_df['exp'].corr(peak_df['aTPM']) < 0.4:
@@ -71,3 +70,5 @@ for celltype_id, peak in dm.dataset_train.zarr_dataset.datapool.peaks_dict.items
 for i in range(len(batch['peak_coord'])):
     assert batch['peak_coord'][i].min() > batch['metadata'][i]['start'] & batch['peak_coord'][i].max() < batch['metadata'][i]['end'] 
 
+
+# %%
