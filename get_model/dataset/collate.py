@@ -188,7 +188,7 @@ def get_perturb_collate_fn(perturbation_batch):
 
 def everything_collate(batch):
     batch = batch_dict_list_to_dict(batch) 
-    zarr_batch = get_rev_collate_fn(batch['zarr'], reverse_complement=True)
+    zarr_batch = get_rev_collate_fn(batch['zarr'], reverse_complement=False)
     rrd_batch = default_collate(batch['rrd'])
     # merge the two batches
     zarr_batch.update(rrd_batch)
