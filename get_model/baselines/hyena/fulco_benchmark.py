@@ -71,6 +71,8 @@ if __name__=="__main__":
     argparse = argparse.ArgumentParser()
     argparse.add_argument("--start_idx", type=int, default=0)
     argparse.add_argument("--end_idx", type=int, default=100)
+    args = argparse.parse_args()
+
     fulco_data = "/pmglocal/alb2281/repos/CRISPR_comparison/resources/crispr_data/EPCrisprBenchmark_ensemble_data_GRCh38.tsv"
     fulco_df = pd.read_csv(fulco_data, sep="\t")
     fulco_df["orig_idx"] = fulco_df.index
@@ -125,12 +127,13 @@ if __name__=="__main__":
     result_col = []
     # iterate over rows of dataframe
     for idx, row in tqdm(fulco_df.iterrows(), total=len(fulco_df)):
-        if idx < argparse.start_idx:
+        if idx < args.start_idx:
             continue
-        if idx >= argparse.end_idx:
+        if idx >= args.end_idx:
             break
         if idx % SAVE_EVERY == 0:
             # save results to json
             with open(f"hyena_fulco_benchmark_chunk_{idx}.json", "w") as f:
                 json.dump(result_col, f)
+            result_col = []
         result_col.append(single_inference(row, model))
