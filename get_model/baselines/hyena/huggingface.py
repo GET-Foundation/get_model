@@ -23,6 +23,21 @@ import re
 from standalone_hyenadna import HyenaDNAModel
 from standalone_hyenadna import CharacterTokenizer
 
+from transformers import PreTrainedModel
+import re
+from standalone_hyenadna import HyenaDNAModel
+from standalone_hyenadna import CharacterTokenizer
+
+import os
+import pandas as pd
+from tqdm import tqdm
+from typing import Optional, Tuple, Union
+import torch
+import torch.nn as nn
+from torch.nn import functional as F
+from transformers.modeling_outputs import CausalLMOutput, SequenceClassifierOutput, BaseModelOutputWithNoAttention
+from transformers import AutoModelForCausalLM
+
 
 # helper 1
 def inject_substring(orig_str):
@@ -55,7 +70,6 @@ def load_weights(scratch_dict, pretrained_dict, checkpointing=False):
         if 'backbone' in key:
             # the state dicts differ by one prefix, '.model', so we add that
             key_loaded = 'model.' + key
-            # breakpoint()
             # need to add an extra ".layer" in key
             if checkpointing:
                 key_loaded = inject_substring(key_loaded)
@@ -124,6 +138,88 @@ class HyenaDNAPreTrainedModel(PreTrainedModel):
         scratch_model.load_state_dict(state_dict)
         print("Loaded pretrained weights ok!")
         return scratch_model
+
+
+class HyenaDNAForCausalLM(HyenaDNAPreTrainedModel):
+
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
+        self.hyena = HyenaDNAModel(config)
+        vocab_size = config.vocab_size
+        if vocab_size % config.pad_vocab_size_multiple != 0:
+            vocab_size += config.pad_vocab_size_multiple - (vocab_size % config.pad_vocab_size_multiple)
+        self.vocab_size = vocab_size
+        self.lm_head = nn.Linear(config.d_model, vocab_size, bias=False)
+        breakpoint()
+        # Initialize weights and apply final processing
+        self.post_init()
+
+    def get_input_embeddings(self):
+        return self.hyena.backbone.embeddings.word_embeddings
+
+    def set_input_embeddings(self, value):
+        self.hyena.backbone.embeddings.word_embeddings = value
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def set_output_embeddings(self, new_embeddings):
+        self.lm_head = new_embeddings
+
+    def set_decoder(self, decoder):
+        self.hyena = decoder
+
+    def get_decoder(self):
+        return self.hyena
+
+    def forward(
+        self,
+        input_ids: torch.LongTensor = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[Tuple, CausalLMOutput]:
+
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
+        outputs = self.hyena(
+            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        hidden_states = outputs[0]
+        logits = self.lm_head(hidden_states)
+        logits = logits.float()
+
+        loss = None
+        if labels is not None:
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = nn.CrossEntropyLoss()
+            shift_logits = shift_logits.view(-1, self.vocab_size)
+            shift_labels = shift_labels.view(-1)
+            # Enable model parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
+
+        if not return_dict:
+            output = (logits,) + outputs[1:]
+            return (loss,) + output if loss is not None else output
+
+        return CausalLMOutput(
+            loss=loss,
+            logits=logits,
+            hidden_states=outputs.hidden_states,
+        )
 
 
 
@@ -198,27 +294,9 @@ def inference_single():
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print("Using device:", device)
-
-    # instantiate the model (pretrained here)
-    if pretrained_model_name in ['hyenadna-tiny-1k-seqlen',
-                                 'hyenadna-small-32k-seqlen',
-                                 'hyenadna-medium-160k-seqlen',
-                                 'hyenadna-medium-450k-seqlen',
-                                 'hyenadna-large-1m-seqlen']:
-        # use the pretrained Huggingface wrapper instead
-        model = HyenaDNAPreTrainedModel.from_pretrained(
-            './checkpoints',
-            pretrained_model_name,
-            download=True,
-            config=backbone_cfg,
-            device=device,
-            use_head=use_head,
-            n_classes=n_classes,
-        )
-
-    # from scratch
-    elif pretrained_model_name is None:
-        model = HyenaDNAModel(**backbone_cfg, use_head=use_head, n_classes=n_classes)
+    
+    model = AutoModelForCausalLM.from_pretrained("LongSafari/hyenadna-large-1m-seqlen-hf", trust_remote_code=True)
+    breakpoint()
 
     # create tokenizer
     tokenizer = CharacterTokenizer(
@@ -246,6 +324,7 @@ def inference_single():
         embeddings = model(tok_seq)
 
     print(embeddings.shape)  # embeddings here!
+    
 
 # # uncomment to run! (to get embeddings)
 inference_single()
