@@ -21,7 +21,7 @@ from atac_rna_data_processing.io.region import Genome
 
 SEQUENCE_LENGTH = 1_000_000
 WINDOW_SIZE = 2000
-SAVE_EVERY = 100
+SAVE_EVERY = 50
 
 
 def single_inference(row, model):
@@ -67,20 +67,22 @@ def replace_enhancer_str(region_str, enhancer_str):
     return knockout_str
 
 
-if __name__=="__main__":
-    argparse = argparse.ArgumentParser()
-    argparse.add_argument("--start_idx", type=int, default=0)
-    argparse.add_argument("--end_idx", type=int, default=100)
-    args = argparse.parse_args()
-
+if __name__=="__main__":    
     fulco_data = "/pmglocal/alb2281/repos/CRISPR_comparison/resources/crispr_data/EPCrisprBenchmark_ensemble_data_GRCh38.tsv"
     fulco_df = pd.read_csv(fulco_data, sep="\t")
     fulco_df["orig_idx"] = fulco_df.index
-    fulco_df = fulco_df[fulco_df["startTSS"].notna()]
+
+    missing_indices = "/pmglocal/alb2281/repos/get_model/get_model/baselines/hyena/missing_indices.txt"
+    with open(missing_indices, "r") as f:
+        missing_indices = f.readlines()
+        # strip
+        missing_indices = [int(x.strip()) for x in missing_indices]
 
     genome_path = os.path.join("/manitou/pmg/users/xf2217/interpret_natac/", "hg38.fa")
     genome = Genome('hg38', genome_path)
-    
+
+    # index fulco_df where orig_idx is equal to missing_indices
+    fulco_df = fulco_df[fulco_df["orig_idx"].isin(missing_indices)]
     fulco_df["region_start"] = fulco_df["startTSS"] - SEQUENCE_LENGTH // 2
     fulco_df["region_start"] = fulco_df["region_start"].apply(lambda x: int(x))
     fulco_df["region_end"] = fulco_df["startTSS"] + SEQUENCE_LENGTH // 2
@@ -125,15 +127,12 @@ if __name__=="__main__":
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     result_col = []
+    counter = 0
     # iterate over rows of dataframe
     for idx, row in tqdm(fulco_df.iterrows(), total=len(fulco_df)):
-        if idx < args.start_idx:
-            continue
-        if idx >= args.end_idx:
-            break
-        if idx % SAVE_EVERY == 0:
-            # save results to json
-            with open(f"{output_dir}/hyena_fulco_benchmark_chunk_{idx}.json", "w") as f:
-                json.dump(result_col, f)
-            result_col = []
         result_col.append(single_inference(row, model))
+
+    if len(result_col) > 0:
+        with open(f"{output_dir}/hyena_fulco_benchmark_chunk_extra.json", "w") as f:
+            json.dump(result_col, f)
+    
