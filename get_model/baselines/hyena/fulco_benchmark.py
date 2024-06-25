@@ -14,13 +14,14 @@ from standalone_hyenadna import HyenaDNAModel
 from standalone_hyenadna import CharacterTokenizer
 from transformers import AutoModelForCausalLM
 import pathlib
+import argparse
 
 from atac_rna_data_processing.io.region import Genome
 
 
 SEQUENCE_LENGTH = 1_000_000
 WINDOW_SIZE = 2000
-SAVE_EVERY = 3
+SAVE_EVERY = 100
 
 
 def single_inference(row, model):
@@ -67,6 +68,9 @@ def replace_enhancer_str(region_str, enhancer_str):
 
 
 if __name__=="__main__":
+    argparse = argparse.ArgumentParser()
+    argparse.add_argument("--start_idx", type=int, default=0)
+    argparse.add_argument("--end_idx", type=int, default=100)
     fulco_data = "/pmglocal/alb2281/repos/CRISPR_comparison/resources/crispr_data/EPCrisprBenchmark_ensemble_data_GRCh38.tsv"
     fulco_df = pd.read_csv(fulco_data, sep="\t")
     fulco_df["orig_idx"] = fulco_df.index
@@ -121,6 +125,10 @@ if __name__=="__main__":
     result_col = []
     # iterate over rows of dataframe
     for idx, row in tqdm(fulco_df.iterrows(), total=len(fulco_df)):
+        if idx < argparse.start_idx:
+            continue
+        if idx >= argparse.end_idx:
+            break
         if idx % SAVE_EVERY == 0:
             # save results to json
             with open(f"hyena_fulco_benchmark_chunk_{idx}.json", "w") as f:
