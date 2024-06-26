@@ -1,53 +1,52 @@
-import torch
-import polars as pl
-from enformer_pytorch import Enformer, GenomeIntervalDataset
+import tensorflow as tf
+# Make sure the GPU is enabled 
+assert tf.config.list_physical_devices('GPU')
+import glob
+import json
+import functools
+import pandas as pd
+import os 
+from tqdm import tqdm
+import numpy as np
 import argparse
+import pathlib
 
-from enformer_pytorch import from_pretrained
-from enformer_pytorch.finetune import HeadAdapterWrapper
-
-from baselines.utils import *
-
-
-device = "cuda:0"
-hg38_path = "/pmglocal/alb2281/get/get_data/hg38.ml.fa"
+import enformer
+from utils import *
 
 
 def main(args):
-    breakpoint()
-    train_path, val_path = split_data_by_chr(args)
-    enformer = from_pretrained('EleutherAI/enformer-official-rough', target_length=2, use_tf_gamma=False) # target_length=1 throws error
-    model = HeadAdapterWrapper(
-        enformer = enformer,
-        num_tracks = 1,
-        post_transformer_embed = False,
-        auto_set_target_length = False, # Override infer target_length from target dimensions
-    ).to(device)
-    model.to(device)
-
-    dataset_train = GenomeIntervalFinetuneDataset(
-        bed_file = train_path,                         
-        fasta_file = hg38_path,                   
-        return_seq_indices = True,                          
-        shift_augs = (-2, 2),                              
-        context_length = 196_608,
-    )
-    dataset_val = GenomeIntervalFinetuneDataset(
-        bed_file = val_path,                         
-        fasta_file = hg38_path,                   
-        return_seq_indices = True,                          
-        shift_augs = (-2, 2),                              
-        context_length = 196_608,
-    )
-
-    breakpoint()
+    np.random.seed(42)
+    EXTENDED_SEQ_LENGTH = 393_216
+    SEQ_LENGTH = 196_608
+    inputs = np.array(np.random.random((1, EXTENDED_SEQ_LENGTH, 4)), dtype=np.float32)
+    inputs_cropped = enformer.TargetLengthCrop1D(SEQ_LENGTH)(inputs)
+    
 
 
-if __name__=="__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--atac_data", type=str, required=True)
-    parser.add_argument("--labels_path", type=str, required=True)
-    parser.add_argument("--leave_out_chr", type=str, required=True)
-    parser.add_argument("--batch_size", type=int, default=4)
-    args = parser.parse_args()
-    main(args)
+    # enformer_model = enformer.Enformer()
+    # checkpoint = tf.train.Checkpoint(module=enformer_model)
+    # latest = tf.train.latest_checkpoint(checkpoint_path)
+
+
+def copy_checkpoint_to_local():
+    checkpoint_gs_path = 'gs://dm-enformer/models/enformer/sonnet_weights/*'
+    checkpoint_path = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/ckpts'
+    pathlib.Path(checkpoint_path).mkdir(parents=True, exist_ok=True)
+
+    # Copy checkpoints from GCS to temporary directory.
+    # This will take a while as the checkpoint is ~ 1GB.
+    for file_path in tf.io.gfile.glob(checkpoint_gs_path):
+        file_name = os.path.basename(file_path)
+        tf.io.gfile.copy(file_path, f'{checkpoint_path}/{file_name}', overwrite=True)
+    
+
+if __name__ == '__main__':  
+    # argparse = argparse.ArgumentParser()
+    # # argparse.add_argument('--organism', type=str, required=True)
+    # # argparse.add_argument('--subset', type=str, required=True)
+    # args = argparse.parse_args()
+
+    # main(args)
+
+    copy_checkpoint_to_local()
