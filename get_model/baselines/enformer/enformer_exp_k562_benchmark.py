@@ -23,7 +23,7 @@ model_path = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/ckp
 fasta_file = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/genome.fa'
 clinvar_vcf = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/clinvar.vcf.gz'
 targets_txt = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/targets_human.txt"
-output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds/enformer_k562_new_encode"
+output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds/enformer_k562_new_encode_chr10,11"
 
 
 SEQUENCE_LENGTH = 393216
@@ -214,6 +214,7 @@ if __name__=="__main__":
   k562_file = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/cage_peaks_new_encode.csv"
   k562_df = pd.read_csv(k562_file)
   k562_df["orig_idx"] = k562_df.index
+  k562_df = k562_df[(k562_df["Chromosome"] == "chr10") | (k562_df["Chromosome"] == "chr11")].reset_index(drop=True)
   print(f"Predicting for {len(k562_df)} regions.")
 
   if not os.path.exists(output_dir):
