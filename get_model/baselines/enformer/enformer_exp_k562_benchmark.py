@@ -1,8 +1,6 @@
-# %%
 import tensorflow as tf
-# %%
 tf.config.list_physical_devices('GPU')
-# %%
+
 import tensorflow_hub as hub
 import joblib
 import gzip
