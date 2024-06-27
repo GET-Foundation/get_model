@@ -15,6 +15,7 @@ import seaborn as sns
 from tqdm import tqdm
 import os
 import json
+import argparse
 
 
 transform_path = 'gs://dm-enformer/models/enformer.finetuned.SAD.robustscaler-PCA500-robustscaler.transform.pkl'
@@ -29,6 +30,7 @@ SEQUENCE_LENGTH = 393216
 OUTPUT_SEQ_LENGTH = 114688
 BATCH_SIZE = 12
 SAVE_EVERY_N_BATCHES = 2
+CAGE_START_TRACK_IDX = 4675 # end_index is end of file
 
 
 class Enformer:
@@ -190,21 +192,25 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df):
   
   result_dict = {}
 
-  cage_start_track_idx = 4675
   
+
   for idx, row in batch_df.iterrows():
     output_start = (row["Start"] + row["End"])/2 - OUTPUT_SEQ_LENGTH/2
     output_end = (row["Start"] + row["End"])/2 + OUTPUT_SEQ_LENGTH/2
     interval_bins = np.linspace(output_start, output_end, num=896, endpoint=False)
     exp_output_start = np.abs(interval_bins - row["Start"]).argmin()
     exp_output_end = np.abs(interval_bins - row["End"]).argmin()
-    ret_pred = predictions[idx, exp_output_start:exp_output_end+1, cage_start_track_idx:]
+    ret_pred = predictions[idx, exp_output_start:exp_output_end+1, CAGE_START_TRACK_IDX:]
     result_dict[row["orig_idx"]] = ret_pred.tolist()
   
   return result_dict
 
 
 if __name__=="__main__":
+  argparse = argparse.ArgumentParser()
+  argparse.add_argument("--start_idx", type=int, default=0)
+  argparse.add_argument("--end_idx", type=int, default=100)
+
   pyfaidx.Faidx(fasta_file)
   fasta_extractor = FastaStringExtractor(fasta_file)
   model = Enformer(model_path)
@@ -234,5 +240,5 @@ if __name__=="__main__":
     
     num_batches += 1
 
-    with open(f"{output_dir}/enformer_cage_example_{start+BATCH_SIZE}.json", "w") as f:
-        json.dump(batch_preds, f)
+    with open(f"{output_dir}/enformer_cage_example_final.json", "w") as f:
+      json.dump(batch_preds, f)
