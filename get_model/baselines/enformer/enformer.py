@@ -169,7 +169,7 @@ class Enformer(snt.Module):
     return self._heads
 
   def __call__(self, inputs: tf.Tensor,
-               is_training: bool) -> Dict[str, tf.Tensor]:
+               is_training: bool = False) -> Dict[str, tf.Tensor]:
     trunk_embedding = self.trunk(inputs, is_training=is_training)
     return {
         head: head_module(trunk_embedding, is_training=is_training)
@@ -220,7 +220,7 @@ class Sequential(snt.Module):
         layers = layers()
       self._layers = [layer for layer in layers if layer is not None]
 
-  def __call__(self, inputs: tf.Tensor, is_training: bool, **kwargs):
+  def __call__(self, inputs: tf.Tensor, is_training: bool = False, **kwargs):
     outputs = inputs
     for _, mod in enumerate(self._layers):
       if accepts_is_training(mod):
@@ -291,7 +291,7 @@ class Residual(snt.Module):
     super().__init__(name=name)
     self._module = module
 
-  def __call__(self, inputs: tf.Tensor, is_training: bool, *args,
+  def __call__(self, inputs: tf.Tensor, is_training: bool = False, *args,
                **kwargs) -> tf.Tensor:
     return inputs + self._module(inputs, is_training, *args, **kwargs)
 

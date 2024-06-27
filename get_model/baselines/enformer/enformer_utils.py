@@ -7,6 +7,7 @@ import functools
 import pandas as pd
 import os 
 from tqdm import tqdm
+import pathlib
 
 
 def get_targets(organism):
@@ -15,7 +16,8 @@ def get_targets(organism):
 
 
 def organism_path(organism):
-  return os.path.join('gs://basenji_barnyard/data', organism)
+  # return os.path.join('gs://basenji_barnyard/data', organism)
+  return os.path.join('/pmglocal/alb2281/get/get_data/enformer', organism)
 
 
 def get_dataset(organism, subset, num_threads=8):
@@ -241,3 +243,13 @@ def evaluate_model(model, dataset, head, max_steps=None):
     metric.update_state(batch['target'], predict(batch['sequence']))
 
   return metric.result()
+
+
+def copy_checkpoint_to_local():
+    checkpoint_gs_path = 'gs://dm-enformer/models/enformer/sonnet_weights/*'
+    checkpoint_path = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/ckpts/sonnet'
+    pathlib.Path(checkpoint_path).mkdir(parents=True, exist_ok=True)
+
+    for file_path in tf.io.gfile.glob(checkpoint_gs_path):
+        file_name = os.path.basename(file_path)
+        tf.io.gfile.copy(file_path, f'{checkpoint_path}/{file_name}', overwrite=True)
