@@ -1489,8 +1489,8 @@ class InferenceDataset(PretrainDataset):
                 gene_chr, gene_start)
 
         # save the tss_chunk_idx as feather in the same directory as the gencode file
-        self.tss_chunk_idx.to_feather(self.gencode_obj.feather_file.replace(
-            '.feather', '_tss_chunk_idx.feather'))
+        # self.tss_chunk_idx.to_feather(self.gencode_obj.feather_file.replace(
+            # '.feather', '_tss_chunk_idx.feather'))
         return self.tss_chunk_idx
 
     def _get_window_idx_for_tss_and_celltype(self, data_key, celltype_id, tss_idx):
