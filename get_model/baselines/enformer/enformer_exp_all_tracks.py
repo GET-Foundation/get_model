@@ -203,11 +203,16 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df):
 
 
 if __name__=="__main__":
+  argparse = argparse.ArgumentParser()
+  argparse.add_argument("--start_idx", type=int, default=0)
+  argparse.add_argument("--end_idx", type=int, default=100)
+  args = argparse.parse_args()
+  
   pyfaidx.Faidx(fasta_file)
   fasta_extractor = FastaStringExtractor(fasta_file)
   model = Enformer(model_path)
 
-  region_file = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/results/enformer_benchmark_to_run.csv"
+  region_file = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/results/train_enformer_benchmark_to_run.csv"
   region_df = pd.read_csv(region_file)
   region_df.reset_index(inplace=True)
   region_df["orig_idx"] = region_df.index
@@ -221,6 +226,10 @@ if __name__=="__main__":
   num_batches = 0
 
   for start in tqdm(range(0, len(region_df), BATCH_SIZE)):
+    if start < args.start_idx:
+      continue
+    if start >= args.end_idx:
+      break
     end = start + BATCH_SIZE
     batch_df = region_df[start:end].reset_index()
     preds = compute_enformer_preds_on_batch(model, fasta_extractor, batch_df)
