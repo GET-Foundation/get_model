@@ -16,12 +16,19 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import OrderedDict
 
+import hydra
+import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 import torch
 import torch.distributed as dist
+import torch.utils.data
 import zarr
+from hydra.core.global_hydra import GlobalHydra
 from timm.utils import get_state_dict
 
+from get_model.config.config import Config
+np.bool = np.bool_
 try:
     from torch import inf
 except ImportError:
@@ -29,6 +36,13 @@ except ImportError:
 
 from tensorboardX import SummaryWriter
 
+
+def load_config(config_name):
+    # Initialize Hydra to load the configuration
+    GlobalHydra.instance().clear()
+    hydra.initialize(config_path="config", version_base="1.3")
+    cfg = hydra.compose(config_name=config_name)
+    return cfg
 
 def print_shape(x):
     """a recursive function to print the shape of values in a nested dictionary"""

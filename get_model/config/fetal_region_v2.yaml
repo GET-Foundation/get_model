@@ -14,8 +14,8 @@ dataset:
     data_type: 'fetal'
     leave_out_celltypes: 'Astrocytes'
     leave_out_chromosomes: null
-    quantitative_atac: false
-    sampling_step: 450
+    quantitative_atac: true
+    sampling_step: 100
 
 training:
   save_ckpt_freq: 1
@@ -34,7 +34,7 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetuneV1"
+  project_name: "GETRegionFinetuneV2"
   run_name: "Astrocyte"
 
 task:
@@ -44,7 +44,8 @@ task:
 
 finetune:
   pretrain_checkpoint: false
-  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
+  strict: true
+  checkpoint: "/home/xf2217/Projects/geneformer_nova/output_e800_r200_mask0.5_adult_watac_ft_expression_ood_tss_logtarget_gradclipnone_astrocyte_human_bingren_shendure_noTCGA/checkpoint-best.pth"
   patterns_to_freeze: []
 
 eval_tss: true

@@ -1,9 +1,9 @@
 defaults:
   - base_ref_region_config
-  - model/GETRegionFinetuneATAC@_here_
-  - finetune/v1_pretrain@finetune
+  - model/GETRegionFinetune@_here_
   - machine/pc
-  - dataset/k562_nucleotide_region_finetune_hic@dataset
+  - finetune/v1_pretrain@finetune
+  - dataset/k562_cage@dataset
   - _self_
 
 assembly: "hg38"
@@ -11,8 +11,6 @@ assembly: "hg38"
 task:
   layer_names: []
   test_mode: "interpret"
-  gene_list: /burg/pmg/users/xf2217/CRISPR_comparison/genes.txt
-  mutations: /burg/pmg/users/xf2217/CRISPR_comparison/regions.txt
 
 training:
   save_ckpt_freq: 1
@@ -23,8 +21,8 @@ training:
   use_fp16: false
 
 dataset:
-  quantitative_atac: true
-  sampling_step: 100
+  quantitative_atac: false
+  sampling_step: 450
   mask_ratio: 0
 
 optimizer:
@@ -36,15 +34,18 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune_k562_atac"
-  run_name: "k562_nucleotide_region_finetune_hic"
+  project_name: "GETRegionFinetune_k562_cage"
+  run_name: "BATAC_LoRA_from_BATAC_pretrain"
 
 finetune:
   pretrain_checkpoint: true
   strict: false
-  use_lora: false
+  use_lora: true
+  layers_with_lora: ['region_embed', 'encoder']
   checkpoint: "/home/xf2217/Projects/get_checkpoints/new_output_e800_r200_mask0.5_adult_natac_human_bingren_shendure/checkpoint-799.pth"
   patterns_to_freeze: []
+  model_key: 'model'
+
 
 eval_tss: true
 log_image: true

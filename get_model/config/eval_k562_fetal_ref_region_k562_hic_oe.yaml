@@ -21,7 +21,7 @@ training:
   use_fp16: false
 
 dataset:
-  quantitative_atac: false
+  quantitative_atac: true
   sampling_step: 100
   mask_ratio: 0
 
@@ -34,7 +34,7 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune_k562_hic_oe"
+  project_name: "GETRegionFinetune_k562_cage"
   run_name: "debug"
 
 finetune:

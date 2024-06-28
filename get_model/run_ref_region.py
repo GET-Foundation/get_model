@@ -54,6 +54,8 @@ class ReferenceRegionDataModule(GETDataModule):
         if stage == 'fit' or stage is None:
             self.dataset_train = self.build_from_zarr_dataset(
                 self.dataset_train)
+            print(self.dataset_train.zarr_dataset.datapool.peaks_dict.keys())
+            
             self.dataset_val = self.build_from_zarr_dataset(self.dataset_val)
         if stage == 'predict':
             if self.cfg.task.test_mode == 'predict':
@@ -111,7 +113,7 @@ class RegionLitModel(LitModel):
         super().__init__(cfg)
         self.min_exp_loss = float('inf')
         self.exp_overfit_count = 0
-        self.exp_overfit_threshold = 4
+        self.exp_overfit_threshold = 100
 
     def validation_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='val')
@@ -119,11 +121,9 @@ class RegionLitModel(LitModel):
         #       obs['exp'].detach().cpu().numpy().flatten().max())
 
         # if size of obs is too large, subsample 2000 elements
-        if 'hic' in obs:
-            idx = np.random.choice(
-                obs['hic'].flatten().shape[0], 1000, replace=False)
-            obs['hic'] = obs['hic'].flatten()[idx]
-            pred['hic'] = pred['hic'].flatten()[idx]
+        # if 'hic' in obs:
+        #     obs['hic'] = obs['hic'][0].flatten()
+        #     pred['hic'] = pred['hic'][0].flatten()
 
         if 'abc' in obs:
             idx = np.random.choice(
@@ -159,10 +159,23 @@ class RegionLitModel(LitModel):
         if batch_idx == 0 and self.cfg.log_image:
             # log one example as scatter plot
             for key in pred:
-                plt.clf()
-                self.logger.experiment.log({
-                    f"scatter_{key}": wandb.Image(sns.scatterplot(y=pred[key].detach().cpu().numpy().flatten(), x=obs[key].detach().cpu().numpy().flatten()))
-                })
+                if key!='hic':
+                    plt.clf()
+                    self.logger.experiment.log({
+                        f"scatter_{key}": wandb.Image(sns.scatterplot(y=pred[key].detach().cpu().numpy().flatten(), x=obs[key].detach().cpu().numpy().flatten()))
+                    })
+                else:
+                    # log hic matrix as a heatmap
+                    for i in range(len(pred[key])):
+
+                        plt.clf()
+                        self.logger.experiment.log({
+                            f"heatmap_{key}_pred": wandb.Image(sns.heatmap(pred[key][i].detach().cpu().numpy().reshape(200,200), square=True, vmax=1.0, vmin=0, cmap='viridis'))
+                        })
+                        plt.clf()
+                        self.logger.experiment.log({
+                            f"heatmap_{key}_obs": wandb.Image(sns.heatmap(obs[key][i].detach().cpu().numpy().reshape(200,200), square=True, vmax=1.0, vmin=0, cmap='viridis'))
+                        })
         # if distributed, set sync_dist=True
         distributed = self.cfg.machine.num_devices > 1
         self.log_dict(
@@ -277,7 +290,6 @@ class RegionLitModel(LitModel):
             z = zarr.open(zarr_path, mode='a')
             recursive_save_to_zarr(
                 z, result,  object_codec=object_codec, overwrite=True)
-
         elif self.cfg.task.test_mode == 'interpret_captum':
             tss_peak = batch['tss_peak'][0].cpu().numpy()
 
@@ -427,6 +439,7 @@ class RegionLitModel(LitModel):
 def run(cfg: DictConfig):
     model = RegionLitModel(cfg)
     dm = ReferenceRegionDataModule(cfg)
+    # print all training cell types
     print(OmegaConf.to_yaml(cfg))
     model.dm = dm
     wandb_logger = WandbLogger(name=cfg.wandb.run_name,

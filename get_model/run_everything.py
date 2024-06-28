@@ -174,7 +174,7 @@ class RegionLitModel(LitModel):
             for key in pred:
                 plt.clf()
                 self.logger.experiment.log({
-                    f"scatter_{key}": wandb.Image(sns.scatterplot(y=pred[key].detach().cpu().numpy().flatten(), x=obs[key].detach().cpu().numpy().flatten()))
+                    f"scatter_{key}": wandb.Image(sns.scatterplot(y=pred[key].detach().cpu().numpy().flatten(), x=obs[key].detach().cpu().numpy().flatten(), s=1, alpha=0.3))
                 })
         # if distributed, set sync_dist=True
         distributed = self.cfg.machine.num_devices > 1

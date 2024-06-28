@@ -2,7 +2,7 @@ model:
   _target_: get_model.model.model_refactored.GETRegionFinetuneHiCOE
   cfg:
     num_regions: 200
-    num_motif: 283
+    num_motif: 284
     embed_dim: 768
     num_layers: 12
     num_heads: 12

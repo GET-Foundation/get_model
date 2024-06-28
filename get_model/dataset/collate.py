@@ -47,7 +47,7 @@ def batch_dict_list_to_dict(batch: list):
     return new_batch
 
 
-def get_rev_collate_fn(batch, reverse_complement=True):
+def get_rev_collate_fn(batch, reverse_complement=False):
     batch = batch_dict_list_to_dict(batch)
     sample_track = list(batch['sample_track'])
     sample_peak_sequence = list(batch['sample_peak_sequence'])
@@ -63,8 +63,8 @@ def get_rev_collate_fn(batch, reverse_complement=True):
     mask_ratio = metadata[0]['mask_ratio']
 
     n_peak_max = max([len(x) for x in celltype_peaks])
-    # calculate max length of the sample sequence using peak coordinates, padding is 100 per peak
-    sample_len_max = max([(x[:, 1]-x[:, 0]).sum()+100*x.shape[0]
+    # calculate max length of the sample sequence using peak coordinates
+    sample_len_max = max([(x[:, 1]-x[:, 0]).sum()
                          for x in celltype_peaks])
     # pad each peaks in the end with 0
     for i in range(len(celltype_peaks)):
@@ -104,16 +104,13 @@ def get_rev_collate_fn(batch, reverse_complement=True):
     else:
         hic_matrix = torch.FloatTensor(0)
     peak_len = celltype_peaks[:, :, 1]-celltype_peaks[:, :, 0]
-    padded_peak_len = peak_len + 100
     total_peak_len = peak_len.sum(1)
     n_peaks = (peak_len > 0).sum(1)
     # max_n_peaks = n_peaks.max()
     max_n_peaks = n_peak_max
-    peak_peadding_len = n_peaks*100
-    tail_len = sample_peak_sequence.shape[1] - \
-        peak_peadding_len - peak_len.sum(1)
+    tail_len = sample_peak_sequence.shape[1] - peak_len.sum(1)
     # flatten the list
-    chunk_size = torch.cat([torch.cat([padded_peak_len[i][0:n], tail_len[i].unsqueeze(
+    chunk_size = torch.cat([torch.cat([peak_len[i][0:n], tail_len[i].unsqueeze(
         0)]) for i, n in enumerate(n_peaks)]).tolist()
 
     mask = torch.stack([torch.cat([torch.zeros(i), torch.zeros(

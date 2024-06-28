@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from sympy import rem
 import torch
 import zarr
 from caesar.io.gencode import Gencode
@@ -97,34 +98,33 @@ def get_sequence_with_mutations(arr, start, end, mut):
     return arr, arr_wt
 
 
-def _stack_tracks_with_padding_and_inactivation(celltype_peaks, track, padding, inactivated_peak_idx):
+def _stack_tracks_with_inactivation(celltype_peaks, track, inactivated_peak_idx=None):
     # Initialize an empty list to hold the arrays.
     stacked_track_list = []
     track_shape = track.shape
     track_dtype = track.dtype
-    if len(track_shape) == 1:
-        track_depth = 1
-    else:
-        track_depth = track_shape[1]
-    # Iterate over the enumerated celltype_peaks to apply padding and handle inactivated peaks.
+    track_depth = 1 if len(track_shape) == 1 else track_shape[1]
+
+    # Handle the case where inactivated_peak_idx is None
     if inactivated_peak_idx is None:
         inactivated_peak_idx = []
+
+    # Iterate over the enumerated celltype_peaks and handle inactivated peaks.
     for i, (start, end) in enumerate(celltype_peaks):
         if i not in inactivated_peak_idx:
-            # Apply padding and add the sliced track to the list.
-            padded_track = track[max(0, start-padding):end+padding]
-            # check if the padded track is empty
-            if padded_track.size == 0 or padded_track.shape[0] <= 1:
-                if end-start+2*padding <= 0:
-                    padded_track = csr_matrix(
-                        (2*padding, track_depth), dtype=track_dtype)
-                padded_track = csr_matrix(
-                    (end-start+2*padding, track_depth), dtype=track_dtype)
-            stacked_track_list.append(padded_track)
+            # Slice the track and add it to the list
+            sliced_track = track[start:end]
+            
+            # Check if the sliced track is empty
+            if sliced_track.size == 0 or sliced_track.shape[0] <= 1:
+                if end - start <= 0:
+                    raise ValueError(f"Invalid peak dimensions: end ({end}) <= start ({start})")
+                sliced_track = csr_matrix((end - start, track_depth), dtype=track_dtype)
+            
+            stacked_track_list.append(sliced_track)
         else:
-            # Create a zero array of the required shape for inactivated peaks.
-            zero_array = csr_matrix(
-                (end-start+2*padding, track_depth), dtype=track_dtype)
+            # Create a zero array for inactivated peaks
+            zero_array = csr_matrix((end - start, track_depth), dtype=track_dtype)
             stacked_track_list.append(zero_array)
 
     # Vertically stack the arrays.
@@ -359,18 +359,23 @@ class ZarrDataPool(object):
         self.zarr_dict = {cdz.data_key: cdz for zarr_dir in self.zarr_dirs for cdz in [
             CelltypeDenseZarrIO(zarr_dir).subset_celltypes_with_data_name(self.peak_name)]}
 
-        if self.keep_celltypes is not None and isinstance(self.keep_celltypes, list):
-            for data_key, cdz in self.zarr_dict.items():
-                self.zarr_dict.update({data_key: cdz.leave_out_celltypes(
-                    self.keep_celltypes, inverse=True)})
-        elif isinstance(self.keep_celltypes, str):
-            # remove the leave out celltypes using substring
-            for data_key, cdz in self.zarr_dict.items():
-                self.zarr_dict.update({data_key: cdz.leave_out_celltypes_with_pattern(
-                    self.keep_celltypes, inverse=True)})
+        if self.is_train:
+            self.keep_celltypes = self.keep_celltypes.split(',') if isinstance(
+                self.keep_celltypes, str) else self.keep_celltypes
+            # remove '' from list
+            self.keep_celltypes = [celltype for celltype in self.keep_celltypes if celltype != '']
+            if self.keep_celltypes is not None and isinstance(self.keep_celltypes, list) and len(self.keep_celltypes) > 0:
+                for data_key, cdz in self.zarr_dict.items():
+                    self.zarr_dict.update({data_key: cdz.leave_out_celltypes(
+                        self.keep_celltypes, inverse=True)})
+            elif isinstance(self.keep_celltypes, str):
+                # remove the leave out celltypes using substring
+                for data_key, cdz in self.zarr_dict.items():
+                    self.zarr_dict.update({data_key: cdz.leave_out_celltypes_with_pattern(
+                        self.keep_celltypes, inverse=True)})
 
         # remove the leave out celltypes using subset
-        if self.leave_out_celltypes is not None and isinstance(self.leave_out_celltypes, list):
+        if self.leave_out_celltypes is not None and isinstance(self.leave_out_celltypes, list) and len(self.leave_out_celltypes) > 0:
             for data_key, cdz in self.zarr_dict.items():
                 self.zarr_dict.update({data_key: cdz.leave_out_celltypes(
                     self.leave_out_celltypes, inverse=not self.is_train)})
@@ -751,16 +756,15 @@ class ZarrDataPool(object):
         return chunk_idx
 
     def generate_sample(self, chr_name, start, end, data_key, celltype_id,
-                        mutations=None, peak_inactivation=None, padding=50):
+                        mutations=None, peak_inactivation=None):
         """
         Convenient handler for generate a single sample.
         """
         try:
             chr_name, start, end, celltype_id, track, _, celltype_peaks, motif_mean_std = self.load_data(
                 data_key, celltype_id, chr_name, start, end)
-            track_start = celltype_peaks['Start'].min() - padding
-            track_end = celltype_peaks['End'].max() + padding
-            assert track_start >= start and track_end <= end, f"Celltype peaks after padding is not within the input range {chr_name}:{start}-{end}"
+            track_start = celltype_peaks['Start'].min()
+            track_end = celltype_peaks['End'].max()
 
             if peak_inactivation is not None:
                 inactivated_peak_idx = self._inactivated_peaks(
@@ -810,10 +814,10 @@ class ZarrDataPool(object):
 
             sample_track = track[_start:_end]
 
-            sample_peak_sequence = _stack_tracks_with_padding_and_inactivation(
-                celltype_peaks, sample_peak_sequence, padding, inactivated_peak_idx)
-            sample_track = _stack_tracks_with_padding_and_inactivation(
-                celltype_peaks, sample_track, padding, inactivated_peak_idx)
+            sample_peak_sequence = _stack_tracks_with_inactivation(
+                celltype_peaks, sample_peak_sequence, inactivated_peak_idx)
+            sample_track = _stack_tracks_with_inactivation(
+                celltype_peaks, sample_track, inactivated_peak_idx)
             # remove atac and expression from inactivated peak
             if inactivated_peak_idx is not None:
                 # keep the TSS column but set aTPM and expression to 0
@@ -845,7 +849,6 @@ class PreloadDataPack(object):
     Parameters:
     preload_count (int): The number of windows to preload.
     zarr_data_pool (ZarrDataPool): A ZarrDataPool object.
-    padding (int): The number of nucleotides to pad around each peak.
     mask_ratio (float): The ratio of nucleotides to mask in the peak sequence.
     n_peaks_lower_bound (int): The lower bound of number of peaks in a sample.
     n_peaks_upper_bound (int): The upper bound of number of peaks in a sample.
@@ -858,7 +861,7 @@ class PreloadDataPack(object):
     This class is used by PretrainDataset to preload datax for a slot.
     """
 
-    def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, padding=50, mask_ratio=0.5,
+    def __init__(self, preload_count: int, zarr_data_pool: ZarrDataPool, mask_ratio=0.5,
                  n_peaks_lower_bound=5, n_peaks_upper_bound=200, n_peaks_sample_gap=50, use_insulation=True, window_index=None, peak_inactivation=None, mutations=None):
         # logging.info('Initializing PreloadDataPack')
         self.preload_count = preload_count
@@ -867,7 +870,6 @@ class PreloadDataPack(object):
         self.insulation_peak_counts = pd.DataFrame()
         self.preloaded_data_window_indices_mapping = {}
         self.next_sample = 0
-        self.padding = padding
         self.peak_inactivation = peak_inactivation
         self.mutations = mutations
         self.mask_ratio = mask_ratio
@@ -926,7 +928,7 @@ class PreloadDataPack(object):
         self._calculate_window_peak_counts()
         if self.insulation_peak_counts.shape[0] == 0 and self.use_insulation:
             logging.info('No valid insulation peak count')
-            return PreloadDataPack(self.preload_count, self.zarr_data_pool, self.padding, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound, self.n_peaks_sample_gap, self.use_insulation, window_index, self.peak_inactivation, self.mutations)
+            return PreloadDataPack(self.preload_count, self.zarr_data_pool, self.mask_ratio, self.n_peaks_lower_bound, self.n_peaks_upper_bound, self.n_peaks_sample_gap, self.use_insulation, window_index, self.peak_inactivation, self.mutations)
 
     def get_sample_with_idx(self, idx):
         """
@@ -991,8 +993,8 @@ class PreloadDataPack(object):
             peak_start = peak_index * self.n_peaks_sample_gap
             peak_end = peak_start + self.n_peaks_upper_bound
         celltype_peaks = celltype_peaks.iloc[peak_start:peak_end]
-        track_start = celltype_peaks['Start'].min() - self.padding
-        track_end = celltype_peaks['End'].max() + self.padding
+        track_start = celltype_peaks['Start'].min()
+        track_end = celltype_peaks['End'].max()
         return self._generate_sample(chr_name, start, end, data_key, celltype_id, track, celltype_peaks, motif_mean_std,
                                      track_start, track_end, mut)
 
@@ -1068,10 +1070,10 @@ class PreloadDataPack(object):
 
         sample_track = track[_start:_end]
 
-        sample_peak_sequence = _stack_tracks_with_padding_and_inactivation(
-            celltype_peaks, sample_peak_sequence, self.padding, inactivated_peak_idx)
-        sample_track = _stack_tracks_with_padding_and_inactivation(
-            celltype_peaks, sample_track, self.padding, inactivated_peak_idx)
+        sample_peak_sequence = _stack_tracks_with_inactivation(
+            celltype_peaks, sample_peak_sequence, inactivated_peak_idx)
+        sample_track = _stack_tracks_with_inactivation(
+            celltype_peaks, sample_track, inactivated_peak_idx)
         # remove atac and expression from inactivated peak
         if inactivated_peak_idx is not None:
             # keep the TSS column but set aTPM and expression to 0
@@ -1235,7 +1237,6 @@ class PretrainDataset(Dataset):
                  preload_count=50,
                  n_packs=1,
 
-                 padding=50,
                  mask_ratio=0.5,
                  negative_peak_name=None,
                  negative_peak_ratio=0,
@@ -1285,7 +1286,6 @@ class PretrainDataset(Dataset):
         preload_count (int): The number of windows to preload.
         n_packs (int): The number of data packs to preload.
 
-        padding (int): The number of nucleotides to pad around each peak.
         mask_ratio (float): The ratio of nucleotides to mask in the peak sequence.
         negative_peak_name (str): The name of the negative peak data.
         negative_peak_ratio (float): The ratio of negative peaks to sample.
@@ -1306,7 +1306,6 @@ class PretrainDataset(Dataset):
         for key, value in locals().items():
             logging.info(f'{key}: {value}')
         self.preload_count = preload_count
-        self.padding = padding
         self.mask_ratio = mask_ratio
         self.peak_name = peak_name
         self.negative_peak_name = negative_peak_name
@@ -1362,7 +1361,7 @@ class PretrainDataset(Dataset):
     def __getitem__(self, index: int):
         if self.preload_data_packs is None:
             self.preload_data_packs = [PreloadDataPack(
-                preload_count=self.preload_count, zarr_data_pool=self.datapool, padding=self.padding, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation, peak_inactivation=self.peak_inactivation, mutations=self.mutations) for _ in range(self.n_packs)]
+                preload_count=self.preload_count, zarr_data_pool=self.datapool, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation, peak_inactivation=self.peak_inactivation, mutations=self.mutations) for _ in range(self.n_packs)]
         return self._getitem(index)
 
     def _getitem(self, index: int):
@@ -1394,7 +1393,7 @@ class PretrainDataset(Dataset):
         # logging.info(f'Async reloading data for slot {index}')
         # reload by reinitializing the preload data pack and put it back to the preload_data_packs
         self.preload_data_packs[slot] = PreloadDataPack(
-            preload_count=self.preload_count, zarr_data_pool=self.datapool, padding=self.padding, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation, window_index=window_index, peak_inactivation=self.peak_inactivation, mutations=self.mutations)
+            preload_count=self.preload_count, zarr_data_pool=self.datapool, mask_ratio=self.mask_ratio, n_peaks_lower_bound=self.n_peaks_lower_bound, n_peaks_upper_bound=self.n_peaks_upper_bound, n_peaks_sample_gap=self.n_peaks_sample_gap, use_insulation=self.use_insulation, window_index=window_index, peak_inactivation=self.peak_inactivation, mutations=self.mutations)
         # self.preload_data_packs[slot].preload_data()
         # add the index back to avaliable packs
         self.avaliable_packs.append(slot)
@@ -1413,7 +1412,7 @@ def worker_init_fn_get(worker_id):
     dataset = worker_info.dataset
     if dataset.preload_data_packs is None:
         dataset.preload_data_packs = [PreloadDataPack(
-            preload_count=dataset.preload_count, zarr_data_pool=dataset.datapool, padding=dataset.padding, mask_ratio=dataset.mask_ratio, n_peaks_lower_bound=dataset.n_peaks_lower_bound, n_peaks_upper_bound=dataset.n_peaks_upper_bound, n_peaks_sample_gap=dataset.n_peaks_sample_gap, use_insulation=dataset.use_insulation, peak_inactivation=dataset.peak_inactivation, mutations=dataset.mut) for _ in range(dataset.n_packs)]
+            preload_count=dataset.preload_count, zarr_data_pool=dataset.datapool, mask_ratio=dataset.mask_ratio, n_peaks_lower_bound=dataset.n_peaks_lower_bound, n_peaks_upper_bound=dataset.n_peaks_upper_bound, n_peaks_sample_gap=dataset.n_peaks_sample_gap, use_insulation=dataset.use_insulation, peak_inactivation=dataset.peak_inactivation, mutations=dataset.mut) for _ in range(dataset.n_packs)]
 
 
 class InferenceDataset(PretrainDataset):
@@ -1568,7 +1567,7 @@ class InferenceDataset(PretrainDataset):
         
         # generate sample
         sample = self.datapool.generate_sample(
-            chr_name, track_start, track_end, data_key, celltype_id, mutations=mutations, peak_inactivation=peak_inactivation, padding=self.padding)
+            chr_name, track_start, track_end, data_key, celltype_id, mutations=mutations, peak_inactivation=peak_inactivation)
 
         # get the peak index for mutations in the sample
         self._get_peak_idx_for_mutations(mutations, peaks_in_locus, info)
@@ -1623,8 +1622,8 @@ class InferenceDataset(PretrainDataset):
                 peak_end = peaks_in_locus.shape[0]
                 peak_start = max(0, peak_end - self.n_peaks_upper_bound)
             tss_peak = tss_peak - peak_start
-            track_start = peaks_in_locus.iloc[peak_start].Start-self.padding
-            track_end = peaks_in_locus.iloc[peak_end-1].End+self.padding
+            track_start = peaks_in_locus.iloc[peak_start].Start
+            track_end = peaks_in_locus.iloc[peak_end-1].End
             original_peak_start = peaks_in_locus.iloc[peak_start].original_peak_index
         else:
             peaks_in_locus_subset = peaks_in_locus.query(
@@ -1724,7 +1723,7 @@ class PerturbationInferenceDataset(Dataset):
             df['celltype'] = celltype
             perturbations_gene_overlap.append(df)
         self.perturbations_gene_overlap = pd.concat(
-            perturbations_gene_overlap, ignore_index=True)
+            perturbations_gene_overlap, ignore_index=True).drop_duplicates()
         
 
     def __len__(self):

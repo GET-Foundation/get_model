@@ -626,7 +626,7 @@ class DilatedConv1d(BaseModule):
     def __init__(self, cfg: DilatedConv1dConfig):
         super().__init__(cfg)
         self.conv = nn.Conv1d(cfg.dim, cfg.dim, cfg.kernel_size,
-                              padding='valid', dilation=cfg.dilation)
+                              padding='same', dilation=cfg.dilation)
         self.activation = nn.ReLU()
         # self.batch_norm = nn.BatchNorm1d(cfg.dim)
 
@@ -730,8 +730,8 @@ class ConvPool(BaseModule):
     def __init__(self, cfg: ConvPoolConfig):
         super().__init__(cfg)
         self.pool_method = cfg.pool_method
-        # self.motif_proj = nn.Linear(
-        #     cfg.motif_dim, cfg.hidden_dim)
+        self.motif_proj = nn.Linear(
+            cfg.motif_dim, cfg.hidden_dim)
         self.dila_conv_tower = DilatedConv1dBlock(DilatedConv1dBlockConfig(
             hidden_dim=cfg.hidden_dim, depth=cfg.n_dil_layers))
         self.aprofile_header = nn.Conv1d(
@@ -752,15 +752,17 @@ class ConvPool(BaseModule):
                 - peak_profiles: Tensor of shape (batch, length) representing the peak profiles.
         """
         # x = self.motif_proj(x)
-        batch, length, motif_dim = x.shape
+
 
         if torch.all(n_peaks == max_n_peaks) and np.unique(peak_split).shape[0] == 2:
             peak_size = np.unique(peak_split).max()
             num_peaks = n_peaks[0]
+            x = self.motif_proj(x)
+            batch, length, motif_dim = x.shape
             x = x.reshape(batch * num_peaks, peak_size,
                           motif_dim).transpose(1, 2)
             peak_profile = self.dila_conv_tower(x)
-            peak_atpm = peak_profile.mean(2)
+            peak_atpm = peak_profile.sum(2)
             peak_profile = self.aprofile_header(peak_profile)
             peak_atpm = self.atpm_header(peak_atpm)
             peak_atpm = peak_atpm.reshape(batch, num_peaks)
@@ -778,7 +780,7 @@ class ConvPool(BaseModule):
                     continue
                 peak_profile = self.dila_conv_tower(
                     peak.unsqueeze(0).transpose(1, 2))
-                peak_atpm = peak_profile.mean(2)
+                peak_atpm = peak_profile.sum(2)
                 peak_profile = self.aprofile_header(peak_profile).squeeze(0)
                 peak_atpm_list.append(peak_atpm)
                 peak_profiles.append(peak_profile)

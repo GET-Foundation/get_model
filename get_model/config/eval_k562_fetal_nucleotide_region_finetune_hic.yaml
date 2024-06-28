@@ -46,7 +46,7 @@ finetune:
   patterns_to_freeze: ['motif_scanner', 'conv_blocks', 'atac_attention']
   model_key: 'model'
   additional_checkpoints:
-    - checkpoint: "nucleotide_motif_adaptor/3urbv4pi/checkpoints/last.ckpt"
+    - checkpoint: "nucleotide_motif_adaptor/9zewa0op/checkpoints/last.ckpt"
       model_key: 'state_dict'
       strict: false
       rename_config:

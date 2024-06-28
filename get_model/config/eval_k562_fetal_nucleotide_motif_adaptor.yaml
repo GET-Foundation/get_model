@@ -1,8 +1,8 @@
 defaults:
   - base_ref_region_config
-  - model/GETNucleotideV1MotifAdaptor@_here_
+  - model/GETNucleotideMotifAdaptor@_here_
   - machine/pc
-  - finetune/v1_finetune@finetune
+  - finetune/lightning@finetune
   - dataset/k562_nucleotide_adaptor@dataset
   - _self_
 
@@ -35,13 +35,13 @@ optimizer:
 
 wandb:
   project_name: "nucleotide_motif_adaptor"
-  run_name: "NTToBATAC_ENCFF998SLH.motif_prior.V1Motif"
+  run_name: "NTToBATAC_ENCFF998SLH.motif_prior.from_atac_model"
 
 finetune:
   pretrain_checkpoint: false
   strict: false
   use_lora: false
-  checkpoint: null
+  checkpoint: GETRegionFinetune_k562_atac/mrcg3pa8/checkpoints/last.ckpt
   patterns_to_freeze: []
   model_key: 'model'
 

@@ -33,11 +33,10 @@ model:
       attn_drop_rate: 0
       use_mean_pooling: false
       flash_attn: ${model.cfg.flash_attn}
-    head_atpm:
+    head_exp:
       embed_dim: ${model.cfg.embed_dim}
       output_dim: ${model.cfg.output_dim}
-      hidden_dim: 256
-      drop: ${model.cfg.dropout}
+      use_atac: false
     mask_token:
       embed_dim: ${model.cfg.embed_dim}
       std: 0.02

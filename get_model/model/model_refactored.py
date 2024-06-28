@@ -930,7 +930,7 @@ class GETRegionFinetuneHiCOE(BaseGETModel):
         self.distance_contact_map = DistanceContactHead(
             cfg.distance_contact_map)
         self.distance_contact_map.eval()
-        self.proj_distance = nn.Linear(cfg.embed_dim, 128)
+        self.proj_distance = nn.Linear(cfg.embed_dim+1, 128)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
         logging.info(
             f"GETRegionFinetuneExpHiCABC can only be used with quantitative_atac=True in order to generate the ABC score.")
@@ -938,6 +938,7 @@ class GETRegionFinetuneHiCOE(BaseGETModel):
 
     def get_input(self, batch, perturb=False):
         peak_coord = batch['peak_coord']
+        peak_length = peak_coord[:, :, 1] - peak_coord[:, :, 0]
         peak_coord_mean = peak_coord[:, :, 0]
         # pair-wise distance using torch
         # Add new dimensions to create column and row vectors
@@ -955,9 +956,12 @@ class GETRegionFinetuneHiCOE(BaseGETModel):
         return {
             'region_motif': region_model,
             'distance_map': distance,
+            'peak_length': peak_length/1000
         }
 
-    def forward(self, region_motif, distance_map):
+    def forward(self, region_motif, distance_map, peak_length):
+        # concat peak_length to the region_motif
+        region_motif  = torch.cat([region_motif, peak_length.unsqueeze(-1)], dim=-1)
         x = self.region_embed(region_motif)
         B, N, C = x.shape
         cls_tokens = self.cls_token.expand(B, -1, -1)
@@ -966,6 +970,7 @@ class GETRegionFinetuneHiCOE(BaseGETModel):
         # x = x[:, 1:]
         fused_distance_map = self.proj_distance(
             fused_distance_map).transpose(1, 3).transpose(2, 3)
+        
         hic = self.hic_header(fused_distance_map).squeeze(1)
         return hic
 
@@ -997,6 +1002,8 @@ class GETRegionFinetuneHiCOE(BaseGETModel):
             'region_motif': torch.randn(B, R, M).float().abs(),
             'distance_map': torch.randn(B, R, R).float(),
         }
+
+
 
 
 @dataclass
@@ -1163,12 +1170,17 @@ class GETChrombpNetBias(BaseGETModel):
     def before_loss(self, output, batch):
         pred = output
         B, R = pred['atpm'].shape
-        obs = {'atpm': batch['sample_track'].sum(dim=1).unsqueeze(-1),
-               'aprofile': batch['sample_track']}
-        pred['aprofile'] = torch.nn.functional.log_softmax(
-            pred['aprofile'], dim=-1)
+        obs = {'aprofile': torch.log2(batch['sample_track']+1)}
+        pred['aprofile'] = F.softplus(pred['aprofile'])
         pred['aprofile'], obs['aprofile'] = self.crop_output(
             pred['aprofile'], obs['aprofile'], B, R)
+        obs_atpm = batch['sample_track'].sum(dim=1).unsqueeze(-1)
+        obs_atpm = torch.log10(obs_atpm*1e5/batch['metadata'][0]['libsize']+1).detach()
+        obs['atpm'] = obs_atpm
+        pred_atpm = pred['aprofile'].sum(dim=2).unsqueeze(-1)
+        pred_atpm = torch.log10(pred_atpm*1e5/batch['metadata'][0]['libsize']+1)
+        pred = {'atpm': pred_atpm,
+                'aprofile': torch.log2(pred['aprofile']+1)}
         return pred, obs
 
     def generate_dummy_data(self):
@@ -1180,6 +1192,7 @@ class GETChrombpNetBias(BaseGETModel):
             'max_n_peaks': R,
             'motif_mean_std': torch.randn(B, 2, 639).abs().float(),
         }
+
 
 
 @dataclass
@@ -1486,6 +1499,8 @@ class GETNucleotideRegionFinetuneExpHiCAxial(BaseGETModel):
             'peak_coord': torch.randn(B, R, 1).float(),
             'distance_map': torch.randn(B, R, R).float(),
         }
+    
+
 
 @dataclass
 class GETNucleotideRegionFinetuneExpConfig(BaseGETModelConfig):
@@ -1584,8 +1599,8 @@ class GETNucleotideRegionFinetuneATACConfig(BaseGETModelConfig):
     atac_attention: SplitPoolConfig = field(default_factory=SplitPoolConfig)
     region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
-    head_atpm: ATACHeadConfig = field(
-        default_factory=ATACHeadConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
     
 
 class GETNucleotideRegionFinetuneATAC(BaseGETModel):
@@ -1602,7 +1617,7 @@ class GETNucleotideRegionFinetuneATAC(BaseGETModel):
         self.proj = nn.Linear(128,  # (B,R,M ->B,R,D)
                               cfg.region_embed.embed_dim)
         self.encoder = GETTransformer(**cfg.encoder)
-        self.head_atpm = ATACHead(cfg.head_atpm)
+        self.head_exp = ExpressionHead(cfg.head_exp)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
         self.apply(self._init_weights)
 
@@ -1637,16 +1652,21 @@ class GETNucleotideRegionFinetuneATAC(BaseGETModel):
         x = torch.cat((cls_tokens, x), dim=1)
         x, _ = self.encoder(x)
         x = x[:, 1:]
-        exp = nn.Softplus()(self.head_atpm(x))
+        exp = nn.Softplus()(self.head_exp(x))
         return exp
 
     def before_loss(self, output, batch):
         pred = {
             'atpm': output.squeeze(2),
         }
-        obs = {
-            'atpm': batch['atpm'],
-        }
+        if 'region_motif' in batch:
+            obs = {
+                    'atpm': batch['region_motif'][:, :, -1],
+                }
+        else:   
+            obs = {
+                'atpm': batch['atpm'],
+            }
         return pred, obs
 
     def generate_dummy_data(self):

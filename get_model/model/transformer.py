@@ -457,13 +457,12 @@ class GETTransformerWithContactMapOE(GETTransformer):
     def forward(self, x, distance_map, mask=None, return_attns=False, bias=None):
         attn_output = [] if return_attns else None
         distance_map = distance_map.squeeze(1)
-        distance_map = 1 / distance_map
         # concat 1 to first row and column of distance map (B, R, R, 1) to (B, R+1, R+1, 1)
-        bias = F.pad(distance_map, (0, 1, 0, 1), "constant", 0)
-        bias = bias.unsqueeze(1)
+        # bias = F.pad(distance_map, (0, 1, 0, 1), "constant", 0)
+        # bias = bias.unsqueeze(1)
         
         for blk in self.blocks:
-            x, attn = blk(x, mask, bias)
+            x, attn = blk(x, mask)
             if return_attns:
                 attn_output.append(attn)
 
@@ -475,6 +474,8 @@ class GETTransformerWithContactMapOE(GETTransformer):
 
         outer_sum = x[:, 1:].unsqueeze(
             2) + x[:, :-1].unsqueeze(1)
+        # concat distance map to outer sum
+        outer_sum = torch.cat([distance_map.unsqueeze(3), outer_sum], dim=3)
 
         return x, outer_sum, attn_output
 

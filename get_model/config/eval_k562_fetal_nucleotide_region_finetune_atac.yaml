@@ -2,7 +2,7 @@ defaults:
   - base_ref_region_config
   - model/GETNucleotideRegionFinetuneATAC@_here_
   - machine/pc
-  - finetune/v1_finetune@finetune
+  - finetune/lightning@finetune
   - dataset/k562_nucleotide_region_finetune_hic@dataset
   - _self_
 
@@ -21,7 +21,7 @@ training:
   use_fp16: false
 
 dataset:
-  quantitative_atac: false
+  quantitative_atac: true
   sampling_step: 100
   mask_ratio: 0
 
@@ -35,26 +35,26 @@ optimizer:
 
 wandb:
   project_name: "nucleotide_region_finetune_atac"
-  run_name: "pb3b6jf4_BATAC"
+  run_name: "cth7iqge_BATAC.all_from_scratch"
 
 finetune:
   pretrain_checkpoint: false
   strict: false
-  use_lora: true
-  layers_with_lora: ['encoder']
-  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
+  use_lora: false
+  layers_with_lora: ['encoder', 'head_exp']
+  checkpoint: null #GETRegionFinetune_k562_atac/mrcg3pa8/checkpoints/last.ckpt
   patterns_to_freeze: []
-  model_key: 'model'
-  additional_checkpoints:
-    - checkpoint: "nucleotide_motif_adaptor/pb3b6jf4/checkpoints/best.ckpt"
-      model_key: 'state_dict'
-      strict: false
-      rename_config:
-        model.motif_scanner.: motif_scanner.
-        model.conv_blocks.: conv_blocks.
-        model.atac_attention.: atac_attention.
-        model.proj.: proj.
+  model_key: 'state_dict'
+  # additional_checkpoints:
+    # - checkpoint: "nucleotide_motif_adaptor/cth7iqge/checkpoints/best.ckpt"
+    #   model_key: 'state_dict'
+    #   strict: false
+    #   rename_config:
+    #     model.motif_scanner.: motif_scanner.
+    #     model.conv_blocks.: conv_blocks.
+    #     model.atac_attention.: atac_attention.
+    #     model.proj.: proj.
 
 
 eval_tss: true
-log_image: false
+log_image: true
