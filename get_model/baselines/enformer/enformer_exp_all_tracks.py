@@ -29,7 +29,7 @@ output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/pre
 SEQUENCE_LENGTH = 393216
 OUTPUT_SEQ_LENGTH = 114688
 BATCH_SIZE = 12
-SAVE_EVERY_N_BATCHES = 2
+SAVE_EVERY_N_BATCHES = 100
 CAGE_START_TRACK_IDX = 4675 # end_index is end of file
 
 
@@ -191,9 +191,6 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df):
   predictions = model.predict_on_batch(one_hot_seq_batch)['human']
   
   result_dict = {}
-
-  
-
   for idx, row in batch_df.iterrows():
     output_start = (row["Start"] + row["End"])/2 - OUTPUT_SEQ_LENGTH/2
     output_end = (row["Start"] + row["End"])/2 + OUTPUT_SEQ_LENGTH/2
@@ -201,24 +198,21 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df):
     exp_output_start = np.abs(interval_bins - row["Start"]).argmin()
     exp_output_end = np.abs(interval_bins - row["End"]).argmin()
     ret_pred = predictions[idx, exp_output_start:exp_output_end+1, CAGE_START_TRACK_IDX:]
-    result_dict[row["orig_idx"]] = ret_pred.tolist()
-  
+    result_dict[row["orig_idx"]] = ret_pred
   return result_dict
 
 
 if __name__=="__main__":
-  argparse = argparse.ArgumentParser()
-  argparse.add_argument("--start_idx", type=int, default=0)
-  argparse.add_argument("--end_idx", type=int, default=100)
-
   pyfaidx.Faidx(fasta_file)
   fasta_extractor = FastaStringExtractor(fasta_file)
   model = Enformer(model_path)
 
   region_file = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/results/enformer_benchmark_to_run.csv"
   region_df = pd.read_csv(region_file)
+  region_df.reset_index(inplace=True)
   region_df["orig_idx"] = region_df.index
-  print(f"Predicting for {len(region_df)} regions.")
+  region_df.drop(columns=["index", "level_0"], inplace=True)
+  print(f"Predicting for {len(region_df)} total regions.")
 
   if not os.path.exists(output_dir):
     os.makedirs(output_dir)
@@ -231,14 +225,17 @@ if __name__=="__main__":
     batch_df = region_df[start:end].reset_index()
     preds = compute_enformer_preds_on_batch(model, fasta_extractor, batch_df)
     batch_preds.append(preds)
+    
+    if (num_batches+1) % SAVE_EVERY_N_BATCHES == 0:
+      batch_preds = np.array(batch_preds)
 
-    if (num_batches + 1) % SAVE_EVERY_N_BATCHES == 0:
-      # save flat_preds to json file
-      with open(f"{output_dir}/enformer_cage_example_{start+BATCH_SIZE}.json", "w") as f:
-        json.dump(batch_preds, f)
+      with open(f"{output_dir}/enformer_cage_example_{start+BATCH_SIZE}.npy", "wb") as f:
+        np.save(f, batch_preds)
       batch_preds = []
     
     num_batches += 1
 
-    with open(f"{output_dir}/enformer_cage_example_final.json", "w") as f:
-      json.dump(batch_preds, f)
+  if len(batch_preds) > 0:
+    batch_preds = np.array(batch_preds)
+    with open(f"{output_dir}/enformer_cage_example_final.npy", "wb") as f:
+      np.save(f, batch_preds)
