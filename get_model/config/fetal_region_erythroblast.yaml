@@ -10,13 +10,13 @@ assembly: "hg19"
 dataset:
     root: ${machine.data_path}
     metadata_path: 'cell_type_align.txt'
-    num_region_per_sample: 200
+    num_region_per_sample: 900
     transform: null
     data_type: 'fetal'
-    leave_out_celltypes: 'Astrocytes'
+    leave_out_celltypes: 'Erythroblasts'
     leave_out_chromosomes: null
     quantitative_atac: true
-    sampling_step: 100
+    sampling_step: 450
 
 training:
   save_ckpt_freq: 1
@@ -35,16 +35,14 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetuneV1_Astrocyte"
+  project_name: "GETRegionFinetuneV1_Erythroblast"
   run_name: "debug"
 
 task:
-  layer_names: []
-  test_mode: "inference"
-  gene_list: /home/xf2217/Projects/get_revision/brain_multiome/genes_in_Q1.txt
+  layer_names: ['region_embed']
+  test_mode: "interpret"
+  gene_list: /home/xf2217/Projects/get_model/evals/erythroblast/gene_list.txt
 
-machine:
-  output_dir: /home/xf2217/Projects/get_revision/brain_multiome/
 
 finetune:
   pretrain_checkpoint: false

@@ -155,6 +155,23 @@ class RegionLitModel(LitModel):
                 pred['exp'][torch.isnan(pred['exp'])] = 0
                 obs['exp'][torch.isnan(pred['exp'])] = 0
                 # return
+        if 'atpm' in obs and self.cfg.eval_tss:
+            tss_idx = batch['mask']
+            # pred[key] = (pred[key] * tss_idx)
+            # obs[key] = (obs[key] * tss_idx)
+            pred['atpm'] = pred['atpm'][tss_idx > 0].flatten()
+            obs['atpm'] = obs['atpm'][tss_idx > 0].flatten()
+            # error handling in metric when there is no TSS, or all TSS is not expressed in batch.
+            if pred['atpm'].shape[0] == 0:
+                return
+            if obs['atpm'].sum() == 0:
+                return
+            # check for nan
+            if torch.isnan(pred['atpm']).any() or torch.isnan(obs['atpm']).any():
+                # nan to 0
+                pred['atpm'][torch.isnan(pred['atpm'])] = 0
+                obs['atpm'][torch.isnan(pred['atpm'])] = 0
+                # return
         metrics = self.metrics(pred, obs)
         if batch_idx == 0 and self.cfg.log_image:
             # log one example as scatter plot
@@ -361,7 +378,7 @@ class RegionLitModel(LitModel):
                     lora_state_dict = extract_state_dict(lora_state_dict)
                     lora_state_dict = rename_state_dict(
                         lora_state_dict, self.cfg.finetune.lora_rename_config)
-                    load_state_dict(model, lora_state_dict, strict=True)
+                    load_state_dict(model, lora_state_dict, strict=self.cfg.finetune.strict)
             elif self.cfg.stage in ['validate', 'predict']:
                 # Load LoRA parameters for validation and prediction
                 if self.cfg.finetune.lora_checkpoint is not None:

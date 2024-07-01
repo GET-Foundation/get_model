@@ -2,10 +2,10 @@ zarr_dirs:
   - "encode_hg38atac_dense_cage.zarr"
 keep_celltypes: "k562.encode_hg38atac.ENCFF998SLH.max"
 leave_out_celltypes: null
-leave_out_chromosomes: "chr10,chr11"
+leave_out_chromosomes: "chr14"
 peak_name: "peaks_q0.05_fetal_joint_tissue_open_exp_cage"
 dataset_size: 40960
-eval_dataset_size: 512
+eval_dataset_size: 1024
 additional_peak_columns:
   ["Expression_positive", "Expression_negative", "aTPM", "TSS"]
 center_expand_target: 0

@@ -1,7 +1,7 @@
 model:
   _target_: get_model.model.model_refactored.GETRegionFinetuneATAC
   cfg:
-    num_regions: 900
+    num_regions: 200
     num_motif: 283
     embed_dim: 768
     num_layers: 12

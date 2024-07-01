@@ -86,12 +86,6 @@ class LitModel(L.LightningModule):
         self.save_hyperparameters()
         self.dm = None
 
-    # def on_before_optimizer_step(self, optimizer):
-    #     # Compute the 2-norm for each layer
-    #     # If using mixed precision, the gradients are already unscaled here
-    #     # norms = grad_norm(self.model, norm_type=2)
-    #     # self.log_dict(norms)
-
     def get_model(self):
         model = instantiate(self.cfg.model)
 
@@ -270,6 +264,7 @@ class LitModel(L.LightningModule):
                 }
 
     def interpret_step(self, batch, batch_idx, layer_names: List[str] = None, focus: int = None):
+        
         target_tensors = {}
         hooks = []
         input = self.model.get_input(batch)
@@ -292,6 +287,9 @@ class LitModel(L.LightningModule):
             for key, tensor in input.items():
                 tensor.requires_grad = True
         else:
+            target_tensors['input'] = input
+            for key, tensor in input.items():
+                tensor.requires_grad = True
             for layer_name in layer_names:
                 layer = self.model.get_layer(layer_name)
                 hook = layer.register_forward_hook(capture_target_tensor(layer_name))
@@ -333,7 +331,6 @@ class LitModel(L.LightningModule):
         jacobians = recursive_numpy(jacobians)
         target_tensors = recursive_numpy(target_tensors)
         return pred, obs, jacobians, target_tensors
-
 
     def interpret_captum_step(self, batch, batch_idx, focus, start, end, shift=0):
         import torch
@@ -402,12 +399,17 @@ class LitModel(L.LightningModule):
         z = zarr.open(zarr_path, mode='a')
         recursive_save_to_zarr(z, result_df,  object_codec=object_codec, overwrite=True)
     
-
     def configure_optimizers(self):
         # a adam optimizer with a scheduler using lightning function
         optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.lr)
         return optimizer
+    
+    # def on_before_optimizer_step(self, optimizer):
+    #     # Compute the 2-norm for each layer
+    #     # If using mixed precision, the gradients are already unscaled here
+    #     # norms = grad_norm(self.model, norm_type=2)
+    #     # self.log_dict(norms)
 
     # def configure_optimizers(self):
     #     optimizer = create_optimizer(self.cfg.optimizer, self.model)

@@ -1,9 +1,9 @@
 defaults:
   - base_ref_region_config
-  - model/GETRegionFinetune@_here_
+  - model/GETRegionFinetuneATAC@_here_
   - machine/pc
-  - finetune/v1_pretrain@finetune
-  - dataset/k562_cage@dataset
+  - finetune/lightning@finetune
+  - dataset/k562_nucleotide_adaptor@dataset
   - _self_
 
 assembly: "hg38"
@@ -21,12 +21,13 @@ training:
   use_fp16: false
 
 dataset:
+  n_peaks_upper_bound: 200
   quantitative_atac: true
-  sampling_step: 450
+  sampling_step: 100
   mask_ratio: 0
 
 optimizer:
-  lr: 0.0001
+  lr: 0.001
   min_lr: 0.000001
   weight_decay: 0.05
   opt: "adamw"
@@ -34,15 +35,14 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune_k562_cage"
-  run_name: "QATAC_LoRA_from_QATAC_fetal_finetune"
+  project_name: "GETRegionFinetuneATAC_k562"
+  run_name: "ENCFF998SLH"
 
 finetune:
   pretrain_checkpoint: true
   strict: false
   use_lora: true
-  layers_with_lora: ['region_embed', 'encoder']
-  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth"
+  checkpoint: "/home/xf2217/Projects/get_checkpoints/new_output_e800_r200_mask0.5_adult_natac_human_bingren_shendure/checkpoint-799.pth" #GETRegionFinetune_k562_atac/mrcg3pa8/checkpoints/last.ckpt
   patterns_to_freeze: []
   model_key: 'model'
 

@@ -21,8 +21,8 @@ model:
         aprofile:
           _target_: torch.nn.MSELoss
       weights:
-        atpm: 1
-        aprofile: 1.0
+        atpm: 10
+        aprofile: 1
     metrics:
       components:
         atpm: ["mse", "pearson", "spearman", "r2"]

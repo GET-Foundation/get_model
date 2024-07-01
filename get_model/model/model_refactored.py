@@ -231,7 +231,7 @@ class BaseGETModel(BaseModule):
         """Prepare the output and target for the loss function
         The goal is to construct either:
         1. pred and obs tensors, in which case a defined loss function is applied to pred and obs
-        2. pred: {name: tensor} and obs: {name: tensor}, in which case we will use the 
+        2. pred: {name: tensor} and obs: {name: tensor}, in which case we will use the
         loss_cfg: {name: loss_fn} to determine the loss function for each name"""
         raise NotImplementedError
 
@@ -640,8 +640,8 @@ class MLPRegionFinetune(GETRegionFinetune):
         self.relu2 = torch.nn.ReLU()
         self.linear3 = torch.nn.Linear(256, cfg.output_dim)
 
-    def forward(self, x):
-        x = self.linear1(x)
+    def forward(self, region_motif):
+        x = self.linear1(region_motif)
         x = self.relu1(x)
         x = self.linear2(x)
         x = self.relu2(x)
@@ -970,7 +970,7 @@ class GETRegionFinetuneHiCOE(BaseGETModel):
         # x = x[:, 1:]
         fused_distance_map = self.proj_distance(
             fused_distance_map).transpose(1, 3).transpose(2, 3)
-        
+
         hic = self.hic_header(fused_distance_map).squeeze(1)
         return hic
 
@@ -1499,7 +1499,7 @@ class GETNucleotideRegionFinetuneExpHiCAxial(BaseGETModel):
             'peak_coord': torch.randn(B, R, 1).float(),
             'distance_map': torch.randn(B, R, R).float(),
         }
-    
+
 
 
 @dataclass
@@ -1511,7 +1511,7 @@ class GETNucleotideRegionFinetuneExpConfig(BaseGETModelConfig):
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     head_exp: ExpressionHeadConfig = field(
         default_factory=ExpressionHeadConfig)
-    
+
 
 class GETNucleotideRegionFinetuneExp(BaseGETModel):
     def __init__(self, cfg: GETNucleotideRegionFinetuneExpConfig):
@@ -1601,7 +1601,7 @@ class GETNucleotideRegionFinetuneATACConfig(BaseGETModelConfig):
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     head_exp: ExpressionHeadConfig = field(
         default_factory=ExpressionHeadConfig)
-    
+
 
 class GETNucleotideRegionFinetuneATAC(BaseGETModel):
     def __init__(self, cfg: GETNucleotideRegionFinetuneATACConfig):
@@ -1663,7 +1663,7 @@ class GETNucleotideRegionFinetuneATAC(BaseGETModel):
             obs = {
                     'atpm': batch['region_motif'][:, :, -1],
                 }
-        else:   
+        else:
             obs = {
                 'atpm': batch['atpm'],
             }

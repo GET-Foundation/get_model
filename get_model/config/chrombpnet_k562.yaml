@@ -11,8 +11,8 @@ dataset:
   center_expand_target: 2114
   n_peaks_lower_bound: 0
   n_peaks_upper_bound: 1
-  peak_count_filter: 100
-  random_shift_peak: 100
+  peak_count_filter: 0
+  random_shift_peak: 0
 
 machine:
   batch_size: 32
@@ -35,9 +35,9 @@ optimizer:
   opt_betas: [0.9, 0.95]
 
 wandb:
-  project_name: "k562_chrombpnet"
+  project_name: "k562_chrombpnet_benchmark"
   run_name: "k562_chrombpnet_dnase.ENCFF257HEE"
 
 finetune:
-  checkpoint: null
+  checkpoint: k562_chrombpnet/jhxywyli/checkpoints/best.ckpt
   patterns_to_freeze: []

@@ -1,6 +1,6 @@
 defaults:
   - base_ref_region_config
-  - model/GETRegionFinetuneATAC@_here_
+  - model/GETRegionFinetune@_here_
   - finetune/v1_pretrain@finetune
   - machine/pc
   - dataset/k562_nucleotide_region_finetune_hic@dataset

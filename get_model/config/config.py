@@ -82,6 +82,7 @@ class ReferenceRegionDatasetConfig(DatasetConfig):
     quantitative_atac: bool = False
     sampling_step: int = 100
     mask_ratio: float = 0
+    leave_out_motifs: str | None = None
 
 
 @dataclass

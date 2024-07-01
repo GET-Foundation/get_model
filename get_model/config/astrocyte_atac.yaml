@@ -1,7 +1,7 @@
 defaults:
   - base_region_config
   - model/GETRegionFinetuneATAC@_here_
-  - finetune/lightning@finetune
+  - finetune/v1_pretrain@finetune
   - machine/pc_region_v2
   - _self_
 
@@ -16,8 +16,8 @@ dataset:
     num_region_per_sample: 200
     transform: null
     data_type: 'k562'
-    leave_out_celltypes: k562_count_10
-    leave_out_chromosomes: "chr10"
+    leave_out_celltypes: 'Fetal Astrocyte 1'
+    leave_out_chromosomes: "chr14"
     quantitative_atac: true
     sampling_step: 100
     mask_ratio: 0
@@ -39,12 +39,15 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetuneATAC_k562"
-  run_name: "k562_from_scratch"
+  project_name: "GETRegionFinetuneATAC_astrocyte"
+  run_name: "Astrocyte_from_pretrain"
 
 finetune:
-  strict: true
-  checkpoint: GETRegionFinetuneATAC_k562/ztoz38tx/checkpoints/best.ckpt
+  strict: false
+  pretrain_checkpoint: true
+  use_lora: true
+  layers_with_lora: ['region_embed', 'encoder']
+  checkpoint:  ../get_checkpoints/new_output_e800_r200_mask0.5_adult_natac_human_bingren_shendure/checkpoint-799.pth
   patterns_to_freeze: []
 
 eval_tss: false

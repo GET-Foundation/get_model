@@ -1,0 +1,6 @@
+python get_model/debug/debug_run_region.py stage=predict task.gene_list="/home/xf2217/Projects/get_revision/brain_multiome/genes_in_Q1.txt" task.test_mode=inference wandb.run_name=genes_in_Q1.astrocyte machine.batch_size=1
+python get_model/debug/debug_run_region.py stage=predict task.gene_list="/home/xf2217/Projects/get_revision/brain_multiome/genes_in_Q2.txt" task.test_mode=inference wandb.run_name=genes_in_Q2.astrocyte machine.batch_size=1
+python get_model/debug/debug_run_region.py stage=predict task.gene_list="/home/xf2217/Projects/get_revision/brain_multiome/genes_in_Q3.txt" task.test_mode=inference wandb.run_name=genes_in_Q3.astrocyte machine.batch_size=1
+python get_model/debug/debug_run_region.py stage=predict task.gene_list="/home/xf2217/Projects/get_revision/brain_multiome/genes_in_Q4.txt" task.test_mode=inference wandb.run_name=genes_in_Q4.astrocyte machine.batch_size=1
+python get_model/debug/debug_run_region.py stage=predict task.gene_list="/home/xf2217/Projects/get_revision/brain_multiome/genes_in_Q5.txt" task.test_mode=inference wandb.run_name=genes_in_Q5.astrocyte machine.batch_size=1
+python get_model/debug/debug_run_region.py stage=predict task.gene_list="/home/xf2217/Projects/get_revision/brain_multiome/genes_corr_0.5.txt" task.test_mode=inference wandb.run_name=genes_corr_0.5.astrocyte machine.batch_size=1
