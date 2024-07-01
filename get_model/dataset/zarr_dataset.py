@@ -1990,11 +1990,13 @@ class ReferenceRegionDataset(Dataset):
         else:
             hic_matrix_i = 0
         
-        if motif_quantile_cutoff is not None and self.is_train:
+        if motif_quantile_cutoff is not None:
             # if a peak has any motif value larger than the cutoff, set all motif in that region to 0
             # get all region_idx with any of the motif value larger than the cutoff
+
             region_idx = np.any(region_motif_i > motif_quantile_cutoff, axis=1)
-            region_motif_i[region_idx] = 0
+            if self.is_train:
+                region_motif_i[region_idx] = 0
             mask = region_idx
         else:
             if self.mask_ratio > 0:
