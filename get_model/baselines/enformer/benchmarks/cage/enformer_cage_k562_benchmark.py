@@ -15,13 +15,15 @@ import seaborn as sns
 from tqdm import tqdm
 import os
 import json
+import argparse
+
 
 transform_path = 'gs://dm-enformer/models/enformer.finetuned.SAD.robustscaler-PCA500-robustscaler.transform.pkl'
 model_path = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/ckpts/enformer-base"
 fasta_file = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/genome.fa'
 clinvar_vcf = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/clinvar.vcf.gz'
 targets_txt = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/targets_human.txt"
-output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds/enformer_k562_new_encode_chr10,11"
+output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds/enformer_cage_new_encode_peaks_chr14"
 
 
 SEQUENCE_LENGTH = 393216
@@ -176,7 +178,7 @@ def plot_tracks(tracks, interval, height=1.5):
   plt.tight_layout()
 
 
-def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_idx_set):
+def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_indices):
   # prepare one-hot batch
   one_hot_seq_col = []
   for idx, row in tqdm(batch_df.iterrows(), total=len(batch_df)):
@@ -188,32 +190,35 @@ def compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, track_idx_
   predictions = model.predict_on_batch(one_hot_seq_batch)['human']
   
   result_dict = {}
-  for track_idx in track_idx_set: 
-    result_dict[track_idx] = {}
-    cur_track_preds = predictions[:,:,track_idx]
-    for idx, row in batch_df.iterrows():
-      output_start = (row["Start"] + row["End"])/2 - OUTPUT_SEQ_LENGTH/2
-      output_end = (row["Start"] + row["End"])/2 + OUTPUT_SEQ_LENGTH/2
-      interval_bins = np.linspace(output_start, output_end, num=896, endpoint=False)
-      exp_output_start = np.abs(interval_bins - row["Start"]).argmin()
-      exp_output_end = np.abs(interval_bins - row["End"]).argmin()
-      ret_pred = cur_track_preds[idx, exp_output_start:exp_output_end]
-      result_dict[track_idx][row["orig_idx"]] = ret_pred.tolist()
-  
+  for idx, row in batch_df.iterrows():
+    output_start = (row["Start"] + row["End"])/2 - OUTPUT_SEQ_LENGTH/2
+    output_end = (row["Start"] + row["End"])/2 + OUTPUT_SEQ_LENGTH/2
+    interval_bins = np.linspace(output_start, output_end, num=896, endpoint=False)
+    exp_output_start = np.abs(interval_bins - row["Start"]).argmin()
+    exp_output_end = np.abs(interval_bins - row["End"]).argmin()
+    ret_pred = predictions[idx, exp_output_start:exp_output_end+1, track_indices]
+    result_dict[row["orig_idx"]] = ret_pred
   return result_dict
 
 
 if __name__=="__main__":
+  cage_idx_set = [4828, 5111]
+
+  argparse = argparse.ArgumentParser()
+  argparse.add_argument("--start_idx", type=int, default=0)
+  argparse.add_argument("--end_idx", type=int, default=100)
+  args = argparse.parse_args()
+  
   pyfaidx.Faidx(fasta_file)
   fasta_extractor = FastaStringExtractor(fasta_file)
   model = Enformer(model_path)
-  k562_track_idx_set = [4828, 5111] 
 
-  k562_file = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/cage_peaks_new_encode.csv"
-  k562_df = pd.read_csv(k562_file)
-  k562_df["orig_idx"] = k562_df.index
-  k562_df = k562_df[(k562_df["Chromosome"] == "chr10") | (k562_df["Chromosome"] == "chr11")].reset_index(drop=True)
-  print(f"Predicting for {len(k562_df)} regions.")
+  region_file = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/k562_new_encode_peaks.csv" # m010
+  region_df = pd.read_csv(region_file)
+  region_df.reset_index(inplace=True)
+  region_df = region_df[region_df["Chromosome"] == "chr14"]
+  region_df["orig_idx"] = region_df.index
+  print(f"Predicting for {len(region_df)} total regions.")
 
   if not os.path.exists(output_dir):
     os.makedirs(output_dir)
@@ -221,33 +226,26 @@ if __name__=="__main__":
   batch_preds = []
   num_batches = 0
 
-  for start in tqdm(range(0, len(k562_df), BATCH_SIZE)):
+  for start in tqdm(range(0, len(region_df), BATCH_SIZE)):
+    if start < args.start_idx:
+      continue
+    if start >= args.end_idx:
+      break
     end = start + BATCH_SIZE
-    batch_df = k562_df[start:end].reset_index()
-    preds = compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, k562_track_idx_set)
+    batch_df = region_df[start:end].reset_index()
+    preds = compute_enformer_preds_on_batch(model, fasta_extractor, batch_df, cage_idx_set)
     batch_preds.append(preds)
+    
+    if (num_batches+1) % SAVE_EVERY_N_BATCHES == 0:
+      batch_preds = np.array(batch_preds)
 
-    if (num_batches + 1) % SAVE_EVERY_N_BATCHES == 0:
-      # merge list of dicts together
-      flat_preds = {}
-      for track_idx in k562_track_idx_set:
-        flat_preds[track_idx] = {}
-        for d in batch_preds:
-          for k, v in d[track_idx].items():
-            flat_preds[track_idx][k] = v
-      # save flat_preds to json file
-      with open(f"{output_dir}/enformer_cage_example_{start+BATCH_SIZE}.json", "w") as f:
-        json.dump(flat_preds, f)
+      with open(f"{output_dir}/enformer_cage_example_{start+BATCH_SIZE}.npy", "wb") as f:
+        np.save(f, batch_preds)
       batch_preds = []
     
     num_batches += 1
 
-  if batch_preds:
-    flat_preds = {}
-    for track_idx in k562_track_idx_set:
-      flat_preds[track_idx] = {}
-      for d in batch_preds:
-        for k, v in d[track_idx].items():
-          flat_preds[track_idx][k] = v
-    with open(f"{output_dir}/enformer_cage_example_final.json", "w") as f:
-      json.dump(flat_preds, f)
+  if len(batch_preds) > 0:
+    batch_preds = np.array(batch_preds)
+    with open(f"{output_dir}/enformer_cage_example_{start+BATCH_SIZE}_final.npy", "wb") as f:
+      np.save(f, batch_preds)

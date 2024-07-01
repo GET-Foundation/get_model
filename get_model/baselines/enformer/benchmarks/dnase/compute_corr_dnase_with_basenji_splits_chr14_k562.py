@@ -3,25 +3,19 @@ import pandas as pd
 import json 
 import numpy as np
 from tqdm import tqdm
+
 # %%
-dnase_peaks = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/encode_ENCFF257HEE_dnase_k562.csv"
-preds_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds/enformer_dnase_preds"
+encode_peaks = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/k562_new_encode_peaks.csv"
+encode_df = pd.read_csv(encode_peaks)
+preds_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds/enformer_dnase_preds_final_chr14"
 pred_files = os.listdir(preds_dir)
 # %%
-# %%
-
-dnase_peaks_df = pd.read_csv(dnase_peaks)
-
-
-#%% 
 all_preds = []
 for file in pred_files:
     with open(f"{preds_dir}/{file}", "rb") as f:
         preds = np.load(f, allow_pickle=True)
         all_preds.append(preds)
 # %
-# %%
-
 # combine dictionaries together
 combined_preds = {}
 for batch in all_preds:
@@ -29,22 +23,15 @@ for batch in all_preds:
         for key in item.keys():
             combined_preds[key] = item[key]
 # %%
-
-leaveout_df = dnase_peaks_df.copy()
+leaveout_df = encode_df.copy()
+leaveout_df = leaveout_df.query('Chromosome == "chr14"')
 
 # %%
 # save preds to leaveout_df where index is the original index
 leaveout_df["preds"] = leaveout_df.index.map(lambda x: combined_preds[x])
 
 # %%
-leaveout_df["aTPM"].describe()
-#%%
-# leaveout_df = leaveout_df.query('TSS>0')
-# %%
-
 # [121, 122, 123, 625]
-
-
 leaveout_df["mean_preds_121"] = leaveout_df["preds"].map(lambda x: np.mean(x[0,:]))
 leaveout_df["mean_preds_122"] = leaveout_df["preds"].map(lambda x: np.mean(x[1,:]))
 leaveout_df["mean_preds_123"] = leaveout_df["preds"].map(lambda x: np.mean(x[2,:]))
@@ -58,24 +45,22 @@ leaveout_df["sum_preds_4track_average"] = (leaveout_df["sum_preds_121"] + leaveo
 
 
 # %%
-leaveout_df_tss_only = leaveout_df.query('TSS>0')
-
-# %%
-
 from pyranges import PyRanges as pr
 
 # %%
-
+eval_df_without_preds = leaveout_df.drop(columns=["preds"])
 enformer_seqs = "/pmglocal/alb2281/get/get_data/enformer_human_sequences.bed"
 enformer_df = pd.read_csv(enformer_seqs, sep="\t", header=None)
 enformer_df.columns = ["Chromosome", "Start", "End", "Split"]
 enformer_df_leaveout = enformer_df.query('Split != "train"')
-overlap_bed = pr(dnase_peaks_df.reset_index()).join(pr(enformer_df_leaveout), suffix="_enformer").df[dnase_peaks_df.columns.tolist()+['index']].drop_duplicates()
+overlap_bed = pr(eval_df_without_preds.reset_index()).join(pr(enformer_df_leaveout), suffix="_enformer").df[eval_df_without_preds.columns.tolist()+['index']].drop_duplicates()
 overlap_bed.set_index("index", inplace=True)
-overlap_leaveout_df = overlap_bed.copy()
-#%%
 
-overlap_leaveout_df["preds"] = overlap_leaveout_df.index.map(lambda x: combined_preds[x])
+# %%
+overlap_bed["preds"] = overlap_bed.index.map(lambda x: combined_preds[x])
+
+# %%
+overlap_leaveout_df = overlap_bed.copy()
 
 # %%
 overlap_leaveout_df["mean_preds_121"] = overlap_leaveout_df["preds"].map(lambda x: np.mean(x[0,:]))
@@ -89,9 +74,17 @@ overlap_leaveout_df["sum_preds_625"] = overlap_leaveout_df["preds"].map(lambda x
 overlap_leaveout_df["mean_preds_4track_average"] = (overlap_leaveout_df["mean_preds_121"] + overlap_leaveout_df["mean_preds_122"] + overlap_leaveout_df["mean_preds_123"] + overlap_leaveout_df["mean_preds_625"]) / 4
 overlap_leaveout_df["sum_preds_4track_average"] = (overlap_leaveout_df["sum_preds_121"] + overlap_leaveout_df["sum_preds_122"] + overlap_leaveout_df["sum_preds_123"] + overlap_leaveout_df["sum_preds_625"]) / 4
 
-
 # %%
-overlap_leaveout_df_tss = overlap_leaveout_df.query('TSS>0')
+leaveout_df_tss_only = leaveout_df.query('TSS > 0')
+overlap_leaveout_df_tss = overlap_leaveout_df.query('TSS > 0')
+
+
+# count > 10
+leaveout_df = leaveout_df.query('Count > 10')
+leaveout_df_tss_only = leaveout_df_tss_only.query('Count > 10')
+overlap_leaveout_df = overlap_leaveout_df.query('Count > 10')
+overlap_leaveout_df_tss = overlap_leaveout_df_tss.query('Count > 10')
+
 
 # %%
 eval_df = leaveout_df[["mean_preds_121", "mean_preds_122", "mean_preds_123", "mean_preds_625", "mean_preds_4track_average", "sum_preds_121", "sum_preds_122", "sum_preds_123", "sum_preds_625", "sum_preds_4track_average", "aTPM"]]
@@ -150,10 +143,10 @@ spearman_merged_corr.to_csv("/pmglocal/alb2281/repos/get_model/get_model/baselin
 
 # %%
 import seaborn as sns
-sns.scatterplot(data=eval_df, x="sum_preds_4track_average", y="aTPM")
+sns.scatterplot(data=eval_df_tss, x="sum_preds_2track_average", y="Expression_sum")
 # %%
 
-sns.scatterplot(data=overlap_eval_df, x="sum_preds_4track_average", y="aTPM")
+sns.scatterplot(data=, x="sum_preds_4track_average", y="aTPM")
 # %%
 
 pearson_merged_corr

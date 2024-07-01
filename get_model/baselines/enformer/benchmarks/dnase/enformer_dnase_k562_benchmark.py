@@ -23,7 +23,7 @@ model_path = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/ckp
 fasta_file = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/genome.fa'
 clinvar_vcf = '/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/clinvar.vcf.gz'
 targets_txt = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/targets_human.txt"
-output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds/enformer_dnase_preds"
+output_dir = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/preds/enformer_dnase_preds_final_chr14"
 
 
 SEQUENCE_LENGTH = 393216
@@ -213,10 +213,11 @@ if __name__=="__main__":
   fasta_extractor = FastaStringExtractor(fasta_file)
   model = Enformer(model_path)
 
-  region_file = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/encode_ENCFF257HEE_dnase_k562.csv"
+  region_file = "/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/data/k562_new_encode_peaks.csv"
   region_df = pd.read_csv(region_file)
   region_df.reset_index(inplace=True)
   region_df["orig_idx"] = region_df.index
+  region_df = region_df[region_df["Chromosome"] == "chr14"]
   print(f"Predicting for {len(region_df)} total regions.")
 
   if not os.path.exists(output_dir):
