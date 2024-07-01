@@ -136,61 +136,7 @@ spearman_merged_corr = pd.concat([spearman_eval_df_corr, spearman_eval_df_tss_co
 spearman_merged_corr.columns = ["all_peaks", "all_peaks_tss", "basenji_test", "basenji_test_tss"]
 # %%
 
-
-pearson_merged_corr.to_csv("/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/results/enformer_k562_atac_pearson.csv")
-spearman_merged_corr.to_csv("/pmglocal/alb2281/repos/get_model/get_model/baselines/enformer/results/enformer_k562_atac_spearman.csv")
-
-
-# %%
-import seaborn as sns
-sns.scatterplot(data=eval_df_tss, x="sum_preds_2track_average", y="Expression_sum")
-# %%
-
-sns.scatterplot(data=, x="sum_preds_4track_average", y="aTPM")
-# %%
-
 pearson_merged_corr
 # %%
 spearman_merged_corr
 # %%
-
-
-## Overlap with count 10 peaks
-
-count_10_peaks = "/pmglocal/alb2281/get/get_data/k562_count_10/k562_count_10.csv"
-# %%
-count_10_peaks_df = pd.read_csv(count_10_peaks)
-# %%
-count10_overlap_bed = pr(dnase_peaks_df.reset_index()).join(pr(count_10_peaks_df), suffix="_count10peaks").df[dnase_peaks_df.columns.tolist()+['index']].drop_duplicates()
-# %%
-count10_overlap_bed.set_index("index", inplace=True)
-overlap_leaveout_df = count10_overlap_bed.copy()
-#%%
-
-overlap_leaveout_df["preds"] = overlap_leaveout_df.index.map(lambda x: combined_preds[x])
-
-# %%
-overlap_leaveout_df["mean_preds_121"] = overlap_leaveout_df["preds"].map(lambda x: np.mean(x[0,:]))
-overlap_leaveout_df["mean_preds_122"] = overlap_leaveout_df["preds"].map(lambda x: np.mean(x[1,:]))
-overlap_leaveout_df["mean_preds_123"] = overlap_leaveout_df["preds"].map(lambda x: np.mean(x[2,:]))
-overlap_leaveout_df["mean_preds_625"] = overlap_leaveout_df["preds"].map(lambda x: np.mean(x[3,:]))
-overlap_leaveout_df["sum_preds_121"] = overlap_leaveout_df["preds"].map(lambda x: np.sum(x[0,:]))
-overlap_leaveout_df["sum_preds_122"] = overlap_leaveout_df["preds"].map(lambda x: np.sum(x[1,:]))
-overlap_leaveout_df["sum_preds_123"] = overlap_leaveout_df["preds"].map(lambda x: np.sum(x[2,:]))
-overlap_leaveout_df["sum_preds_625"] = overlap_leaveout_df["preds"].map(lambda x: np.sum(x[3,:]))
-overlap_leaveout_df["mean_preds_4track_average"] = (overlap_leaveout_df["mean_preds_121"] + overlap_leaveout_df["mean_preds_122"] + overlap_leaveout_df["mean_preds_123"] + overlap_leaveout_df["mean_preds_625"]) / 4
-overlap_leaveout_df["sum_preds_4track_average"] = (overlap_leaveout_df["sum_preds_121"] + overlap_leaveout_df["sum_preds_122"] + overlap_leaveout_df["sum_preds_123"] + overlap_leaveout_df["sum_preds_625"]) / 4
-
-# %%
-overlap_leaveout_df = overlap_leaveout_df[['mean_preds_121', 'mean_preds_122', 'mean_preds_123', 'mean_preds_625', 'mean_preds_4track_average', 'sum_preds_121', 'sum_preds_122', 'sum_preds_123', 'sum_preds_625', 'sum_preds_4track_average', 'aTPM']]
-# %%
-pearson_overlap_df_corr = overlap_leaveout_df.corr(method='pearson')[["aTPM"]]
-spearman_overlap_df_corr = overlap_leaveout_df.corr(method='spearman')[["aTPM"]]
-
-
-# %%
-pearson_overlap_df_corr
-# %%
-spearman_overlap_df_corr
-# %%
-
