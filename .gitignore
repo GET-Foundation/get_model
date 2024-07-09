@@ -35,3 +35,5 @@ test/abc
 test/esc_abc
 test/dnase_abc
 test/dnase*
+test/all_scores.csv.gz
+evals/erythroblast

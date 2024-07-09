@@ -12,20 +12,20 @@ model:
     num_regions: 200
 dataset:
     root: ${machine.data_path}
-    metadata_path: 'data/k562_atac_finetune.csv'
+    metadata_path: 'data/k562_bulk_atac_finetune.csv'
     num_region_per_sample: 200
     transform: null
     data_type: 'k562'
     leave_out_celltypes: "k562_bulk_cut0.03"
     leave_out_chromosomes: "chr10"
     quantitative_atac: true
-    sampling_step: 5
+    sampling_step: 100
     mask_ratio: 0
 
 training:
   save_ckpt_freq: 1
-  epochs: 100
-  warmup_epochs: 5
+  epochs: 10
+  warmup_epochs: 0
   accumulate_grad_batches: 1
   clip_grad: null
   use_fp16: false
@@ -39,12 +39,14 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetuneATAC_k562"
-  run_name: "k562_from_scratch"
+  project_name: "GETRegionFinetuneATAC_k562_bulk"
+  run_name: ${dataset.leave_out_chromosomes}
 
 finetune:
-  strict: true
-  checkpoint: GETRegionFinetuneATAC_k562/ztoz38tx/checkpoints/best.ckpt
+  strict: false
+  use_lora: true
+
+  checkpoint: /home/xf2217/Projects/get_checkpoints/new_output_e800_r200_mask0.5_adult_natac_human_bingren_shendure/checkpoint-799.pth
   patterns_to_freeze: []
 
 eval_tss: false
