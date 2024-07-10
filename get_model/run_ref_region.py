@@ -15,7 +15,6 @@ from matplotlib import pyplot as plt
 from minlora import LoRAParametrization
 from minlora.model import add_lora_by_name
 from omegaconf import MISSING, DictConfig, OmegaConf
-
 import wandb
 from get_model.config.config import *
 from get_model.dataset.zarr_dataset import (
@@ -223,7 +222,14 @@ class RegionLitModel(LitModel):
             result_df = []
             for batch_element in range(len(batch['gene_name'])):
                 goi_idx = batch['all_tss_peak'][batch_element]
+<<<<<<< HEAD
+                goi_idx = goi_idx[goi_idx > 0] # filter out PAD tokens (-1)
+                goi_idx = goi_idx[goi_idx < batch['region_motif'][batch_element].shape[0]] # filter out TSS that exceed number of regions
+                if len(goi_idx) == 0:
+                    goi_idx = batch["tss_peak"][batch_element][0]
+=======
                 goi_idx = goi_idx[goi_idx > 0]  # filter out pad (tss_peak = 0)
+>>>>>>> refactor_with_hydra
                 strand = batch['strand'][batch_element]
                 atpm = batch['region_motif'][batch_element][goi_idx, -
                                                             1].max().cpu().item()
@@ -460,7 +466,8 @@ def run(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     model.dm = dm
     wandb_logger = WandbLogger(name=cfg.wandb.run_name,
-                               project=cfg.wandb.project_name)
+                               project=cfg.wandb.project_name,
+                               entity="get-v3")
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
     if cfg.machine.num_devices > 0:
         strategy = 'auto'
@@ -475,24 +482,25 @@ def run(cfg: DictConfig):
     inference_mode = True
     if 'interpret' in cfg.task.test_mode:
         inference_mode = False
+
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator=accelerator,
+        accelerator="cuda",
         num_sanity_val_steps=0,
         strategy=strategy,
-        devices=device,
+        devices=[0],
         logger=[
             wandb_logger,
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
         callbacks=[ModelCheckpoint(
             monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
-        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+        # plugins=[][MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         log_every_n_steps=4,
         val_check_interval=0.5,
         default_root_dir=cfg.machine.output_dir,
-        inference_mode=inference_mode
+        inference_mode=inference_mode,
     )
     if cfg.stage == 'fit':
         trainer.fit(model, datamodule=dm, ckpt_path=cfg.finetune.resume_ckpt)

@@ -2,27 +2,25 @@ defaults:
   - base_ref_region_config
   - model/GETRegionFinetune@_here_
   - machine/manitou_alb2281
-  - dataset/gbm_ref_eval@dataset
+  - dataset/gbm_eval@dataset
   - _self_
 
 assembly: "hg38"
 
 task:
-  layer_names: []
   test_mode: "inference"
-  gene_list: genes.txt
-  mutations: regions.txt
+  gene_list: RET
 
 training:
   save_ckpt_freq: 1
-  epochs: 100
+  epochs: 20
   warmup_epochs: 1
   accumulate_grad_batches: 1
   clip_grad: null
   use_fp16: false
 
 dataset:
-  quantitative_atac: true
+  quantitative_atac: false
   sampling_step: 100
   mask_ratio: 0
 
@@ -35,16 +33,15 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune_gbm"
-  run_name: "debug"
+  project_name: "get-finetune-region-alb2281"
+  run_name: "gbm-v1"
 
 finetune:
   pretrain_checkpoint: false
   strict: true
-  use_lora: false
-  layers_with_lora: ['region_embed', 'encoder']
-  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth"
+  checkpoint: "/burg/pmg/users/xf2217/get_checkpoints/output_e800_r900_mask0.5_adult_watac/checkpoint-799.pth"
+  model_prefix: "model."
   patterns_to_freeze: []
 
 eval_tss: true
-log_image: false
+log_image: true

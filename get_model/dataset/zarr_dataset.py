@@ -276,7 +276,7 @@ class ZarrDataPool(object):
         logging.info('Initializing ZarrDataPool')
         self.sequence = sequence_obj if sequence_obj is not None else get_sequence_obj(
             genome_seq_zarr)
-        self.motif_mean_std_obj = motif_mean_std_obj
+        self.motif_mean_std_obj = None # motif_mean_std_obj
         self.zarr_dirs = zarr_dirs
         self.insulation_paths = insulation_paths
         self.insulation_subsample_ratio = insulation_subsample_ratio
@@ -443,12 +443,19 @@ class ZarrDataPool(object):
         item_insulation = item_insulation.reset_index(drop=True).reset_index()
 
         celltype_peaks = celltype_peaks.reset_index(drop=True).reset_index()
+        motif_mean_std = None
+
+        # TODO: Fix instead of set motif_mean_std = None for v3
         if self.motif_mean_std_obj is not None:
-            try:
+            if chr_chunk_idx+1==self.motif_mean_std_obj.data_dict[chr_name].shape[0]:
+                # the final chunk in the chromosome
+                motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chr_chunk_idx:chr_chunk_idx+1].reshape(
+                2, 2, -1).mean(0)
+            elif chr_chunk_idx+2 <= self.motif_mean_std_obj.data_dict[chr_name].shape[0]:
                 motif_mean_std = self.motif_mean_std_obj.data_dict[chr_name][chr_chunk_idx:chr_chunk_idx+2].reshape(
                 2, 2, -1).mean(0)
-            except: # TODO need to check the best way to handle this!!!!!
-                motif_mean_std = np.zeros((2, 639))+1
+            else: # TODO need to check the best way to handle this!!!!!
+                motif_mean_std = np.zeros((2, 2, 1))
         else:
             motif_mean_std = np.zeros((2, 639))+1
         return chr_name, start, end, celltype_id, track, item_insulation, celltype_peaks, motif_mean_std
@@ -1480,7 +1487,6 @@ class InferenceDataset(PretrainDataset):
         #     self.tss_chunk_idx = pd.read_feather(
         #         self.gencode_obj.feather_file.replace('.feather', '_tss_chunk_idx.feather'))
         #     return self.tss_chunk_idx
-
         self.tss_chunk_idx = self.gencode_obj.gtf.query(
             'gene_name in @self.gene_list').copy()
         for i, row in self.tss_chunk_idx.iterrows():
@@ -1535,7 +1541,7 @@ class InferenceDataset(PretrainDataset):
 
     def _get_gene_info_from_window_idx(self, window_idx):
         # TODO: genome_chunk_length is affected by leave out chromosome by tss_chunk_idx is not
-        chunk_idx = window_idx % (self.tss_chunk_idx.chunk_idx.max() + 1)
+        chunk_idx = window_idx % (self.tss_chunk_idx.chunk_idx.max()+1)
         gene_df = self.tss_chunk_idx.query(
             'chunk_idx==@chunk_idx or chunk_idx==@chunk_idx+1')
         return gene_df
@@ -1747,8 +1753,8 @@ class PerturbationInferenceDataset(Dataset):
 
 @dataclass
 class ReferenceRegionMotifConfig:
-    root: str = '/home/xf2217/Projects/get_data'
-    data: str = 'fetal_tfatlas_peaks_motif.hg38.zarr'
+    root: str = '/pmglocal/alb2281/get/get_data'
+    data: str = 'fetal_gbm_peak_motif_v1.hg38.zarr'
     refdata: str = 'fetal_union_peak_motif_v1.hg38.zarr'
     motif_scaler: float = 1.0
     leave_out_motifs: str|None = None
@@ -1894,8 +1900,13 @@ class ReferenceRegionDataset(Dataset):
     @property
     def data_dict(self):
         if not hasattr(self, '_data_dict'):
-            self._data_dict = {celltype_id: self.reference_region_motif.map_peaks_to_motifs(
-                peaks) for celltype_id, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
+            self._data_dict = {}
+            for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items():
+                data, new_peaks = self.reference_region_motif.map_peaks_to_motifs(peaks)
+                new_datapool_peaks = new_peaks[['peak_names', 'Start', 'End', 'Expression_positive', 'Expression_negative', 'aTPM', 'Count', 'TSS', 'Chromosome']].reset_index(drop=True)
+                self.zarr_dataset.datapool.peaks_dict[data_key] = new_datapool_peaks
+                self._data_dict[data_key] = self.reference_region_motif.map_peaks_to_motifs(new_datapool_peaks)
+            
         return self._data_dict
     
     @property
@@ -1916,6 +1927,74 @@ class ReferenceRegionDataset(Dataset):
             self._idx_dict = idx_dict
         return self._idx_dict
 
+    def extract_data_list(self, region_motif, peaks):
+        region_motif_list = []
+        peak_list = []
+        target_list = []
+        tssidx_list = []
+        hic_matrix_list = []
+
+        all_chromosomes = peaks["Chromosome"].unique(
+        ).tolist()
+        input_chromosomes = _chromosome_splitter(
+            all_chromosomes, self.leave_out_chromosomes, is_train=self.is_train
+        )
+        target_data = peaks[["Expression_positive",
+                             "Expression_negative"]].values
+        tssidx_data = peaks["TSS"].values
+        atpm = peaks['aTPM'].values
+        target_data[atpm < 0.1, :] = 0
+        if not self.quantitative_atac:
+            region_motif = np.concatenate(
+                [region_motif, np.zeros((region_motif.shape[0], 1))+1], axis=1)
+        else:
+            region_motif = np.concatenate(
+                [region_motif, atpm.reshape(-1, 1)/atpm.reshape(-1, 1).max()], axis=1)
+        for chromosome in input_chromosomes:
+            idx_peak_list = peaks.query('Chromosome==@chromosome').index.values
+            idx_peak_start = idx_peak_list[0]
+            idx_peak_end = idx_peak_list[-1]
+            for i in range(idx_peak_start, idx_peak_end, self.sampling_step):
+                # shift = np.random.randint(-self.sampling_step //
+                #                           2, self.sampling_step // 2)
+                # start_index = max(0, i + shift)
+                start_index = max(0, i)
+                end_index = start_index + self.num_region_per_sample
+                celltype_peak_annot_i = peaks.iloc[start_index:end_index, :]
+                if celltype_peak_annot_i.shape[0] == 0:
+                    continue
+                if celltype_peak_annot_i.iloc[-1].End - celltype_peak_annot_i.iloc[0].Start > 5000000:
+                    end_index = celltype_peak_annot_i[celltype_peak_annot_i.End -
+                                                      celltype_peak_annot_i.Start < 5000000].index[-1]
+                    
+                if celltype_peak_annot_i["Start"].min() < 0 or celltype_peak_annot_i.shape[0] != self.num_region_per_sample:
+                    continue
+
+                region_motif_i = coo_matrix(
+                    region_motif[start_index:end_index])
+
+                target_i = coo_matrix(
+                    target_data[start_index:end_index])
+                tssidx_i = tssidx_data[start_index:end_index]
+
+                if region_motif_i.shape[0] == self.num_region_per_sample:
+
+                    # get hic matrix for celltype_peak_annot_i
+                    if self.zarr_dataset.datapool.hic_obj is not None:
+                        hic_matrix_i = get_hic_from_idx(
+                            self.zarr_dataset.datapool.hic_obj, celltype_peak_annot_i)
+                        if hic_matrix_i is None:
+                            continue
+                        else:
+                            hic_matrix_list.append(hic_matrix_i)
+                    else:
+                        hic_matrix_list.append(0)
+
+                    region_motif_list.append(region_motif_i)
+                    peak_list.append(celltype_peak_annot_i)
+                    target_list.append(target_i)
+                    tssidx_list.append(tssidx_i)
+        return peak_list, region_motif_list, target_list, tssidx_list, hic_matrix_list
 
     def setup(self):
         
@@ -2113,9 +2192,15 @@ class InferenceReferenceRegionDataset(Dataset):
     @property
     def data_dict(self):
         if not hasattr(self, '_data_dict'):
-            self._data_dict = {data_key: self.reference_region_motif.map_peaks_to_motifs(
-                peaks) for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items()}
+            self._data_dict = {}
+            for data_key, peaks in self.zarr_dataset.datapool.peaks_dict.items():
+                data, new_peaks = self.reference_region_motif.map_peaks_to_motifs(peaks)
+                new_datapool_peaks = new_peaks[['peak_names', 'Start', 'End', 'Expression_positive', 'Expression_negative',	'aTPM',	'Count', 'TSS', 'Chromosome']].reset_index(drop=True)
+                self.zarr_dataset.datapool.peaks_dict[data_key] = new_datapool_peaks
+                self._data_dict[data_key] = self.reference_region_motif.map_peaks_to_motifs(new_datapool_peaks)
+            
         return self._data_dict
+
 
     def __len__(self):
         return len(self.zarr_dataset)
@@ -2134,8 +2219,8 @@ class InferenceReferenceRegionDataset(Dataset):
         region_motif, peaks = self.data_dict[celltype_id]
         region_motif = region_motif[peak_start:peak_end]
         chromosome = peaks['Chromosome'].values[peak_start]
-        peak_coord = peaks[['Start', 'End']].values[peak_start:peak_end]
-        atpm = peaks['aTPM'].values[peak_start:peak_end]
+        peaks_coord = peaks[['Start', 'End']].values[peak_start:peak_end]
+        atpm = peaks['aTPM'].values[peak_start:peak_end]    
         # append binary or quantitative atac signal
         if not self.quantitative_atac:
             region_motif = np.concatenate(
@@ -2149,17 +2234,20 @@ class InferenceReferenceRegionDataset(Dataset):
         max_tss_count = 100
 
         region_motif = np.pad(region_motif, ((0, pad_length), (0, 0)), mode='constant')
-        peak_coord = np.pad(peak_coord, ((0, pad_length), (0, 0)), mode='constant')
+        peaks_coord = np.pad(peaks_coord, ((0, pad_length), (0, 0)), mode='constant')
         mask = np.pad(mask, (0, pad_length), mode='constant')
         exp_label = np.pad(target, ((0, pad_length), (0, 0)), mode='constant')
         tss_peak = sample['metadata']['tss_peak']
         if tss_peak.shape == ():
             tss_peak = np.array([tss_peak])
+        
+        if len(sample["metadata"]["all_tss_peak"]) == 0:
+            raise ValueError("No TSS peaks found for the gene.")
         all_tss_peak = np.pad(sample['metadata']['all_tss_peak'], (0, max_tss_count - len(sample['metadata']['all_tss_peak'])), mode='constant', constant_values=-1)
 
         return {'region_motif': region_motif.astype(np.float32),
                 'chromosome': chromosome,
-                'peak_coord': peak_coord,
+                'peak_coord': peaks_coord,
                 'mask': mask,
                 'exp_label': exp_label.astype(np.float32),
                 'hic_matrix': hic_matrix,

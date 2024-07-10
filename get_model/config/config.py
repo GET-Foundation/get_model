@@ -59,7 +59,7 @@ class DatasetConfig:
     n_packs: int = 1
 
     # leave-out & filtering
-    keep_celltypes: str | None = None
+    keep_celltypes: Any | None = None
     leave_out_celltypes: str | None = "Astrocyte"
     leave_out_chromosomes: str | None = "chr4,chr14"
     non_redundant: bool = False
