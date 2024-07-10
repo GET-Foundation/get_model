@@ -11,6 +11,7 @@ from get_model.dataset.zarr_dataset import (InferenceDataset,
                                             InferenceReferenceRegionDataset,
                                             ReferenceRegionMotif,
                                             ReferenceRegionMotifConfig)
+from modules.caesar.caesar.io.zarr_io import CelltypeDenseZarrIO
 
 random.seed(0)
 
@@ -214,4 +215,73 @@ from scipy.stats import pearsonr
 pearsonr(hic.flatten()-result[1].squeeze().detach().numpy().flatten(), result[1].squeeze().detach().numpy().flatten())
 # %%
 plot_diag_heatmap(hic, abc*10)
+# %%
+def plot_bed(bed, query, chrom, start, end, ax=None):
+    bed_to_plot = bed.query(
+        'Chromosome == @chrom and Start >= @start and End <= @end').copy()
+    bed_to_plot = bed_to_plot.query(query)
+    bed_to_plot['Start'] = bed_to_plot['Start'] - start
+    bed_to_plot['End'] = bed_to_plot['End'] - start
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(20, 5))
+    # plot each row in the bed as a rectangle, x range from start to end, y range from 0 to Score,
+    # different Name will have different color
+    colors = sns.color_palette(
+        'mako_r', n_colors=len(bed_to_plot['Name'].unique()))
+    colors = {name: color for name, color in zip(
+        bed_to_plot['Name'].unique(), colors)}
+    for idx, row in bed_to_plot.iterrows():
+        ax.fill_between([row['Start'], row['End']], 0,
+                        row['Score'], color=colors[row['Name']])
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    return ax
+
+# %%
+df = dataset.datapool.peaks_dict['k562.encode_hg38atac.ENCFF128WZG.max']
+df['Name'] = 'bed'
+df['Score'] = df['aTPM']
+
+plot_bed(df, 'Count>10', 'chr1', 1000000, 1500000)
+# %%
+from caesar.io.zarr_io import CelltypeDenseZarrIO
+cdz = CelltypeDenseZarrIO('/home/xf2217/Projects/get_data/encode_hg38atac_dense.zarr')
+# %%
+df_specific = cdz.get_peaks('k562.encode_hg38atac.ENCFF128WZG.max', name='peaks_q0.05_tissue_open')
+df_specific['Name'] = 'specific'
+df_specific['Score'] = df_specific['aTPM']
+plot_bed(df_specific, 'Count>10', 'chr1', 1000000, 1500000)
+
+#%%
+fig, ax = plt.subplots(2, 1, figsize=(20, 6))
+
+
+plot_bed(df, 'Count>10', 'chr1', 1000000, 1100000, ax=ax[0])
+plot_bed(df_specific, 'Count>10', 'chr1', 1000000, 1100000, ax=ax[1])
+
+#%%
+def plot_panel(chrom, start, end, bed1, bed2, query, ids=None):
+    if ids == None:
+        ids = cdz.ids
+    fig, axes = plt.subplots(len(ids)+2, 1, figsize=(
+        20, 6), sharex=True, sharey=False)
+    for i, cell_type in enumerate(ids):
+        z = cdz.get_track(cell_type, chrom, start, end)
+        # conv 50
+        z = np.convolve(z, np.ones(50)/50, mode='same')
+        # plot bed as a overlay
+        axes[i].plot(z)
+    plot_bed(bed1, query,
+             chrom, start, end, ax=axes[-2])
+    plot_bed(bed2, query,
+             chrom, start, end, ax=axes[-1])
+    return fig, axes
+
+plot_panel('chr2', 890000, 3100000, df, df_specific, 'Count>10', ids=None)
+
+
+
+# %%
+cdz.da['k562.encode_hg38atac.ENCFF257HEE.max']
 # %%

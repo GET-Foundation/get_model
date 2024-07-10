@@ -59,15 +59,28 @@ cfg = ReferenceRegionMotifConfig(
 rrm = ReferenceRegionMotif(cfg)
 # %%
 everything = InferenceEverythingDataset(
-    rrm, dataset, quantitative_atac=True, sampling_step=450)
+    rrm, dataset, quantitative_atac=True, sampling_step=100)
 #%%
 from get_model.dataset.collate import everything_collate
 
-dl = torch.utils.data.DataLoader(everything, batch_size=2, collate_fn=everything_collate, num_workers=16, shuffle=False)
+dl = torch.utils.data.DataLoader(everything, batch_size=1, collate_fn=everything_collate, num_workers=16, shuffle=False)
 
 # %%
 for i, batch in tqdm(enumerate(dl)):
-    if i > 1000:
+    if i > 0:
         break
 
 # %%
+dataset_exp = dataset[0]['additional_peak_features'][:,0:2]
+# %%
+everything_exp = batch['exp_label'][0]
+# %%
+sns.scatterplot(x=everything[0]['rrd']['exp_label'].flatten(), y=everything[0]['zarr']['additional_peak_features'][:,0:2].flatten())
+# %%
+(dataset_exp-everything_exp.numpy()).sum()
+# %%
+batch['exp_label'][0]
+# %%
+sns.scatterplot(x=batch['atpm'][0], y=everything[0]['zarr']['additional_peak_features'][:,2])
+# %%
+    
