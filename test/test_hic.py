@@ -1,7 +1,7 @@
 #%%
 import hicstraw
 import numpy as np  
-hic = hicstraw.HiCFile("../data/4DNFI2TK7L2F.hic")
+hic = hicstraw.HiCFile("/home/xf2217/Projects/encode_hg38atac/raw/ENCFF621AIY.hic")
 #%%
 def get_hic_from_idx(hic, csv, start, end, resolution=10000, method='observed'):
     csv_region = csv.iloc[start:end]
@@ -38,7 +38,7 @@ pretrain = PretrainDataset(zarr_dirs=['/pmglocal/xf2217/get_data/shendure_fetal_
                             ],
                            genome_seq_zarr='/pmglocal/xf2217/get_data/hg38.zarr', 
                            genome_motif_zarr='/pmglocal/xf2217/get_data/hg38_motif_result.zarr', insulation_paths=[
-                           '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], , peak_name='peaks_q0.01_tissue_open_exp', preload_count=100, n_packs=1,
+                           '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.adjecent.feather', '/pmglocal/xf2217/get_model/data/hg38_4DN_average_insulation.ctcf.longrange.feather'], peak_name='peaks_q0.01_tissue_open_exp', preload_count=100, n_packs=1,
                            max_peak_length=5000, center_expand_target=500, n_peaks_lower_bound=10, n_peaks_upper_bound=100, use_insulation=True, leave_out_celltypes='Astrocyte', leave_out_chromosomes='chr1', is_train=False, dataset_size=65536, additional_peak_columns=None)
 # %%
 df = pretrain.datapool.peaks_dict[list(pretrain.datapool.peaks_dict.keys())[0]]

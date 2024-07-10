@@ -31,11 +31,9 @@ logs
 multirun
 test/abc
 *.txt
-*.tsv
-test/esc_abc
-test/dnase_abc
-test/dnase*
 *pdf
 *png
+*bw
 *tar
 *bw
+*tsv

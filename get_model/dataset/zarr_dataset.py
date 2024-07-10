@@ -2733,6 +2733,7 @@ Sampling step: {self.sampling_step}
 
                     celltype_annot_i = celltype_peak_annot.iloc[start_index:end_index, :]
                     if celltype_annot_i.shape[0] < num_region_per_sample:
+                        print("Not enough regions in the last batch")
                         continue
                     # if celltype_annot_i.iloc[-1].End - celltype_annot_i.iloc[0].Start > 5000000:
                     #     end_index = celltype_annot_i[celltype_annot_i.End -

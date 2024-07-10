@@ -1,25 +1,40 @@
-# Use a base image with mamba installed, assuming a Linux distribution compatible with your setup
 FROM mambaorg/micromamba:latest
 
-# Set the working directory inside the container to a more conventional path
-WORKDIR /GET_STARTED
-# root user is required to install packages
-USER root
-RUN apt-get update && apt-get install -y git
+
+COPY --chown=$MAMBA_USER:$MAMBA_USER environment.yml /tmp/env.yaml
+RUN micromamba install -y -n base -f /tmp/env.yaml && \
+    micromamba clean --all --yes
+
+ARG MAMBA_DOCKERFILE_ACTIVATE=1
+
+# install git with mamba
+RUN micromamba install -y git openssh -c conda-forge
+
+# change back to mamba user
 USER $MAMBA_USER
+# Shallow clone the get_model repository into the codebase directory
+RUN --mount=type=ssh git clone --depth 1 --recursive git@github.com:fuxialexander/get_model.git && \
+    cd get_model && \
+    git checkout refactor_with_hydra
 
-# map the repository to the container
-COPY . /GET_STARTED/get_model
+# Install the package in editable mode
+RUN cd $ROOT_DIR/get_model && \
+    pip install -e .
 
-WORKDIR /GET_STARTED/get_model
-# Clone the necessary repositories and set up the environments
-RUN mamba env create -f environment.yml -p /opt/conda/envs/get_started && \
-    echo "source activate /opt/conda/envs/get_started" > ~/.bashrc && \
-    pip install . && \
-    cd /GET_STARTED/get_model/modules/caesar && \
-    pip install . && \
-    cd /GET_STARTED/get_model/modules/atac_rna_data_processing && \
-    pip install .
+# Clone the caesar repository into the project directory and install it
+RUN cd $ROOT_DIR/get_model/modules/ && \
+    cd caesar && \
+    pip install -e .
 
-# Set the final working directory
-WORKDIR /GET_STARTED
+# Clone the atac_rna_data_processing repository into the project directory and install it
+RUN cd $ROOT_DIR/get_model/modules/ && \
+    cd atac_rna_data_processing && \
+    pip install -e .
+
+# Install additional dependencies
+RUN pip install cython==3.0.8 einops==0.7.0 hic-straw==1.3.1 scanpy==1.9.8 MOODS-python hydra-core lightning ghostscript pytest && \
+    pip install git+https://github.com/pyranges/pyranges@master && \
+    pip install git+https://github.com/cccntu/minLoRA.git@master
+
+# Set the working directory to the codebase directory
+WORKDIR $ROOT_DIR/get_model

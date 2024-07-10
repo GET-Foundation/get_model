@@ -16,10 +16,10 @@ dataset:
     num_region_per_sample: 200
     transform: null
     data_type: 'k562'
-    leave_out_celltypes: k562_count_10
+    leave_out_celltypes: "k562_bulk_cut0.03"
     leave_out_chromosomes: "chr10"
     quantitative_atac: true
-    sampling_step: 100
+    sampling_step: 5
     mask_ratio: 0
 
 training:

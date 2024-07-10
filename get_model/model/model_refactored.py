@@ -747,7 +747,7 @@ class DistanceContactMapModelConfig(BaseGETModelConfig):
 
 
 class DistanceContactMap(BaseGETModel):
-    """A simple and small ResNet model to predict the contact map from the log distance map.
+    """A simple and small Conv2d model to predict the contact map from the log distance map.
     The output has the same shape as the input distance map.
     """
 
