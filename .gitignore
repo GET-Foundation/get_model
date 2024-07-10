@@ -33,3 +33,5 @@ test/abc
 *.txt
 *pdf
 *png
+*bw
+*tar
