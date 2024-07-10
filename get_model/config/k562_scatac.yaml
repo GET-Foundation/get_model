@@ -1,0 +1,51 @@
+defaults:
+  - base_ref_region_config
+  - model/GETRegionFinetuneATAC@_here_
+  - machine/pc
+  - finetune/lightning@finetune
+  - dataset/k562_nucleotide_adaptor@dataset
+  - _self_
+
+assembly: "hg38"
+
+task:
+  layer_names: []
+  test_mode: "interpret"
+
+training:
+  save_ckpt_freq: 1
+  epochs: 100
+  warmup_epochs: 1
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: false
+
+dataset:
+  n_peaks_upper_bound: 200
+  quantitative_atac: true
+  sampling_step: 100
+  mask_ratio: 0
+
+optimizer:
+  lr: 0.001
+  min_lr: 0.000001
+  weight_decay: 0.05
+  opt: "adamw"
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.999]
+
+wandb:
+  project_name: "GETRegionFinetuneATAC_k562"
+  run_name: "ENCFF998SLH"
+
+finetune:
+  pretrain_checkpoint: true
+  strict: false
+  use_lora: true
+  checkpoint: "/home/xf2217/Projects/get_checkpoints/new_output_e800_r200_mask0.5_adult_natac_human_bingren_shendure/checkpoint-799.pth" #GETRegionFinetune_k562_atac/mrcg3pa8/checkpoints/last.ckpt
+  patterns_to_freeze: []
+  model_key: 'model'
+
+
+eval_tss: true
+log_image: true

@@ -1,21 +1,22 @@
 defaults:
   - base_region_config
   - model/GETRegionFinetune@_here_
+  - finetune/v1_finetune@finetune
   - machine/pc_region_v1
   - _self_
 
-assembly: "hg38"
+assembly: "hg19"
 
 dataset:
     root: ${machine.data_path}
     metadata_path: 'cell_type_align.txt'
-    num_region_per_sample: 900
+    num_region_per_sample: 200
     transform: null
     data_type: 'fetal'
     leave_out_celltypes: 'Astrocytes'
     leave_out_chromosomes: null
-    quantitative_atac: false
-    sampling_step: 450
+    quantitative_atac: true
+    sampling_step: 100
 
 training:
   save_ckpt_freq: 1
@@ -34,17 +35,23 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetuneV1"
-  run_name: "Astrocyte"
+  project_name: "GETRegionFinetuneV1_Astrocyte"
+  run_name: "debug"
 
 task:
   layer_names: []
+  test_mode: "inference"
   gene_list: /home/xf2217/Projects/get_revision/brain_multiome/genes_in_Q1.txt
 
+machine:
+  output_dir: /home/xf2217/Projects/get_revision/brain_multiome/
 
 finetune:
   pretrain_checkpoint: false
-  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
+  strict: true
+  use_lora: false
+  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth"
   patterns_to_freeze: []
 
 eval_tss: true
+log_image: true

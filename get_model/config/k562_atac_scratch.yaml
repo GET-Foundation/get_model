@@ -1,6 +1,7 @@
 defaults:
   - base_region_config
   - model/GETRegionFinetuneATAC@_here_
+  - finetune/lightning@finetune
   - machine/pc_region_v2
   - _self_
 
@@ -15,8 +16,8 @@ dataset:
     num_region_per_sample: 200
     transform: null
     data_type: 'k562'
-    leave_out_celltypes: 'k562_bulk_count_10,k562_bulk_cut0.03,k562_bulk_cut0.05,k562_bulk_cut0.07,k562_count_10,k562_cut0.03,k562_cut0.05,k562_cut0.07,Fetal Astrocyte 1'
-    leave_out_chromosomes: "chr11"
+    leave_out_celltypes: k562_count_10
+    leave_out_chromosomes: "chr10"
     quantitative_atac: true
     sampling_step: 100
     mask_ratio: 0
@@ -38,11 +39,12 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetuneATAC"
-  run_name: "k562_and_astrocyte_from_scratch"
+  project_name: "GETRegionFinetuneATAC_k562"
+  run_name: "k562_from_scratch"
 
 finetune:
-  checkpoint: null
+  strict: true
+  checkpoint: GETRegionFinetuneATAC_k562/ztoz38tx/checkpoints/best.ckpt
   patterns_to_freeze: []
 
 eval_tss: false

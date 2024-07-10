@@ -17,11 +17,11 @@ model:
     loss:
       components:
         atpm:
-          _target_: get_model.model.model_refactored.log1pMSELoss
+          _target_: torch.nn.MSELoss
         aprofile:
-          _target_: get_model.model.model_refactored.MNLLLoss
+          _target_: torch.nn.MSELoss
       weights:
-        atpm: 10.0
+        atpm: 0
         aprofile: 1.0
     metrics:
       components:

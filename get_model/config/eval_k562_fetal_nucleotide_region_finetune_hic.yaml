@@ -1,0 +1,60 @@
+defaults:
+  - base_ref_region_config
+  - model/GETNucleotideRegionFinetuneExp@_here_
+  - machine/pc
+  - finetune/v1_finetune@finetune
+  - dataset/k562_nucleotide_region_finetune_hic@dataset
+  - _self_
+
+assembly: "hg38"
+
+task:
+  layer_names: []
+  test_mode: "interpret"
+
+training:
+  save_ckpt_freq: 1
+  epochs: 100
+  warmup_epochs: 1
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: false
+
+dataset:
+  quantitative_atac: false
+  sampling_step: 100
+  mask_ratio: 0
+
+optimizer:
+  lr: 0.001
+  min_lr: 0.000001
+  weight_decay: 0.05
+  opt: "adamw"
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.999]
+
+wandb:
+  project_name: "nucleotide_region_finetune"
+  run_name: "motif_no_freeze"
+
+finetune:
+  pretrain_checkpoint: false
+  strict: false
+  use_lora: true
+  layers_with_lora: ['encoder', 'head_exp']
+  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes_natac/checkpoint-best.pth"
+  patterns_to_freeze: ['motif_scanner', 'conv_blocks', 'atac_attention']
+  model_key: 'model'
+  additional_checkpoints:
+    - checkpoint: "nucleotide_motif_adaptor/9zewa0op/checkpoints/last.ckpt"
+      model_key: 'state_dict'
+      strict: false
+      rename_config:
+        model.motif_scanner.: motif_scanner.
+        model.conv_blocks.: conv_blocks.
+        model.atac_attention.: atac_attention.
+        model.proj.: proj.
+
+
+eval_tss: true
+log_image: true

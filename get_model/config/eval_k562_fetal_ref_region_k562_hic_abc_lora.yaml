@@ -34,15 +34,15 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune_k562_abc"
+  project_name: "GETRegionFinetune_k562_hic_oe"
   run_name: "debug"
 
 finetune:
-  pretrain_checkpoint: false
-  strict: true
+  pretrain_checkpoint: true
+  strict: false
   use_lora: true
-  layers_with_lora: ['region_embed', 'head_exp', 'encoder']
-  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth"
+  layers_with_lora: ['region_embed', 'encoder', 'head_exp']
+  checkpoint: "/home/xf2217/Projects/get_checkpoints/v1_pretrain_natac/checkpoint-799.pth"
   patterns_to_freeze: ['distance_contact_map']
   model_key: 'model'
   additional_checkpoints:

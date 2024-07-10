@@ -1,0 +1,17 @@
+model:
+  _target_: get_model.model.model_refactored.MLPRegionFinetune
+  cfg:
+    input_dim: 283
+    use_atac: false
+    output_dim: 2
+    loss:
+      components:
+        exp:
+          _target_: torch.nn.PoissonNLLLoss
+          reduction: "mean"
+          log_input: False
+      weights:
+        exp: 1.0
+    metrics:
+      components:
+        exp: ["pearson", "spearman", "r2"]

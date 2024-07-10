@@ -208,7 +208,7 @@ class MotifScanner(BaseModule):
         elif self.include_reverse_complement:
             x = x[:, :637, :] + x[:, 637:, :]  # output should be 637 dim
         x = x.permute(0, 2, 1)
-        if motif_mean_std is not None:
+        if motif_mean_std is not None and self.motif_prior:
             x = self.normalize_motif(x, motif_mean_std)
         x = F.relu(x)
         return x
@@ -388,12 +388,15 @@ class ContactMapHead(BaseModule):
     """A simple and small ResNet model to predict the contact map from the log distance map.
     The output has the same shape as the input distance map.
     """
-    def __init__(self, cfg):
+    def __init__(self, cfg, activation='softplus'):
         super().__init__(cfg)
         self.conv1 = nn.Conv2d(cfg.input_dim, cfg.hidden_dim, 3, padding=1)
         self.conv2 = nn.Conv2d(cfg.hidden_dim, cfg.hidden_dim, 3, padding=1)
         self.conv3 = nn.Conv2d(cfg.hidden_dim, cfg.hidden_dim, 3, padding=1)
         self.conv4 = nn.Conv2d(cfg.hidden_dim, cfg.output_dim, 3, padding=1)
+        if activation == 'softplus':
+            self.activation = nn.Softplus()
+
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -418,8 +421,10 @@ class ContactMapHead(BaseModule):
 
         # Fourth layer
         x = self.conv4(x)
-        hic = F.softplus(x)
-
+        if hasattr(self, 'activation'):
+            hic = self.activation(x)
+        else:
+            hic = x
         return hic
 
 
@@ -621,7 +626,7 @@ class DilatedConv1d(BaseModule):
     def __init__(self, cfg: DilatedConv1dConfig):
         super().__init__(cfg)
         self.conv = nn.Conv1d(cfg.dim, cfg.dim, cfg.kernel_size,
-                              padding='valid', dilation=cfg.dilation)
+                              padding='same', dilation=cfg.dilation)
         self.activation = nn.ReLU()
         # self.batch_norm = nn.BatchNorm1d(cfg.dim)
 
@@ -725,8 +730,8 @@ class ConvPool(BaseModule):
     def __init__(self, cfg: ConvPoolConfig):
         super().__init__(cfg)
         self.pool_method = cfg.pool_method
-        # self.motif_proj = nn.Linear(
-        #     cfg.motif_dim, cfg.hidden_dim)
+        self.motif_proj = nn.Linear(
+            cfg.motif_dim, cfg.hidden_dim)
         self.dila_conv_tower = DilatedConv1dBlock(DilatedConv1dBlockConfig(
             hidden_dim=cfg.hidden_dim, depth=cfg.n_dil_layers))
         self.aprofile_header = nn.Conv1d(
@@ -747,15 +752,17 @@ class ConvPool(BaseModule):
                 - peak_profiles: Tensor of shape (batch, length) representing the peak profiles.
         """
         # x = self.motif_proj(x)
-        batch, length, motif_dim = x.shape
+
 
         if torch.all(n_peaks == max_n_peaks) and np.unique(peak_split).shape[0] == 2:
             peak_size = np.unique(peak_split).max()
             num_peaks = n_peaks[0]
+            x = self.motif_proj(x)
+            batch, length, motif_dim = x.shape
             x = x.reshape(batch * num_peaks, peak_size,
                           motif_dim).transpose(1, 2)
             peak_profile = self.dila_conv_tower(x)
-            peak_atpm = peak_profile.mean(2)
+            peak_atpm = peak_profile.sum(2)
             peak_profile = self.aprofile_header(peak_profile)
             peak_atpm = self.atpm_header(peak_atpm)
             peak_atpm = peak_atpm.reshape(batch, num_peaks)
@@ -773,7 +780,7 @@ class ConvPool(BaseModule):
                     continue
                 peak_profile = self.dila_conv_tower(
                     peak.unsqueeze(0).transpose(1, 2))
-                peak_atpm = peak_profile.mean(2)
+                peak_atpm = peak_profile.sum(2)
                 peak_profile = self.aprofile_header(peak_profile).squeeze(0)
                 peak_atpm_list.append(peak_atpm)
                 peak_profiles.append(peak_profile)
@@ -1014,3 +1021,21 @@ class ATACSplitPoolMaxNorm(ATACSplitPool):
             x = self.final_bn(x.transpose(1, 2)).transpose(1, 2)
 
         return x
+
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+        """A resnet block"""
+        super(ConvBlock, self).__init__()
+        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.batch_norm1 = nn.BatchNorm1d(out_channels)
+        self.batch_norm2 = nn.BatchNorm1d(out_channels)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.batch_norm1(out)
+        out = F.relu(out)
+        out = self.conv2(out)
+        out = self.batch_norm2(out)
+        out = F.relu(out+x)
+        return out

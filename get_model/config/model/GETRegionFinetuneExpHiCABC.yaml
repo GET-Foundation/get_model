@@ -46,20 +46,20 @@ model:
           _target_: torch.nn.PoissonNLLLoss
           reduction: "mean"
           log_input: False
-        # hic:
-        #   _target_: torch.nn.PoissonNLLLoss
-        #   reduction: "mean"
-        #   log_input: False
-        abc:
+        hic:
           _target_: torch.nn.PoissonNLLLoss
           reduction: "mean"
           log_input: False
+        # abc:
+        #   _target_: torch.nn.PoissonNLLLoss
+        #   reduction: "mean"
+        #   log_input: False
       weights:
         exp: 0.1
-        # hic: 1.0
-        abc: 1.0
+        hic: 1.0
+        # abc: 1.0
     metrics:
       components:
         exp: ["pearson", "spearman", "r2"]
-        # hic: ["pearson", "spearman", "r2"]
-        abc: ["pearson", "spearman", "r2"]
+        hic: ["pearson", "spearman", "r2"]
+        # abc: ["pearson", "spearman", "r2"]

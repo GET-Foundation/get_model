@@ -1,7 +1,7 @@
 defaults:
   - base_config
   - model/GETFinetune@_here_
-  - machine/manitou
+  - machine/pc
   - dataset/finetune_k562_fetal@dataset
   - _self_
 
@@ -14,7 +14,7 @@ task:
 
 training:
   save_ckpt_freq: 10
-  epochs: 2
+  epochs: 100
   warmup_epochs: 1
   accumulate_grad_batches: 1
   clip_grad: null
@@ -35,5 +35,5 @@ wandb:
 finetune:
   pretrain_checkpoint: false
   strict: false
-  checkpoint: "/pmglocal/xf2217/GET_STARTED/get_model/GETRegionFinetune_k562/9g198fd4/checkpoints/best.ckpt"
+  checkpoint: null
   patterns_to_freeze: []

@@ -8,4 +8,4 @@ rename_config:
   "region_embed.proj.": "region_embed.embed."
   "encoder.cls_token": "cls_token"
   "head.": "head_exp.head."
-strict: True
+strict: true

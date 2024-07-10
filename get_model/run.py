@@ -1,3 +1,4 @@
+from functools import partial
 import logging
 import zarr
 
@@ -28,11 +29,12 @@ from get_model.dataset.zarr_dataset import (InferenceDataset,
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import create_optimizer
-from get_model.utils import (cosine_scheduler, load_checkpoint,
+from get_model.utils import (cosine_scheduler, extract_state_dict, load_checkpoint, load_state_dict,
                              recursive_detach, recursive_numpy, recursive_save_to_zarr, remove_keys,
-                             rename_lit_state_dict, rename_v1_finetune_keys,
+                             rename_lit_state_dict, rename_state_dict, rename_v1_finetune_keys,
                              rename_v1_pretrain_keys)
-
+from minlora import LoRAParametrization
+from minlora.model import add_lora_by_name
 logging.disable(logging.WARN)
 
 # Wrapper model for Captum
@@ -84,38 +86,78 @@ class LitModel(L.LightningModule):
         self.save_hyperparameters()
         self.dm = None
 
-    # def on_before_optimizer_step(self, optimizer):
-    #     # Compute the 2-norm for each layer
-    #     # If using mixed precision, the gradients are already unscaled here
-    #     # norms = grad_norm(self.model, norm_type=2)
-    #     # self.log_dict(norms)
-
     def get_model(self):
         model = instantiate(self.cfg.model)
+
+        # Load main model checkpoint
         if self.cfg.finetune.checkpoint is not None:
             checkpoint_model = load_checkpoint(
-                self.cfg.finetune.checkpoint)
-            # state_dict = model.state_dict()
-            # remove_keys(checkpoint_model, state_dict)
-            strict = self.cfg.finetune.strict
-            if 'model' in checkpoint_model:
-                checkpoint_model = checkpoint_model['model']
-            if 'state_dict' in checkpoint_model:
-                checkpoint_model = checkpoint_model['state_dict']
-                checkpoint_model = rename_lit_state_dict(
-                    checkpoint_model, self.cfg.finetune.patterns_to_drop)
-                model.load_state_dict(checkpoint_model, strict=strict)
+                self.cfg.finetune.checkpoint, model_key=self.cfg.finetune.model_key)
+            checkpoint_model = extract_state_dict(checkpoint_model)
+            checkpoint_model = rename_state_dict(
+                checkpoint_model, self.cfg.finetune.rename_config)
+            lora_config = {  # specify which layers to add lora to, by default only add to linear layers
+                nn.Linear: {
+                    "weight": partial(LoRAParametrization.from_linear, rank=8),
+                },
+                nn.Conv2d: {
+                    "weight": partial(LoRAParametrization.from_conv2d, rank=4),
+                },
+            }
+            if any("lora" in k for k in checkpoint_model.keys()) and self.cfg.finetune.use_lora:
+                add_lora_by_name(
+                    model, self.cfg.finetune.layers_with_lora, lora_config)
+                load_state_dict(model, checkpoint_model,
+                                strict=self.cfg.finetune.strict)
+            elif any("lora" in k for k in checkpoint_model.keys()) and not self.cfg.finetune.use_lora:
+                raise ValueError(
+                    "Model checkpoint contains LoRA parameters but use_lora is set to False")
+            elif not any("lora" in k for k in checkpoint_model.keys()) and self.cfg.finetune.use_lora:
+                logging.info(
+                    "Model checkpoint does not contain LoRA parameters but use_lora is set to True, using the checkpoint as base model")
+                load_state_dict(model, checkpoint_model,
+                                strict=self.cfg.finetune.strict)
+                add_lora_by_name(
+                    model, self.cfg.finetune.layers_with_lora, lora_config)
             else:
-                if self.cfg.finetune.pretrain_checkpoint:
-                    checkpoint_model = rename_v1_pretrain_keys(
-                        checkpoint_model)
-                    model.load_state_dict(checkpoint_model, strict=strict)
-                else:
-                    checkpoint_model = rename_v1_finetune_keys(
-                        checkpoint_model)
-                    model.load_state_dict(checkpoint_model, strict=strict)
+                load_state_dict(model, checkpoint_model,
+                                strict=self.cfg.finetune.strict)
+
+        # Load additional checkpoints
+        if len(self.cfg.finetune.additional_checkpoints) > 0:
+            for checkpoint_config in self.cfg.finetune.additional_checkpoints:
+                checkpoint_model = load_checkpoint(
+                    checkpoint_config.checkpoint, model_key=checkpoint_config.model_key)
+                checkpoint_model = extract_state_dict(checkpoint_model)
+                checkpoint_model = rename_state_dict(
+                    checkpoint_model, checkpoint_config.rename_config)
+                load_state_dict(model, checkpoint_model,
+                                strict=checkpoint_config.strict)
+
+        if self.cfg.finetune.use_lora:
+            # Load LoRA parameters based on the stage
+            if self.cfg.stage == 'fit':
+                # Load LoRA parameters for training
+                if self.cfg.finetune.lora_checkpoint is not None:
+                    lora_state_dict = load_checkpoint(
+                        self.cfg.finetune.lora_checkpoint)
+                    lora_state_dict = extract_state_dict(lora_state_dict)
+                    lora_state_dict = rename_state_dict(
+                        lora_state_dict, self.cfg.finetune.lora_rename_config)
+                    load_state_dict(model, lora_state_dict, strict=True)
+            elif self.cfg.stage in ['validate', 'predict']:
+                # Load LoRA parameters for validation and prediction
+                if self.cfg.finetune.lora_checkpoint is not None:
+                    lora_state_dict = load_checkpoint(
+                        self.cfg.finetune.lora_checkpoint)
+                    lora_state_dict = extract_state_dict(lora_state_dict)
+                    lora_state_dict = rename_state_dict(
+                        lora_state_dict, self.cfg.finetune.lora_rename_config)
+                    load_state_dict(model, lora_state_dict, strict=True)
+
         model.freeze_layers(
-          patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
+            patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
+        print("Model = %s" % str(model))
         return model
 
     def forward(self, batch):
@@ -222,6 +264,7 @@ class LitModel(L.LightningModule):
                 }
 
     def interpret_step(self, batch, batch_idx, layer_names: List[str] = None, focus: int = None):
+        
         target_tensors = {}
         hooks = []
         input = self.model.get_input(batch)
@@ -244,6 +287,9 @@ class LitModel(L.LightningModule):
             for key, tensor in input.items():
                 tensor.requires_grad = True
         else:
+            target_tensors['input'] = input
+            for key, tensor in input.items():
+                tensor.requires_grad = True
             for layer_name in layer_names:
                 layer = self.model.get_layer(layer_name)
                 hook = layer.register_forward_hook(capture_target_tensor(layer_name))
@@ -285,7 +331,6 @@ class LitModel(L.LightningModule):
         jacobians = recursive_numpy(jacobians)
         target_tensors = recursive_numpy(target_tensors)
         return pred, obs, jacobians, target_tensors
-
 
     def interpret_captum_step(self, batch, batch_idx, focus, start, end, shift=0):
         import torch
@@ -354,12 +399,17 @@ class LitModel(L.LightningModule):
         z = zarr.open(zarr_path, mode='a')
         recursive_save_to_zarr(z, result_df,  object_codec=object_codec, overwrite=True)
     
-
     def configure_optimizers(self):
         # a adam optimizer with a scheduler using lightning function
         optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.lr)
         return optimizer
+    
+    # def on_before_optimizer_step(self, optimizer):
+    #     # Compute the 2-norm for each layer
+    #     # If using mixed precision, the gradients are already unscaled here
+    #     # norms = grad_norm(self.model, norm_type=2)
+    #     # self.log_dict(norms)
 
     # def configure_optimizers(self):
     #     optimizer = create_optimizer(self.cfg.optimizer, self.model)
@@ -557,7 +607,7 @@ def run(cfg: DictConfig):
         accelerator = 'gpu'
         device = cfg.machine.num_devices
         if cfg.machine.num_devices > 1:
-            strategy = 'ddp_spawn'
+            strategy = 'ddp_find_unused_parameters_true'
     else:
         strategy = 'auto'
         accelerator = 'cpu'
@@ -605,7 +655,7 @@ def run_downstream(cfg: DictConfig):
         accelerator = 'gpu'
         device = cfg.machine.num_devices
         if cfg.machine.num_devices > 1:
-            strategy = 'ddp_spawn'
+            strategy = 'ddp_find_unused_parameters_true'
     else:
         strategy = 'auto'
         accelerator = 'cpu'

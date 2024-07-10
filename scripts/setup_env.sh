@@ -71,6 +71,6 @@ cd $ROOT_DIR/atac_rna_data_processing
 pip install -e .
 
 pip install git+https://github.com/pyranges/pyranges@master
-pip install git+https://github.com/cccntu/minLoRA.git@master
+pip install git+https://github.com/cccntu/minLoRA.git@main
 # Return to the codebase directory
 cd $CODEBASE_DIR

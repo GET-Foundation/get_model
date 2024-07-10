@@ -34,8 +34,8 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune_k562_abc"
-  run_name: "lora_axial"
+  project_name: "GETRegionFinetune_k562_abc_axial"
+  run_name: "debug"
 
 finetune:
   pretrain_checkpoint: false

@@ -2,6 +2,7 @@ defaults:
   - base_ref_region_config
   - model/GETRegionFinetune@_here_
   - machine/pc
+  - finetune/lightning@finetune
   - dataset/tfatlas_eval@dataset
   - _self_
 
@@ -16,9 +17,14 @@ training:
   use_fp16: false
 
 dataset:
-  quantitative_atac: false
-  sampling_step: 100
+  quantitative_atac: true
+  sampling_step: 450
   mask_ratio: 0
+  keep_celltypes: "0.joung_tfatlas.L10M,"
+  leave_out_celltypes: "6_0.joung_tfatlas.L10M"
+  leave_out_chromosomes: null
+  hic_path: null
+  n_peaks_upper_bound: 900
 
 optimizer:
   lr: 0.0001
@@ -29,14 +35,17 @@ optimizer:
   opt_betas: [0.9, 0.999]
 
 wandb:
-  project_name: "GETRegionFinetune"
-  run_name: "TFAtlas"
+  project_name: "TFAtlas_ood_cell_lora_new"
+  run_name: "QATAC_cluster_0"
 
 finetune:
   pretrain_checkpoint: false
   strict: true
+  use_lora: true
+  layers_with_lora: ['region_embed', 'encoder', 'head_exp']
   checkpoint: "/home/xf2217/Projects/get_revision/TFAtlas_fetal_compare/best0.05.ckpt"
   patterns_to_freeze: []
+
 
 eval_tss: true
 log_image: false
