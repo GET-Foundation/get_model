@@ -1893,6 +1893,7 @@ class ReferenceRegionDataset(Dataset):
             assert isinstance(self.leave_out_motifs, np.ndarray)
 
         self.peak_names = reference_region_motif.peak_names
+        self.sample_indices = []
         self.setup()
         self.data_dict
         self.idx_dict
@@ -1928,8 +1929,6 @@ class ReferenceRegionDataset(Dataset):
         return self._idx_dict
 
     def setup(self):
-        
-        self.sample_indices = []
         self.motif_quantile_cutoff_dict = {}
         for celltype_id, (region_motif, peaks) in tqdm(self.data_dict.items()):
             # if self.leave_out_motifs is not None, get the motif_quantile_cutoff from region_motif, put in a dictionary
@@ -2098,6 +2097,40 @@ class ReferenceRegionDataset(Dataset):
                 'data_key': self.zarr_dataset.datapool._get_data_key(celltype_id),
                 }
         return data
+    
+    def save_to_file(self, file_path):
+        """
+        Save the essential data of the dataset to a .pt file.
+        """
+        save_data = {
+            'sample_indices': self.sample_indices,
+            'data_dict': {k: (v[0], v[1].to_dict('records')) for k, v in self.data_dict.items()},
+            'idx_dict': self.idx_dict
+        }
+        torch.save(save_data, file_path)
+        print(f"Dataset saved to {file_path}")
+
+    @classmethod
+    def load_from_file(cls, file_path, zarr_dataset, reference_region_motif, **kwargs):
+        """
+        Load the dataset from a .pt file, skipping the setup process.
+        """
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        save_data = torch.load(file_path)
+        
+        instance = cls(reference_region_motif, zarr_dataset, **kwargs)
+        instance.sample_indices = save_data['sample_indices']
+        instance._data_dict = {k: (v[0], pd.DataFrame(v[1])) for k, v in save_data['data_dict'].items()}
+        instance._idx_dict = save_data['idx_dict']
+
+        # Skip setup process
+        instance.setup = lambda: None
+
+        print(f"Dataset loaded from {file_path}")
+        return instance
+
 
 class InferenceReferenceRegionDataset(Dataset):
     def __init__(self, reference_region_motif: ReferenceRegionMotif,

@@ -989,7 +989,7 @@ class GETRegionFinetuneHiCOE(BaseGETModel):
             'hic': hic_contact_map,
         }
         obs = {
-            'hic': hic,
+            'hic': hic.float(),
         }
         if real_hic:
             mask = (hic==0)

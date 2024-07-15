@@ -56,11 +56,18 @@ def inspect_dataloader(config_name, stage='fit', type='everything', num_batches=
 
 #%%
 # Specify the configuration name you want to use
-config_name = "eval_k562_fetal_ref_region"
+config_name = "eval_k562_fetal_ref_region_k562_hic_oe"
 
 # Inspect the dataloader for the 'fit' stage
-cfg,  dm = inspect_dataloader(config_name, stage='predict', type='ref_region', num_batches=2)
+cfg,  dm = inspect_dataloader(config_name, stage='fit', type='ref_region', num_batches=2)
 
+#%%
+batch = next(iter(dm.dataset_train))
+sns.heatmap(batch['hic_matrix'])
+#%%
+dm.dataset_train.save_to_file('train.pt')
+#%%
+dm.dataset_train.load_from_file('train.pt')
 # %%
 # assert correlation of exp with atpm > 0.4
 for celltype_id, peak in dm.dataset_val.zarr_dataset.datapool.peaks_dict.items():
