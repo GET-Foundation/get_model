@@ -1,8 +1,5 @@
 FROM mambaorg/micromamba:latest
 
-RUN apt-get update
-RUN apt-get -y install gcc
-
 COPY --chown=$MAMBA_USER:$MAMBA_USER environment_for_docker.yml /tmp/env.yaml
 RUN micromamba install -y -n base -f /tmp/env.yaml && \
     micromamba clean --all --yes
@@ -10,7 +7,7 @@ RUN micromamba install -y -n base -f /tmp/env.yaml && \
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 
 # install git with mamba
-RUN micromamba install -y git openssh -c conda-forge
+RUN micromamba install -y git openssh gcc -c conda-forge
 
 # change back to mamba user
 USER $MAMBA_USER
