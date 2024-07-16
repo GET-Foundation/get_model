@@ -7,7 +7,7 @@ RUN micromamba install -y -n base -f /tmp/env.yaml && \
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 
 # install git with mamba
-RUN micromamba install -y git openssh gcc -c conda-forge
+RUN micromamba install -y git openssh gcc gxx -c conda-forge
 
 # change back to mamba user
 USER $MAMBA_USER
@@ -34,7 +34,7 @@ RUN cd /home/$MAMBA_USER/get_model/modules/ && \
 # Install additional dependencies
 RUN pip install cython==3.0.8 einops==0.7.0 hic-straw==1.3.1 scanpy==1.9.8 MOODS-python hydra-core lightning ghostscript pytest && \
     pip install git+https://github.com/pyranges/pyranges@master && \
-    pip install git+https://github.com/cccntu/minLoRA.git@master
+    pip install git+https://github.com/cccntu/minLoRA.git@main
 
 # Set the working directory to the codebase directory
 WORKDIR /home/$MAMBA_USER/get_model/get_model
