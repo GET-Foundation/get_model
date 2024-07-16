@@ -12,22 +12,23 @@ RUN micromamba install -y git openssh -c conda-forge
 
 # change back to mamba user
 USER $MAMBA_USER
-# Shallow clone the get_model repository into the codebase directory
-RUN --mount=type=ssh git clone --depth 1 --recursive git@github.com:fuxialexander/get_model.git && \
-    cd get_model && \
-    git checkout refactor_with_hydra
+
+RUN mkdir -p /home/$MAMBA_USER/.ssh
+RUN ssh-keyscan www.github.com >> /home/$MAMBA_USER/.ssh/known_hosts
+# copy the codebase to the container
+COPY --chown=$MAMBA_USER:$MAMBA_USER . /home/$MAMBA_USER/get_model
 
 # Install the package in editable mode
-RUN cd $ROOT_DIR/get_model && \
+RUN cd /home/$MAMBA_USER/get_model && \
     pip install -e .
 
 # Clone the caesar repository into the project directory and install it
-RUN cd $ROOT_DIR/get_model/modules/ && \
+RUN cd /home/$MAMBA_USER/get_model/modules/ && \
     cd caesar && \
     pip install -e .
 
 # Clone the atac_rna_data_processing repository into the project directory and install it
-RUN cd $ROOT_DIR/get_model/modules/ && \
+RUN cd /home/$MAMBA_USER/get_model/modules/ && \
     cd atac_rna_data_processing && \
     pip install -e .
 
@@ -37,4 +38,4 @@ RUN pip install cython==3.0.8 einops==0.7.0 hic-straw==1.3.1 scanpy==1.9.8 MOODS
     pip install git+https://github.com/cccntu/minLoRA.git@master
 
 # Set the working directory to the codebase directory
-WORKDIR $ROOT_DIR/get_model
+WORKDIR /home/$MAMBA_USER/get_model/get_model
