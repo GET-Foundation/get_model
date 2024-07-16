@@ -10,5 +10,6 @@
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
     "python.testing.pytestPath": "pytest ",
-    "python.testing.cwd": ""
+    "python.testing.cwd": "",
+    "r.lsp.promptToInstall": false
 }

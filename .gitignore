@@ -37,3 +37,5 @@ test/abc
 *tar
 *bw
 *tsv
+experiments
+.vscode/settings.json
