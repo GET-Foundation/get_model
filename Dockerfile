@@ -1,5 +1,7 @@
 FROM mambaorg/micromamba:latest
 
+RUN apt-get update
+RUN apt-get -y install gcc
 
 COPY --chown=$MAMBA_USER:$MAMBA_USER environment_for_docker.yml /tmp/env.yaml
 RUN micromamba install -y -n base -f /tmp/env.yaml && \
