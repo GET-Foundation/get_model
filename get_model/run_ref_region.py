@@ -9,6 +9,7 @@ import torch.utils.data
 import zarr
 from hydra.utils import instantiate
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from custom_callbacks import FinetunedModelCheckpoint 
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.plugins import MixedPrecision
 from matplotlib import pyplot as plt
@@ -479,6 +480,24 @@ def run(cfg: DictConfig):
     if 'interpret' in cfg.task.test_mode:
         inference_mode = False
 
+    # Create both regular and finetuned checkpoints
+    regular_checkpoint = ModelCheckpoint(
+        monitor="val_loss", 
+        mode="min", 
+        save_top_k=1, 
+        save_last=True, 
+    )
+    finetuned_checkpoint = FinetunedModelCheckpoint(
+        monitor="val_loss", 
+        mode="min", 
+        save_top_k=1, 
+        save_last=True, 
+    )
+    # if use lora, save lora parameters
+    if cfg.finetune.use_lora:
+        checkpoint = finetuned_checkpoint
+    else:
+        checkpoint = regular_checkpoint
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator="cuda",
@@ -488,9 +507,8 @@ def run(cfg: DictConfig):
         logger=[
             wandb_logger,
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
-        callbacks=[ModelCheckpoint(
-            monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
-        # plugins=[][MixedPrecision(precision='16-mixed', device="cuda")],
+        callbacks=[checkpoint],
+        # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
         log_every_n_steps=4,
