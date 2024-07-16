@@ -62,9 +62,6 @@ config_name = "eval_k562_fetal_ref_region_k562_hic_oe"
 cfg,  dm = inspect_dataloader(config_name, stage='fit', type='ref_region', num_batches=2)
 
 #%%
-batch = next(iter(dm.dataset_train))
-sns.heatmap(batch['hic_matrix'])
-#%%
 dm.dataset_train.save_to_file('train.pt')
 #%%
 dm.dataset_train.load_from_file('train.pt')

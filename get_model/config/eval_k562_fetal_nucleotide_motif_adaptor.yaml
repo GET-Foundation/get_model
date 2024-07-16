@@ -1,5 +1,5 @@
 defaults:
-  - base_ref_region_config
+  - base_everything_config
   - model/GETNucleotideMotifAdaptor@_here_
   - machine/pc
   - finetune/lightning@finetune

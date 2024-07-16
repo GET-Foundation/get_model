@@ -161,6 +161,7 @@ class TaskConfig:
 
 @dataclass
 class Config:
+    type: str = 'nucleotide'
     log_image: bool = False
     stage: str = 'fit'
     assembly: str = 'hg38'
@@ -178,6 +179,7 @@ class Config:
 
 @dataclass
 class ReferenceRegionConfig(Config):
+    type: str = 'reference_region'
     eval_tss: bool = False
     log_image: bool = False
     dataset: ReferenceRegionDatasetConfig = field(
@@ -185,7 +187,12 @@ class ReferenceRegionConfig(Config):
 
 
 @dataclass
+class EverythingConfig(ReferenceRegionConfig):
+    type: str = 'everything'
+
+@dataclass
 class RegionConfig:
+    type: str = 'region'
     stage: str = 'fit'
     assembly: str = 'hg38'
     eval_tss: bool = False
@@ -207,6 +214,9 @@ cs.store(name="base_config", node=Config)
 
 csrr = ConfigStore.instance()
 csrr.store(name="base_ref_region_config", node=ReferenceRegionConfig)
+
+cse = ConfigStore.instance()
+cse.store(name="base_everything_config", node=EverythingConfig)
 
 csr = ConfigStore.instance()
 csr.store(name="base_region_config", node=RegionConfig)
