@@ -15,9 +15,10 @@ config = OmegaConf.load(
     '/home/xf2217/Projects/get_model/get_model/config/model/DistanceContactMap.yaml')
 model = hydra.utils.instantiate(config)['model']
 checkpoint = torch.load(
-    '/home/xf2217/Projects/get_model/DistanceMap/kp6cfqkc/checkpoints/best.ckpt')
+    '/home/xf2217/Projects/get_model/experiments/DistanceMap/kp6cfqkc/checkpoints/best.ckpt')
 model.load_state_dict(rename_lit_state_dict(checkpoint['state_dict']))
 #%%
+# this was produced using python get_model/debug/debug_run_region.py --config-name fetal_region_erythroblast stage=predict machine.batch_size=1 wandb.run_name=eryth
 z = zarr.open('/home/xf2217/output/GETRegionFinetuneV1_Erythroblast/eryth.zarr', 'r')
 print(z.tree())
 #%%
@@ -192,7 +193,7 @@ hyena  = hyena[['Chromosome', 'Start', 'End', 'hyena']]
 np.bool = np.bool_
 ABE_jacob_hg38_enformer_hyena = prs(ABE_jacob_hg38_enformer.reset_index(), int64=True).join(prs(hyena, int64=True), how='left').df.drop(columns=['Start_b', 'End_b'])
 ABE_jacob_hg38_enformer_hyena['hyena'][ABE_jacob_hg38_enformer_hyena['hyena']==-1] = 0
-ABE_jacob_hg38_enformer_hyena = ABE_jacob_hg38_enformer_hyena.groupby('ID').max()
+ABE_jacob_hg38_enformer_hyena = ABE_jacob_hg38_enformer_hyena.drop('Chromosome', axis=1).groupby('ID').max()
 # %%
 ABE_jacob_hg38_enformer_hyena['ABC Powerlaw'] = ABE_jacob_hg38_enformer_hyena['ATAC'] * ABE_jacob_hg38_enformer_hyena['Powerlaw']
 #%%
@@ -469,11 +470,11 @@ def plot_gene_crispr(gene, final_result, coord=(100000, 100000), score='GET (Jac
     chrom = df['Chromosome'].values[0]
     tss_start = gene_to_tss_hg38[gene]
     fig, ax = plt.subplots(nrows=8, ncols=1, figsize=(10, 5), sharex=True, gridspec_kw={'height_ratios': [2, 2,2,2, 2,2,2,2], 'hspace': 0.3})
-    plot_bedgraph(ABE_hg38.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}'), ax[0], '#b3b3b3', 'HbFBase', score='HbFBase')
-    plot_bedgraph(df.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}'), ax[1], '#E2812D', 'GET (Jacobian)', score=score, absolute=False)
-    plot_bedgraph(df.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}'), ax[2], '#C33D3F', 'Enformer', score='Enformer', absolute=False)
-    plot_bedgraph(df.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}'), ax[3], '#9273B3', 'HyenaDNA', score='HyenaDNA' )
-    plot_bedgraph(df.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}'), ax[4], '#855B54', 'ABC Powerlaw', score='ABC Powerlaw' )
+    plot_bedgraph(ABE_hg38.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}'), ax[0], '#b3b3b3', 'HbFBase', score='HbFBase', dot=False)
+    plot_bedgraph(df.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}'), ax[1], '#E2812D', 'GET (Jacobian)', score=score, absolute=False, dot=False)
+    plot_bedgraph(df.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}'), ax[2], '#C33D3F', 'Enformer', score='Enformer', absolute=False, dot=False)
+    plot_bedgraph(df.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}'), ax[3], '#9273B3', 'HyenaDNA (ISM)', score='HyenaDNA (ISM)', dot=False)
+    plot_bedgraph(df.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}'), ax[4], '#855B54', 'ABC Powerlaw', score='ABC Powerlaw', dot=False)
     plot_bedgraph(atac_bw.df.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}').rename(columns={'HUDEP ATAC':'atac'}), ax[5], '#b3b3b3', label= "HUDEP-2", score='atac', dot=False)
     plot_bedgraph(annot_hg38.query(f'Chromosome=="{chrom}" & Start>{str(coord[0])} & End<{str(coord[1])}'), ax[6], '#D483B8', label= 'Fetal\nErythroblast', score='ATAC', absolute=False, dot=False)
     plot_bedpe(filter_hichip_by_tss(chrom, tss_start, hichip).query(f'Chromosome1=="{chrom}" & Start1>{str(coord[0])} & End2<{str(coord[1])}'), coord[0], coord[1] , ax[7], '#b3b3b3', 'HiChIP')
