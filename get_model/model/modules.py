@@ -179,11 +179,14 @@ class MotifScanner(BaseModule):
         pwm_path="https://resources.altius.org/~jvierstra/projects/motif-clustering-v2.1beta/consensus_pwms.meme",
         include_reverse_complement=True,
     ):
+        # repo root dir 
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        data_dir = os.path.join(repo_root, "data")
         # download pwm to local
-        if not os.path.exists("consensus_pwms.meme"):
-            os.system(f"wget {pwm_path}")
+        if not os.path.exists(f"{data_dir}/consensus_pwms.meme"):
+            os.system(f"wget {pwm_path} -O {data_dir}/consensus_pwms.meme")
         # load pwm
-        motifs, motif_names = parse_meme_file("consensus_pwms.meme")
+        motifs, motif_names = parse_meme_file(f"{data_dir}/consensus_pwms.meme")
         motifs_rev = motifs[:, ::-1, ::-1].copy()
         # construct reverse complement
         motifs = torch.tensor(motifs)
