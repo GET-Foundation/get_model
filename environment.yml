@@ -507,3 +507,4 @@ dependencies:
       - git+https://github.com/cccntu/minLoRA.git@main
       - gradio
       - plotly
+      - axial_attention
