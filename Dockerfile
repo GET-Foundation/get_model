@@ -32,7 +32,7 @@ RUN cd /home/$MAMBA_USER/get_model/modules/ && \
     pip install -e .
 
 # Install additional dependencies
-RUN pip install cython==3.0.8 einops==0.7.0 hic-straw==1.3.1 scanpy==1.9.8 MOODS-python hydra-core lightning ghostscript pytest && \
+RUN pip install cython==3.0.8 einops==0.7.0 hic-straw==1.3.1 scanpy==1.9.8 MOODS-python hydra-core lightning ghostscript pytest gradio plotly && \
     pip install git+https://github.com/pyranges/pyranges@master && \
     pip install git+https://github.com/cccntu/minLoRA.git@main
 
