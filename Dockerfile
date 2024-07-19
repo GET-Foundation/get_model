@@ -36,5 +36,10 @@ RUN pip install cython==3.0.8 einops==0.7.0 hic-straw==1.3.1 scanpy==1.9.8 MOODS
     pip install git+https://github.com/pyranges/pyranges@master && \
     pip install git+https://github.com/cccntu/minLoRA.git@main
 
+# Remove cached packages
+RUN micromamba clean --all --yes
+# Pip cache
+RUN rm -rf /home/$MAMBA_USER/.cache/pip
+
 # Set the working directory to the codebase directory
 WORKDIR /home/$MAMBA_USER/get_model/get_model
