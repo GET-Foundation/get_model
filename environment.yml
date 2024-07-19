@@ -503,6 +503,7 @@ dependencies:
       - lightning
       - ghostscript
       - pytest
+      - git+https://github.com/pyranges/pyranges@master
       - git+https://github.com/cccntu/minLoRA.git@main
       - gradio
       - plotly
