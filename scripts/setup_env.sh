@@ -22,7 +22,7 @@ if [ -d $CODEBASE_DIR ]; then
     cd $CODEBASE_DIR
     git pull
 else
-    git clone git@github.com:fuxialexander/get_model.git
+    git clone --recurse-submodules --shallow-submodules -b refactor_with_hydra git@github.com:fuxialexander/get_model.git
     cd $CODEBASE_DIR
 fi
 

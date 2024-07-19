@@ -1,5 +1,6 @@
 import os
 from lightning.pytorch.callbacks import ModelCheckpoint
+from lora import extract_finetuned_weights
 
 class FinetunedModelCheckpoint(ModelCheckpoint):
     def __init__(self, *args, **kwargs):
@@ -10,7 +11,7 @@ class FinetunedModelCheckpoint(ModelCheckpoint):
         checkpoint = trainer.checkpoint_connector.dump_checkpoint()
 
         # Filter out parameters with 'original' in the key name
-        finetuned_state_dict = {k: v for k, v in checkpoint['state_dict'].items() if 'original' not in k}
+        finetuned_state_dict = extract_finetuned_weights(checkpoint['state_dict'])
         checkpoint['state_dict'] = finetuned_state_dict
 
         # Save the modified checkpoint

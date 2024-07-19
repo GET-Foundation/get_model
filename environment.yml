@@ -503,4 +503,6 @@ dependencies:
       - lightning
       - ghostscript
       - pytest
-      - git+https://github.com/cccntu/minLoRA.git
+      - git+https://github.com/cccntu/minLoRA.git@main
+      - gradio
+      - plotly
