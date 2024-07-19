@@ -13,7 +13,6 @@ from pyranges import PyRanges as pr
 from tqdm import tqdm
 
 from get_model.dataset.zarr_dataset import InferenceDataset
-from get_model.inference_engine import InferenceEngine
 
 random.seed(0)
 
