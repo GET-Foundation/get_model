@@ -508,3 +508,4 @@ dependencies:
       - gradio
       - plotly
       - axial_attention
+      - s3fs
