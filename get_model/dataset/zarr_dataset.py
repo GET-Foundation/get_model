@@ -20,6 +20,8 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 from zmq import has
 
+from get_model.utils import print_shape
+
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -2878,6 +2880,7 @@ class InferenceRegionDataset(RegionDataset):
                 exp_df = pd.read_feather(paths_dict["exp_feather"])
             else:
                 # construct exp_df from gencode_obj and save it to feather
+                # TODO assembly is hardcoded here!!!
                 exp_df = self.gencode_obj['hg19'].get_exp_feather(
                     celltype_peak_annot.reset_index())
                 exp_df.to_feather(paths_dict["exp_feather"])
@@ -2977,15 +2980,16 @@ class InferenceRegionDataset(RegionDataset):
             peak, mask, target = self.transform(peak, tssidx, target)
         if peak.shape[0] == 1:
             peak = peak.squeeze(0)
-        return {'region_motif': peak.toarray().astype(np.float32),
+        item = {'region_motif': peak.toarray().astype(np.float32),
                 'mask': mask,
                 'gene_name': gene_name,
                 'tss_peak': tss_peak_mask,
                 'chromosome': chromosome,
                 'peak_coord': peak_coord,
-                'all_tss_peak': np.pad(np.unique(tss_peak), (0, self.num_region_per_sample - len(tss_peak)), mode='constant', constant_values=-1),
+                'all_tss_peak': np.pad(np.unique(tss_peak), (0, self.num_region_per_sample - len(np.unique(tss_peak))), mode='constant', constant_values=-1),
                 'strand': strand,
                 'exp_label': target.toarray().astype(np.float32)}
+        return item
 
 class EverythingDataset(ReferenceRegionDataset):
     def __init__(self, reference_region_motif: ReferenceRegionMotif,

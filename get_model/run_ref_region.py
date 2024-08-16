@@ -114,6 +114,7 @@ class RegionLitModel(LitModel):
         self.min_exp_loss = float('inf')
         self.exp_overfit_count = 0
         self.exp_overfit_threshold = 100
+        self.accumulated_results = []
 
     def validation_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage='val')
@@ -294,7 +295,7 @@ class RegionLitModel(LitModel):
                     chromosomes[i] = chromosome + ' '*(10-len(chromosome))
 
             result = {
-                'pred': pred,
+                'preds': pred,
                 'obs': obs,
                 'jacobians': jacobians,
                 'input': embeddings['input']['region_motif'],
@@ -303,13 +304,8 @@ class RegionLitModel(LitModel):
                 'strand': recursive_numpy(recursive_detach(batch['strand'])),
                 'gene_name': gene_names,
             }
-            # save to zarr
-            zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.zarr"
-            from numcodecs import VLenUTF8
-            object_codec = VLenUTF8()
-            z = zarr.open(zarr_path, mode='a')
-            recursive_save_to_zarr(
-                z, result,  object_codec=object_codec, overwrite=True)
+            self.accumulated_results.append(result)
+            
         elif self.cfg.task.test_mode == 'interpret_captum':
             tss_peak = batch['tss_peak'][0].cpu().numpy()
 
@@ -396,6 +392,25 @@ class RegionLitModel(LitModel):
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
         print("Model = %s" % str(model))
         return model
+    
+    def on_predict_epoch_end(self):
+        if self.cfg.task.test_mode == 'interpret':
+            # Save accumulated results to zarr
+            zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.wandb.project_name}/{self.cfg.wandb.run_name}.zarr"
+            from numcodecs import VLenUTF8
+            object_codec = VLenUTF8()
+            z = zarr.open(zarr_path, mode='w')
+            
+            # Combine accumulated results
+            combined_result = {
+                key: np.concatenate([r[key] for r in self.accumulated_results])
+                for key in self.accumulated_results[0].keys()
+            }
+            
+            recursive_save_to_zarr(z, combined_result, object_codec=object_codec, overwrite=True)
+            
+            # Clear accumulated results
+            self.accumulated_results = []
 
     def on_validation_epoch_end(self):
         # save self.trainer.callback_metrics to a csv as one row
@@ -500,10 +515,10 @@ def run(cfg: DictConfig):
         checkpoint = regular_checkpoint
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator="cuda",
+        accelerator=accelerator,
         num_sanity_val_steps=0,
         strategy=strategy,
-        devices=[0],
+        devices=device,
         logger=[
             wandb_logger,
             CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],

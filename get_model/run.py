@@ -263,7 +263,7 @@ class LitModel(L.LightningModule):
                 'embeddings_mut': embeddings_mut,
                 }
 
-    def interpret_step(self, batch, batch_idx, layer_names: List[str] = None, focus: int = None):
+    def interpret_step(self, batch, batch_idx, layer_names: List[str] = None, focus: int|np.ndarray = None):
         
         target_tensors = {}
         hooks = []
@@ -310,7 +310,12 @@ class LitModel(L.LightningModule):
                 pred, obs = self.model.before_loss(output, batch)
                 jacobians[target_name][str(i)] = {}
                 mask = torch.zeros_like(target).to(self.device)
-                mask[:, focus, i] = 1
+                if isinstance(focus, int):
+                    mask[:, focus, i] = 1
+                else:
+                    assert len(focus) == mask.shape[0], "The length of focus should match the number of samples in batch"
+                    for j in range(mask.shape[0]):
+                        mask[j, focus[j], i] = 1
                 pred[target_name].backward(mask)
                 for layer_name, layer in target_tensors.items():
                     if isinstance(layer, torch.Tensor):

@@ -18,28 +18,28 @@ from minlora import LoRAParametrization
 from minlora.model import add_lora_by_name
 from omegaconf import MISSING, DictConfig, OmegaConf
 from torch.optim.optimizer import Optimizer
+from tqdm import tqdm
 
 import wandb
 from get_model.config.config import *
-from get_model.dataset.zarr_dataset import (
-    InferenceRegionDataset, RegionDataset,
-    get_gencode_obj)
+from get_model.dataset.zarr_dataset import (InferenceRegionDataset,
+                                            RegionDataset, get_gencode_obj)
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
-from get_model.run import  LitModel, get_insulation_overlap
+from get_model.run import LitModel, get_insulation_overlap
 from get_model.utils import (cosine_scheduler, extract_state_dict,
                              load_checkpoint, load_state_dict,
-                             recursive_detach, recursive_numpy,
-                             recursive_save_to_zarr, 
-                             rename_state_dict,
-                             )
+                             recursive_concat_numpy, recursive_detach,
+                             recursive_numpy, recursive_save_to_zarr,
+                             rename_state_dict)
 
 
 class RegionDataModule(L.LightningDataModule):
     def __init__(self, cfg: DictConfig):
         super().__init__()
         self.cfg = cfg
+        self.accumulated_results = []
 
     def build_training_dataset(self, is_train=True):
         return RegionDataset(**self.cfg.dataset, is_train=is_train)
@@ -106,6 +106,7 @@ class RegionDataModule(L.LightningDataModule):
 class RegionLitModel(LitModel):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
+        self.accumulated_results = []
 
     def optimizer_step(self, epoch: int, batch_idx: int, optimizer: Optimizer | LightningOptimizer, optimizer_closure: Callable[[], Any] | None = None) -> None:
         self.lr_schedulers().step()
@@ -148,7 +149,7 @@ class RegionLitModel(LitModel):
 
     def predict_step(self, batch, batch_idx, *args, **kwargs):
         if self.cfg.task.test_mode == 'inference':
-            loss, pred, obs = self._shared_step(
+            loss, preds, obs = self._shared_step(
                 batch, batch_idx, stage='predict')
             result_df = []
             for batch_element in range(len(batch['gene_name'])):
@@ -158,9 +159,9 @@ class RegionLitModel(LitModel):
                 atpm = batch['region_motif'][batch_element][goi_idx, -
                                                             1].max().cpu().item()
                 gene_name = batch['gene_name'][batch_element]
-                for key in pred:
+                for key in preds:
                     result_df.append(
-                        {'gene_name': gene_name, 'key': key, 'pred': pred[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'obs': obs[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'atpm': atpm})
+                        {'gene_name': gene_name, 'key': key, 'pred': preds[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'obs': obs[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'atpm': atpm})
             result_df = pd.DataFrame(result_df)
             # mkdir if not exist
             os.makedirs(
@@ -170,7 +171,7 @@ class RegionLitModel(LitModel):
             )
         elif self.cfg.task.test_mode == 'perturb':
             # TODO: need to figure out if batching is working
-            pred = self.perturb_step(batch, batch_idx)
+            preds = self.perturb_step(batch, batch_idx)
             batch_size = len(batch['WT']['strand'])
             results = []
 
@@ -180,7 +181,8 @@ class RegionLitModel(LitModel):
                 tss_peak = batch['WT']['tss_peak'][i].cpu().numpy()
                 goi_idx = batch['WT']['all_tss_peak'][i].cpu().numpy()
                 goi_idx = goi_idx[goi_idx > 0]
-                goi_idx = goi_idx[goi_idx < pred['pred_wt']['exp'][i].shape[0]]
+                goi_idx = goi_idx[goi_idx <
+                                  preds['pred_wt']['exp'][i].shape[0]]
 
                 result = {
                     'gene_name': gene_name,
@@ -189,9 +191,9 @@ class RegionLitModel(LitModel):
                     'perturb_chrom': batch['MUT']['perturb_chrom'][i],
                     'perturb_start': batch['MUT']['perturb_start'][i].cpu().item(),
                     'perturb_end': batch['MUT']['perturb_end'][i].cpu().item(),
-                    'pred_wt': pred['pred_wt']['exp'][i][:, strand][goi_idx].mean().cpu().item(),
-                    'pred_mut': pred['pred_mut']['exp'][i][:, strand][goi_idx].mean().cpu().item(),
-                    'obs': pred['obs_wt']['exp'][i][:, strand][goi_idx].mean().cpu().item()
+                    'pred_wt': preds['pred_wt']['exp'][i][:, strand][goi_idx].mean().cpu().item(),
+                    'pred_mut': preds['pred_mut']['exp'][i][:, strand][goi_idx].mean().cpu().item(),
+                    'obs': preds['obs_wt']['exp'][i][:, strand][goi_idx].mean().cpu().item()
                 }
                 results.append(result)
 
@@ -200,47 +202,45 @@ class RegionLitModel(LitModel):
             results_df.to_csv(
                 f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", index=False, mode='a', header=False
             )
-            # except Exception as e:
+            # except Exception as    e:
             # print(e)
+
         elif self.cfg.task.test_mode == 'interpret':
-            goi_idx = batch['all_tss_peak'][0].cpu().numpy()
-            goi_idx = goi_idx[goi_idx > 0]
-            tss_peak = batch['tss_peak'].cpu().numpy()
-            # assume focus is the center peaks in the input sample
+            focus = []
+            for i in range(len(batch['gene_name'])):
+                goi_idx = batch['all_tss_peak'][i].cpu().numpy()
+                goi_idx = goi_idx[goi_idx > 0]
+                focus.append(goi_idx)
             torch.set_grad_enabled(True)
-            pred, obs, jacobians, embeddings = self.interpret_step(
-                batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=np.where(tss_peak>0)[0])
+            preds, obs, jacobians, embeddings = self.interpret_step(
+                batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=focus)
             # pred = np.array([pred['exp'][i][:, batch['strand'][i].cpu().numpy(
             # )][batch['all_tss_peak'][i].cpu().numpy()].mean() for i in range(len(batch['gene_name']))])
             # obs = np.array([obs['exp'][i][:, batch['strand'][i].cpu().numpy(
             # )][batch['all_tss_peak'][i].cpu().numpy()].mean() for i in range(len(batch['gene_name']))])
             gene_names = recursive_numpy(recursive_detach(batch['gene_name']))
             for i, gene_name in enumerate(gene_names):
-                if len(gene_name) < 20:
-                    gene_names[i] = gene_name + ' '*(15-len(gene_name))
+                if len(gene_name) < 100:
+                    gene_names[i] = gene_name + ' '*(100-len(gene_name))
             chromosomes = recursive_numpy(
                 recursive_detach(batch['chromosome']))
             for i, chromosome in enumerate(chromosomes):
-                if len(chromosome) < 10:
-                    chromosomes[i] = chromosome + ' '*(10-len(chromosome))
+                if len(chromosome) < 30:
+                    chromosomes[i] = chromosome + ' '*(30-len(chromosome))
 
             result = {
-                'pred': pred,
+                'preds': preds,
                 'obs': obs,
                 'jacobians': jacobians,
                 'input': embeddings['input']['region_motif'],
                 'chromosome': chromosomes,
                 'peak_coord': recursive_numpy(recursive_detach(batch['peak_coord'])),
                 'strand': recursive_numpy(recursive_detach(batch['strand'])),
-                'gene_name': gene_names,
+                'focus': recursive_numpy(recursive_detach(batch['all_tss_peak'])),
+                'avaliable_genes': gene_names,
             }
-            # save to zarr
-            zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.wandb.project_name}/{self.cfg.wandb.run_name}.zarr"
-            from numcodecs import VLenUTF8
-            object_codec = VLenUTF8()
-            z = zarr.open(zarr_path, mode='a')
-            recursive_save_to_zarr(
-                z, result,  object_codec=object_codec, overwrite=True)
+            self.accumulated_results.append(result)
+
         elif self.cfg.task.test_mode == 'interpret_captum':
             tss_peak = batch['tss_peak'][0].cpu().numpy()
 
@@ -330,6 +330,22 @@ class RegionLitModel(LitModel):
 
     def on_validation_epoch_end(self):
         pass
+
+    def on_predict_epoch_end(self):
+        if self.cfg.task.test_mode == 'interpret':
+            # Save accumulated results to zarr
+            zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.wandb.project_name}/{self.cfg.wandb.run_name}.zarr"
+            from numcodecs import VLenUTF8
+            object_codec = VLenUTF8()
+            z = zarr.open(zarr_path, mode='w')
+
+            accumulated_results = recursive_concat_numpy(
+                self.accumulated_results)
+            recursive_save_to_zarr(
+                z, accumulated_results, object_codec=object_codec, overwrite=True)
+
+            # Clear accumulated results
+            self.accumulated_results = []
 
     def configure_optimizers(self):
         if hasattr(self.model.cfg, 'encoder'):

@@ -32,8 +32,12 @@ def print_shape(x):
         for k, v in x.items():
             print(k)
             print_shape(v)
-    else:
+    elif isinstance(x, np.ndarray) or isinstance(x, torch.Tensor):
         print(x.shape)
+    elif isinstance(x, list):
+        print(len(x))
+    else:
+        print(x)
 
 
 def load_checkpoint(checkpoint_path, model_key=None):
@@ -203,7 +207,20 @@ def recursive_numpy(tensors):
         return tensors.detach().cpu().float().numpy()
     else:
         return tensors
-
+    
+def recursive_concat_numpy(list_of_dict):
+    """input is a list of dict, each dict has the same keys, certain keys might corresponding to another dict,
+    then concatenate the values of the same key in the list of dict, return a dict, recursively handle the hierarchical structure"""
+    if isinstance(list_of_dict[0], dict):
+        keys = list_of_dict[0].keys()
+        return {k: recursive_concat_numpy([d[k] for d in list_of_dict]) for k in keys}
+    elif isinstance(list_of_dict[0], list):
+        return [recursive_concat_numpy([d[i] for d in list_of_dict]) for i in range(len(list_of_dict[0]))]
+    elif isinstance(list_of_dict[0], np.ndarray):
+        return np.concatenate(list_of_dict, axis=0)
+    else:
+        return list_of_dict
+    
 def recursive_save_to_zarr(zarr_group, dict_data, **kwargs):
     for k, v in dict_data.items():
         if isinstance(v, dict):
