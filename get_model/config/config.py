@@ -1,11 +1,12 @@
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Optional, TypeVar
 
+import hydra
 from hydra.core.config_store import ConfigStore
-from omegaconf import MISSING
+from hydra.core.global_hydra import GlobalHydra
+from omegaconf import MISSING, OmegaConf
 
 from get_model.dataset.zarr_dataset import ReferenceRegionMotifConfig
-from typing import Optional
 
 T = TypeVar("T")
 
@@ -19,6 +20,16 @@ def get_target_from_class_name(class_name: str) -> str:
     return f"get_model.model.model_refactored.{class_name}"
 
 
+def load_config(config_name, config_path="./"):
+    # Initialize Hydra to load the configuration
+    GlobalHydra.instance().clear()
+    hydra.initialize(config_path=config_path, version_base="1.3")
+    cfg = hydra.compose(config_name=config_name)
+    return cfg
+
+def pretty_print_config(cfg):
+    print(OmegaConf.to_yaml(cfg))
+    
 @dataclass
 class ModelConfig(Generic[T]):
     _target_: str = field(
@@ -133,11 +144,13 @@ class FinetuneConfig:
     use_lora: bool = False
     lora_checkpoint: str | None = None
     rename_config: dict | None = None
-    layers_with_lora: list = field(default_factory=lambda: ['region_embed', 'encoder', 'head_exp'])
+    layers_with_lora: list = field(default_factory=lambda: [
+                                   'region_embed', 'encoder', 'head_exp'])
     patterns_to_freeze: list = field(default_factory=lambda: [
         "motif_scanner"])
     patterns_to_drop: list = field(default_factory=lambda: [])
     additional_checkpoints: list = field(default_factory=lambda: [])
+
 
 @dataclass
 class MachineConfig:
@@ -147,7 +160,7 @@ class MachineConfig:
     num_devices: int = 1
     num_workers: int = 32
     batch_size: int = 16
-
+    fasta_path: str = MISSING
 
 @dataclass
 class TaskConfig:
@@ -187,6 +200,7 @@ class ReferenceRegionConfig(Config):
 @dataclass
 class EverythingConfig(ReferenceRegionConfig):
     type: str = 'everything'
+
 
 @dataclass
 class RegionConfig:

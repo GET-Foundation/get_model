@@ -1,0 +1,47 @@
+defaults:
+  - base_ref_region_config
+  - model/GETRegionFinetune@_here_
+  - machine/manitou_alb2281
+  - dataset/gbm_eval@dataset
+  - _self_
+
+assembly: "hg38"
+
+task:
+  test_mode: "inference"
+  gene_list: RET
+
+training:
+  save_ckpt_freq: 1
+  epochs: 20
+  warmup_epochs: 1
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: false
+
+dataset:
+  quantitative_atac: false
+  sampling_step: 100
+  mask_ratio: 0
+
+optimizer:
+  lr: 0.0001
+  min_lr: 0.000001
+  weight_decay: 0.05
+  opt: "adamw"
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.999]
+
+wandb:
+  project_name: "get-finetune-region-alb2281-mutation-compatibility"
+  run_name: "gbm-debug"
+
+finetune:
+  pretrain_checkpoint: false
+  strict: true
+  checkpoint: "/burg/pmg/users/xf2217/get_checkpoints/output_e800_r900_mask0.5_adult_watac/checkpoint-799.pth"
+  model_prefix: "model."
+  patterns_to_freeze: []
+
+eval_tss: true
+log_image: true

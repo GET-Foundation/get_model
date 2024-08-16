@@ -508,4 +508,6 @@ dependencies:
       - gradio
       - plotly
       - axial_attention
+      - pyBigWig
+      - intervaltree
       - s3fs

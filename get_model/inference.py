@@ -1,4 +1,5 @@
 import hydra
+import torch
 from get_model.config.config import Config
 from hydra.core.global_hydra import GlobalHydra
 
@@ -31,6 +32,32 @@ def main(args):
     cfg = load_config(args.config_name)
     m = setup_model_from_config(cfg, args.type)
     return m
+
+
+class InferenceModel():
+    def __init__(self, checkpoint_path, device='cuda', config_name='eval_gbm_fetal_ref_region', type='ref_region'):
+        """Compatible with the old mutation code"""
+        self.config_name = config_name
+        self.type = type
+        if checkpoint_path is not None and 'state_dict' in checkpoint_path:
+            self.model = self.model.load_from_checkpoint(checkpoint_path)
+        elif checkpoint_path is not None and 'model' in checkpoint_path:
+            # old checkpoint
+            state_dict = torch.load(checkpoint_path)['model']
+            self.cfg = load_config(config_name)
+            self.model = setup_model_from_config(self.cfg, type)
+            self.model.load_state_dict(state_dict)
+        else:
+            raise('No checkpoint provided')
+        self.model.to(device)
+
+    def predict(self, region_motif):
+        batch = {'region_motif': region_motif,
+                 'exp_label': 0}
+        loss, pred, obs = self.model_shared_step(
+                batch, None, stage='predict')
+        return pred.cpu().numpy()
+
 
 if __name__ == '__main__':
     import argparse
