@@ -7,7 +7,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # %%
-
 api = wandb.Api()
 entity, project = "get-v3", "get-zeroshot-gbm-all-celltypes"
 runs = api.runs(entity + "/" + project)
@@ -34,11 +33,6 @@ zeroshot_runs_df = pd.DataFrame(
 zeroshot_runs_df["exp_pearson"] = zeroshot_runs_df["summary"].apply(lambda x: x["exp_pearson"] if "exp_pearson" in x else None)
 zeroshot_runs_df["exp_spearman"] = zeroshot_runs_df["summary"].apply(lambda x: x["exp_spearman"] if "exp_spearman" in x else None)
 zeroshot_runs_df["exp_r2"] = zeroshot_runs_df["summary"].apply(lambda x: x["exp_r2"] if "exp_r2" in x else None)
-# %%
-zeroshot_runs_df["case_id"] = zeroshot_runs_df["name"].apply(lambda x: x.split(".")[-2].split("_")[0])
-
-
-# %%
 zeroshot_runs_df = zeroshot_runs_df.dropna()
 # %%
 
@@ -68,7 +62,6 @@ oneshot_runs_df = pd.DataFrame(
 oneshot_runs_df["exp_pearson"] = oneshot_runs_df["summary"].apply(lambda x: x["exp_pearson"] if "exp_pearson" in x else None)
 oneshot_runs_df["exp_spearman"] = oneshot_runs_df["summary"].apply(lambda x: x["exp_spearman"] if "exp_spearman" in x else None)
 oneshot_runs_df["exp_r2"] = oneshot_runs_df["summary"].apply(lambda x: x["exp_r2"] if "exp_r2" in x else None)
-# %%
 oneshot_runs_df["case_id"] = oneshot_runs_df["name"].apply(lambda x: x.split(".")[-2].split("_")[0])
 
 
@@ -105,39 +98,20 @@ merged_df = merged_df[['case_id', 'celltype', "patient_id", 'exp_pearson_zerosho
 # %%
 # take the merged_df and unfold it into three columns celltype, zeroshot or oneshot, and the value
 unfolded_df = pd.melt(merged_df, id_vars=["celltype", "patient_id", "case_id"], value_vars=["exp_pearson_oneshot", "exp_pearson_zeroshot"], var_name="method", value_name="exp_pearson")
-# %%
-plt.figure(figsize=(10, 6))
-sns.violinplot(x='celltype', y='exp_pearson', hue='method', data=unfolded_df, split=True)
-plt.title('Violin Plot of Different Cell Types by Treatment')
-plt.show()
-
-# %%
+# exclude training sample
 unfolded_df = unfolded_df[unfolded_df["patient_id"] != "C3L-03405"]
+# exclude neurons
+unfolded_df = unfolded_df[unfolded_df["celltype"] != "Neurons"]
 # %%
-
-# put all rows with celltype Tumor first in unfolded_df
 
 unfolded_df["method"] = unfolded_df["method"].apply(lambda x: x.split("_")[2])
-
-# %%
 method_order = ["zeroshot", "oneshot"]
-celltype_order = ["Tumor", "Macrophages", "Neurons", "Oligodendrocytes"]
+celltype_order = ["Tumor", "Macrophages", "Oligodendrocytes"]
 # %%
 df_sorted = unfolded_df.sort_values(
     by=['method', 'celltype'],
     key=lambda x: x.map({**{v: i for i, v in enumerate(method_order)}, **{v: i for i, v in enumerate(celltype_order)}})
 )
-
-# %%
-plt.figure(figsize=(10, 6))
-sns.violinplot(x='celltype', y='exp_pearson', hue='method', data=df_sorted, split=True, inner="stick")
-plt.xlabel("Cell Type")
-plt.ylabel("Pearson correlation")
-plt.legend(title="")
-plt.title('Violin Plot of Different Cell Types by Treatment')
-plt.show()
-# %%
-
 method_name_map = {
     "zeroshot": "Zero-shot",
     "oneshot": "One-shot (finetuned)"
