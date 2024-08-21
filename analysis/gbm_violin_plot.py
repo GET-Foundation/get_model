@@ -119,11 +119,12 @@ method_name_map = {
 # %%
 df_sorted = df_sorted.replace({"method": method_name_map})
 # %%
-plt.figure(figsize=(10, 6))
-sns.violinplot(x='celltype', y='exp_pearson', hue='method', data=df_sorted, split=True, inner="stick")
-plt.xlabel("Cell Type")
+plt.figure(figsize=(8, 4))
+sns.violinplot(x='celltype', y='exp_pearson', hue='method', data=df_sorted, split=True, inner="stick", palette="Set2")
+plt.xlabel("")
 plt.ylabel("Pearson correlation")
-plt.legend(title="")
-plt.title('Zero-shot vs. one-shot performance on leave-out GBM samples')
-plt.show()
+# legend outside, on top of the plot, flatten in one row
+plt.legend(title="", loc='lower left')
+plt.title('GET expression prediction on GBM samples (n=16)', fontsize=16)
+plt.savefig("/home/xf2217/GET_Figures/GBM_violin_plot.pdf", transparent=True)
 # %%
