@@ -2727,6 +2727,54 @@ Sampling step: {self.sampling_step}
 
         return peak_list, target_list, tssidx_list
 
+class MPRADataset(RegionDataset):
+    def __init__(self, root, metadata_path, num_region_per_sample, mpra_feather_path, focus, data_type="fetal", quantitative_atac=False):
+        super().__init__(root, metadata_path, num_region_per_sample, data_type=data_type, quantitative_atac=quantitative_atac)
+        self.mpra_feather_path = mpra_feather_path
+        self.focus = focus
+        self.mpra = pd.read_feather(self.mpra_feather_path)
+        self.load_mpra_data()
+
+    def load_mpra_data(self):
+        # Generate sample list
+        self.sample_list = []
+        for chr in self.annot.Chromosome.unique():
+            idx_sample_list = self.annot.index[self.annot['Chromosome'] == chr].tolist()
+            idx_sample_start = idx_sample_list[0]
+            idx_sample_end = idx_sample_list[-1]
+            for i in range(idx_sample_start, idx_sample_end, 5):
+                start_index = i
+                end_index = i + self.num_region_per_sample
+                self.sample_list.append((start_index, end_index))
+
+        # Pre-sample indices for each MPRA entry
+        self.sampled_indices = np.random.choice(range(len(self.sample_list)), size=len(self.mpra), replace=True)
+
+    def __len__(self):
+        return len(self.mpra)
+
+    def __getitem__(self, idx):
+        mpra_row = self.mpra.iloc[idx]
+        sample_idx = self.sampled_indices[idx]
+        start_index, end_index = self.sample_list[sample_idx]
+
+        # Get the original peak data for the sampled region
+        c_data = self.peaks[sample_idx].toarray()
+
+        # Insert MPRA data at the focus index
+        c_data[self.focus] = mpra_row.values[1:] + c_data[self.focus]
+        c_data[c_data > 1] = 1
+        c_data[self.focus, 282] = 1
+
+        # Create target data (all zeros for MPRA prediction)
+        t_data = np.zeros((self.num_region_per_sample, 2))
+
+        return {
+            'region_motif': c_data.astype(np.float32),
+            'mask': np.ones(self.num_region_per_sample),
+            'exp_label': t_data.astype(np.float32)
+        }
+
 
 class InferenceRegionDataset(RegionDataset):
     """Same as RegionDataset but load the exp.feather to get gene index in peaks
