@@ -1,6 +1,6 @@
-#%%
 import logging
 import os
+import glob
 
 import hydra
 import lightning as L
@@ -11,68 +11,36 @@ import torch.utils.data
 import zarr
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from omegaconf import DictConfig
-from scipy.sparse import coo_matrix, load_npz, save_npz
 from get_model.config.config import *
-from get_model.dataset.zarr_dataset import (RegionDataset)
+from get_model.dataset.zarr_dataset import MPRADataset
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.run import LitModel
 
-class MPRADataset(RegionDataset):
-    def __init__(self, root, metadata_path, num_region_per_sample, mpra_feather_path, focus, data_type="fetal", quantitative_atac=False):
-        super().__init__(root, metadata_path, num_region_per_sample, data_type=data_type, quantitative_atac=quantitative_atac)
-        self.mpra_feather_path = mpra_feather_path
-        self.focus = focus
-        self.mpra = pd.read_feather(self.mpra_feather_path)
-        self.load_mpra_data()
+class MPRADataModule(L.LightningDataModule):
+    def __init__(self, cfg: DictConfig):
+        super().__init__()
+        self.cfg = cfg
 
-    def load_mpra_data(self):
-        # Load the original peak data
-        cell_data = load_npz(f"{self.root}/{self.data_type}.{'natac' if self.quantitative_atac else 'watac'}.npz")
-        annot = pd.read_csv(f"{self.root}/{self.data_type}.csv", index_col=0)
+    def setup(self, stage=None):
+        if stage == 'predict' or stage is None:
+            self.dataset_predict = MPRADataset(
+                root=self.cfg.data.root,
+                metadata_path=self.cfg.data.metadata_path,
+                num_region_per_sample=self.cfg.model.num_region_per_sample,
+                mpra_feather_path=self.cfg.mpra.input_feather,
+                focus=self.cfg.mpra.focus,
+                data_type=self.cfg.data.type,
+                quantitative_atac=self.cfg.data.quantitative_atac
+            )
 
-        # Generate sample list
-        self.sample_list = []
-        for chr in annot.Chromosome.unique():
-            idx_sample_list = annot.index[annot['Chromosome'] == chr].tolist()
-            idx_sample_start = idx_sample_list[0]
-            idx_sample_end = idx_sample_list[-1]
-            for i in range(idx_sample_start, idx_sample_end, 5):
-                start_index = i
-                end_index = i + self.num_region_per_sample
-                self.sample_list.append((start_index, end_index))
-
-        # Pre-sample indices for each MPRA entry
-        self.sampled_indices = np.random.choice(range(len(self.sample_list)), size=len(self.mpra), replace=True)
-
-        self.cell_data = cell_data
-        self.annot = annot
-
-    def __len__(self):
-        return len(self.mpra)
-
-    def __getitem__(self, idx):
-        mpra_row = self.mpra.iloc[idx]
-        sample_idx = self.sampled_indices[idx]
-        start_index, end_index = self.sample_list[sample_idx]
-
-        # Get the original peak data for the sampled region
-        c_data = self.cell_data[start_index:end_index].toarray()
-
-        # Insert MPRA data at the focus index
-        c_data[self.focus] = mpra_row.values[1:] + c_data[self.focus]
-        c_data[c_data > 1] = 1
-        c_data[self.focus, 282] = 1
-
-        # Create target data (all zeros for MPRA prediction)
-        t_data = np.zeros((self.num_region_per_sample, 2))
-
-        return {
-            'region_motif': c_data.astype(np.float32),
-            'mask': np.ones(self.num_region_per_sample),
-            'exp_label': t_data.astype(np.float32)
-        }
-    
+    def predict_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.dataset_predict,
+            batch_size=self.cfg.training.batch_size,
+            num_workers=self.cfg.machine.num_workers,
+            shuffle=False
+        )
 
 class MPRALitModel(LitModel):
     def __init__(self, cfg: DictConfig):
@@ -82,55 +50,111 @@ class MPRALitModel(LitModel):
         _, preds, _ = self._shared_step(batch, batch_idx, stage='predict')
         return preds
 
+def save_mpra_data(predictions, cfg: DictConfig, dm: MPRADataModule):
+    """
+    Save MPRA predictions and data.
+    
+    Args:
+    predictions (list): List of prediction dictionaries.
+    cfg (DictConfig): Configuration object.
+    dm (MPRADataModule): Data module containing the dataset.
+    """
+    # Process predictions
+    all_preds = np.concatenate([p['exp'] for p in predictions])
+    
+    # Reshape predictions to match the original structure
+    reshaped_preds = all_preds.reshape(-1, cfg.model.num_region_per_sample, 2)
+    
+    # Create the output directory structure
+    base_output_dir = os.path.join(cfg.mpra.output_dir, cfg.wandb.project_name)
+    os.makedirs(base_output_dir, exist_ok=True)
+
+    # Save predictions for each chunk
+    chunk_size = cfg.mpra.chunk_size
+    for i, chunk_start in enumerate(range(0, len(reshaped_preds), chunk_size)):
+        chunk_end = chunk_start + chunk_size
+        chunk_preds = reshaped_preds[chunk_start:chunk_end]
+        
+        # Create chunk directory
+        chunk_dir = os.path.join(base_output_dir, f'chunk_{i}', 'rna', cfg.data.celltype)
+        os.makedirs(chunk_dir, exist_ok=True)
+        
+        # Save as Zarr
+        zarr_path = os.path.join(chunk_dir, 'predictions.zarr')
+        z = zarr.open(zarr_path, mode='w')
+        z.create_dataset('predictions', data=chunk_preds, chunks=(1000, chunk_preds.shape[1], 2))
+
+    # Save MPRA data with predictions
+    mpra_data = dm.dataset_predict.mpra
+    for i, chunk_start in enumerate(range(0, len(mpra_data), chunk_size)):
+        chunk_end = chunk_start + chunk_size
+        chunk = mpra_data.iloc[chunk_start:chunk_end].copy()
+        chunk['prediction'] = reshaped_preds[chunk_start:chunk_end, cfg.mpra.focus, 0]
+        chunk.to_feather(os.path.join(base_output_dir, f'mpra_with_predictions_chunk{i}.feather'))
+
+    print(f"Predictions saved in {base_output_dir}")
+
+def load_get_data(path, data_type='peak', promoter_only=False, repeats=600):
+    """
+    Load GET (Gene Expression Toolkit) data from Zarr format.
+    
+    Args:
+    path (str): Path to the directory containing Zarr files.
+    data_type (str): Type of data ('peak' or 'nonpeak').
+    promoter_only (bool): Whether to filter for promoters only.
+    repeats (int): Number of repeats in the data.
+    
+    Returns:
+    pandas.DataFrame: Processed data.
+    """
+    pred_all = []
+    for chunk_dir in sorted(glob.glob(os.path.join(path, 'chunk_*'))):
+        zarr_path = os.path.join(chunk_dir, 'rna', '*', 'predictions.zarr')
+        zarr_files = glob.glob(zarr_path)
+        if zarr_files:
+            z = zarr.open(zarr_files[0], mode='r')
+            predictions = z['predictions'][:]
+            pred_all.append(predictions[:, 100, :].max(1).reshape(-1, repeats))
+    
+    pred_all = np.vstack(pred_all)
+    pred_all_mean = pred_all.mean(axis=1)
+    pred_all_std = pred_all.std(axis=1)
+    
+    # Load and concatenate all chunked feather files
+    peak_chunks = []
+    for chunk_file in sorted(glob.glob(os.path.join(path, f'mpra_with_predictions_chunk*.feather'))):
+        peak_chunks.append(pd.read_feather(chunk_file))
+    peak = pd.concat(peak_chunks, ignore_index=True)
+    
+    peak['pred'] = pred_all_mean
+    peak['pred_std'] = pred_all_std
+    
+    if promoter_only:
+        peak = peak.query('Name.str.contains("ENSG")')
+    return peak
+
 @hydra.main(config_path="config", config_name="mpra_config")
 def main(cfg: DictConfig):
-    # Create MPRADataset
-    dataset = MPRADataset(
-        root=cfg.data.root,
-        metadata_path=cfg.data.metadata_path,
-        num_region_per_sample=cfg.model.num_region_per_sample,
-        mpra_feather_path=cfg.mpra.input_feather,
-        focus=cfg.mpra.focus,
-        data_type=cfg.data.type,
-        quantitative_atac=cfg.data.quantitative_atac
-    )
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=cfg.training.batch_size,
-        num_workers=cfg.machine.num_workers,
-        shuffle=False
-    )
-
-    # Initialize model
     model = MPRALitModel(cfg)
+    dm = MPRADataModule(cfg)
 
-    # Initialize trainer
+    wandb_logger = WandbLogger(name=cfg.wandb.run_name, project=cfg.wandb.project_name)
+    wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+
     trainer = L.Trainer(
         accelerator=cfg.machine.accelerator,
         devices=cfg.machine.num_devices,
-        logger=CSVLogger(save_dir=cfg.machine.output_dir, name=cfg.wandb.run_name),
+        logger=[
+            wandb_logger,
+            CSVLogger(save_dir=cfg.machine.output_dir, name=cfg.wandb.run_name)
+        ],
         default_root_dir=cfg.machine.output_dir,
     )
 
-    # Predict
-    predictions = trainer.predict(model, dataloader)
-
-    # Process and save predictions
-    all_preds = np.concatenate([p['exp'] for p in predictions])
+    predictions = trainer.predict(model, datamodule=dm)
     
-    # Save as NPZ
-    save_npz(os.path.join(cfg.mpra.output_dir, 'preds.npz'), coo_matrix(all_preds))
-
-    # Save as Zarr if specified
-    if cfg.mpra.save_zarr:
-        zarr_path = os.path.join(cfg.mpra.output_dir, 'predictions.zarr')
-        z = zarr.open(zarr_path, mode='w')
-        z.create_dataset('predictions', data=all_preds, chunks=(1000, all_preds.shape[1]))
-
-    # Save MPRA data with predictions
-    mpra_with_preds = dataset.mpra.copy()
-    mpra_with_preds['prediction'] = all_preds[:, dataset.focus]  # Assuming predictions are for the focus position
-    mpra_with_preds.to_feather(os.path.join(cfg.mpra.output_dir, 'mpra_with_predictions.feather'))
+    # Save predictions and MPRA data
+    save_mpra_data(predictions, cfg, dm)
 
 if __name__ == "__main__":
     main()
