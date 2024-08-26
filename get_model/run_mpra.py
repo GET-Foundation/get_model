@@ -16,6 +16,7 @@ from get_model.dataset.zarr_dataset import MPRADataset
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.run import LitModel
+from get_model.utils import setup_trainer, setup_wandb
 
 class MPRADataModule(L.LightningDataModule):
     def __init__(self, cfg: DictConfig):
@@ -137,20 +138,9 @@ def load_get_data(path, data_type='peak', promoter_only=False, repeats=600):
 def main(cfg: DictConfig):
     model = MPRALitModel(cfg)
     dm = MPRADataModule(cfg)
-
-    wandb_logger = WandbLogger(name=cfg.wandb.run_name, project=cfg.wandb.project_name)
-    wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
-
-    trainer = L.Trainer(
-        accelerator=cfg.machine.accelerator,
-        devices=cfg.machine.num_devices,
-        logger=[
-            wandb_logger,
-            CSVLogger(save_dir=cfg.machine.output_dir, name=cfg.wandb.run_name)
-        ],
-        default_root_dir=cfg.machine.output_dir,
-    )
-
+    
+    trainer, _ = setup_trainer(cfg)
+    
     predictions = trainer.predict(model, datamodule=dm)
     
     # Save predictions and MPRA data
