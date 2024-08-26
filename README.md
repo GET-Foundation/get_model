@@ -1,6 +1,6 @@
 # GET: Gene Expression Transformer
 
-GET is a deep learning model for predicting gene expression from genomic and epigenomic data. It integrates ATAC-seq, Hi-C, and other genomic features to make accurate predictions of gene expression levels.
+GET: a foundation model of transcription across human cell types
 
 ## Table of Contents
 
