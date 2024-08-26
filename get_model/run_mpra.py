@@ -1,6 +1,5 @@
-import logging
-import os
 import glob
+import os
 
 import hydra
 import lightning as L
@@ -9,14 +8,15 @@ import pandas as pd
 import torch
 import torch.utils.data
 import zarr
-from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from omegaconf import DictConfig
+
 from get_model.config.config import *
 from get_model.dataset.zarr_dataset import MPRADataset
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.run import LitModel
-from get_model.utils import setup_trainer, setup_wandb
+from get_model.utils import setup_trainer
+
 
 class MPRADataModule(L.LightningDataModule):
     def __init__(self, cfg: DictConfig):

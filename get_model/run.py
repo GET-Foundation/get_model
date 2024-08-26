@@ -1,21 +1,17 @@
-from functools import partial
 import logging
-import zarr
+from functools import partial
 
 import lightning as L
 import pandas as pd
 import seaborn as sns
 import torch
 import torch.utils.data
+import zarr
 from hydra.utils import instantiate
-from lightning.pytorch.callbacks import (Callback, LearningRateMonitor,
-                                         ModelCheckpoint)
-from lightning.pytorch.loggers import CSVLogger, WandbLogger
-from lightning.pytorch.plugins import MixedPrecision
-from lightning.pytorch.tuner import Tuner
-from lightning.pytorch.utilities import grad_norm
 from matplotlib import pyplot as plt
-from omegaconf import MISSING, DictConfig, OmegaConf
+from minlora import LoRAParametrization
+from minlora.model import add_lora_by_name
+from omegaconf import DictConfig
 from tqdm import tqdm
 
 import wandb
@@ -28,13 +24,11 @@ from get_model.dataset.zarr_dataset import (InferenceDataset,
                                             get_sequence_obj)
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
-from get_model.optim import create_optimizer
-from get_model.utils import (cosine_scheduler, extract_state_dict, load_checkpoint, load_state_dict,
-                             recursive_detach, recursive_numpy, recursive_save_to_zarr,
-                             rename_state_dict, setup_trainer, setup_wandb
-                             )
-from minlora import LoRAParametrization
-from minlora.model import add_lora_by_name
+from get_model.utils import (extract_state_dict, load_checkpoint,
+                             load_state_dict, recursive_detach,
+                             recursive_numpy, recursive_save_to_zarr,
+                             rename_state_dict, setup_trainer)
+
 logging.disable(logging.WARN)
 
 # Wrapper model for Captum
@@ -339,7 +333,8 @@ class LitModel(L.LightningModule):
 
     def interpret_captum_step(self, batch, batch_idx, focus, start, end, shift=0):
         import torch
-        from captum.attr import DeepLift, IntegratedGradients, InputXGradient, Saliency
+        from captum.attr import (DeepLift, InputXGradient, IntegratedGradients,
+                                 Saliency)
         if len(batch['gene_name']) > 1:
             raise ValueError("Only one sample is supported for interpretation")
         gene_name = batch['gene_name'][0]
