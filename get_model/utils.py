@@ -18,6 +18,85 @@ from hydra.core.global_hydra import GlobalHydra
 
 np.bool = np.bool_
 
+import lightning as L
+from lightning.pytorch.loggers import CSVLogger, WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.plugins import MixedPrecision
+from omegaconf import OmegaConf
+import wandb
+
+def setup_wandb(cfg):
+    wandb_logger = WandbLogger(
+        name=cfg.wandb.run_name,
+        project=cfg.wandb.project_name,
+        entity="get-v3",
+    )
+    wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+    return wandb_logger
+
+def setup_trainer(cfg):
+    if cfg.machine.num_devices > 0:
+        strategy = 'auto'
+        accelerator = 'gpu'
+        device = cfg.machine.num_devices
+        if cfg.machine.num_devices > 1:
+            strategy = 'ddp_find_unused_parameters_true'
+    else:
+        strategy = 'auto'
+        accelerator = 'cpu'
+        device = 'auto'
+
+    wandb_logger = setup_wandb(cfg)
+
+    # Create both regular and finetuned checkpoints
+    regular_checkpoint = ModelCheckpoint(
+        monitor="val_loss", 
+        mode="min", 
+        save_top_k=1, 
+        save_last=True, 
+        filename="best"
+    )
+    
+    callbacks = [regular_checkpoint]
+
+    # Add LearningRateMonitor if needed
+    if cfg.get('add_lr_monitor', False):
+        callbacks.append(LearningRateMonitor(logging_interval='epoch'))
+
+    # Determine inference mode
+    inference_mode = True
+    if 'interpret' in cfg.task.test_mode:
+        inference_mode = False
+
+    trainer = L.Trainer(
+        max_epochs=cfg.training.epochs,
+        accelerator=accelerator,
+        num_sanity_val_steps=cfg.get('num_sanity_val_steps', 10),
+        strategy=strategy,
+        devices=device,
+        logger=[
+            wandb_logger,
+            CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')
+        ],
+        callbacks=callbacks,
+        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
+        accumulate_grad_batches=cfg.training.accumulate_grad_batches,
+        gradient_clip_val=cfg.training.clip_grad,
+        log_every_n_steps=cfg.get('log_every_n_steps', 25),
+        default_root_dir=cfg.machine.output_dir,
+        inference_mode=inference_mode,
+        val_check_interval=cfg.get('val_check_interval', 1.0),
+        limit_val_batches=cfg.get('limit_val_batches', 1.0),
+        limit_train_batches=cfg.get('limit_train_batches', 1.0),
+        limit_test_batches=cfg.get('limit_test_batches', 1.0),
+        limit_predict_batches=cfg.get('limit_predict_batches', 1.0),
+        enable_checkpointing=cfg.get('enable_checkpointing', True),
+        enable_progress_bar=cfg.get('enable_progress_bar', True),
+        enable_model_summary=cfg.get('enable_model_summary', True),
+        deterministic=cfg.get('deterministic', False),
+    )
+
+    return trainer, wandb_logger
 
 def load_config(config_name):
     # Initialize Hydra to load the configuration
@@ -263,7 +342,7 @@ def cosine_scheduler(
             final_value
             + 0.5
             * (base_value - final_value)
-            * (1 + math.cos(math.pi * i / (len(iters))))
+            * (1 + math.pi * i / (len(iters)))
             for i in iters
         ]
     )

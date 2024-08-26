@@ -31,7 +31,7 @@ from get_model.model.modules import *
 from get_model.optim import create_optimizer
 from get_model.utils import (cosine_scheduler, extract_state_dict, load_checkpoint, load_state_dict,
                              recursive_detach, recursive_numpy, recursive_save_to_zarr,
-                             rename_state_dict,
+                             rename_state_dict, setup_trainer, setup_wandb
                              )
 from minlora import LoRAParametrization
 from minlora.model import add_lora_by_name
@@ -602,39 +602,9 @@ def run(cfg: DictConfig):
     model = LitModel(cfg)
     dm = GETDataModule(cfg)
     model.dm = dm
-    wandb_logger = WandbLogger(name=cfg.wandb.run_name,
-                               project=cfg.wandb.project_name,
-                               entity="get-v3",
-    )
-    wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
-    if cfg.machine.num_devices > 0:
-        strategy = 'auto'
-        accelerator = 'gpu'
-        device = cfg.machine.num_devices
-        if cfg.machine.num_devices > 1:
-            strategy = 'ddp_find_unused_parameters_true'
-    else:
-        strategy = 'auto'
-        accelerator = 'cpu'
-        device = 'auto'
-    trainer = L.Trainer(
-        max_epochs=cfg.training.epochs,
-        accelerator=accelerator,
-        num_sanity_val_steps=10,
-        strategy=strategy,
-        devices=device,
-        # callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best"),
-        #            LearningRateMonitor(logging_interval='epoch')],
-        logger=[wandb_logger,
-                CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
-        callbacks=[ModelCheckpoint(
-            monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
-        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
-        accumulate_grad_batches=cfg.training.accumulate_grad_batches,
-        gradient_clip_val=cfg.training.clip_grad,
-        log_every_n_steps=25,
-        default_root_dir=cfg.machine.output_dir,
-    )
+    
+    trainer, _ = setup_trainer(cfg)
+    
     # tuner = Tuner(trainer)
     # tuner.lr_find(model, datamodule=dm)
     if cfg.stage == 'fit':
@@ -655,29 +625,7 @@ def run_downstream(cfg: DictConfig):
     model.to('cuda')
     dm = GETDataModule(cfg)
     model.dm = dm
-    if cfg.machine.num_devices > 0:
-        strategy = 'auto'
-        accelerator = 'gpu'
-        device = cfg.machine.num_devices
-        if cfg.machine.num_devices > 1:
-            strategy = 'ddp_find_unused_parameters_true'
-    else:
-        strategy = 'auto'
-        accelerator = 'cpu'
-        device = 'auto'
-    trainer = L.Trainer(
-        max_epochs=cfg.training.epochs,
-        accelerator=accelerator,
-        num_sanity_val_steps=10,
-        strategy=strategy,
-        devices=device,
-        # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
-        accumulate_grad_batches=cfg.training.accumulate_grad_batches,
-        gradient_clip_val=cfg.training.clip_grad,
-        log_every_n_steps=100,
-        deterministic=True,
-        default_root_dir=cfg.machine.output_dir,
-    )
+    trainer, _ = setup_trainer(cfg)
     print(run_ppif_task(trainer, model))
 
 
@@ -707,8 +655,7 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel, output_key='atpm'):
         n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]
     pred_mut = torch.cat(pred_mut, dim=0).reshape(
         n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]
-    pred_change = (10**pred_mut - 10**pred_wt) / \
-        (10**pred_wt - 1) * 100
+    pred_change = (10**pred_mut - 10**pred_wt) / (10**pred_wt - 1) * 100
     mutation['pred_change'] = pred_change.detach().cpu().numpy()
     y = mutation.query('`corrected p value`<=0.05').query('Screen.str.contains("Pro")').query('Screen.str.contains("Tiling")')[
         '% change to PPIF expression'].values

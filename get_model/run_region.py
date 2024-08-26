@@ -32,7 +32,7 @@ from get_model.utils import (cosine_scheduler, extract_state_dict,
                              load_checkpoint, load_state_dict,
                              recursive_concat_numpy, recursive_detach,
                              recursive_numpy, recursive_save_to_zarr,
-                             rename_state_dict)
+                             rename_state_dict, setup_trainer, setup_wandb)
 
 
 class RegionDataModule(L.LightningDataModule):
@@ -392,39 +392,9 @@ def run(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     dm = RegionDataModule(cfg)
     model.dm = dm
-    wandb_logger = WandbLogger(name=cfg.wandb.run_name,
-                               project=cfg.wandb.project_name)
-    wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
-    if cfg.machine.num_devices > 0:
-        strategy = 'auto'
-        accelerator = 'gpu'
-        device = cfg.machine.num_devices
-        if cfg.machine.num_devices > 1:
-            strategy = 'ddp_find_unused_parameters_true'
-    else:
-        strategy = 'auto'
-        accelerator = 'cpu'
-        device = 'auto'
-    inference_mode = True
-    if 'interpret' in cfg.task.test_mode:
-        inference_mode = False
-    trainer = L.Trainer(
-        max_epochs=cfg.training.epochs,
-        accelerator=accelerator,
-        num_sanity_val_steps=10,
-        strategy=strategy,
-        devices=device,
-        logger=[
-            wandb_logger,
-            CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
-        callbacks=[ModelCheckpoint(
-            monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
-        # plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
-        accumulate_grad_batches=cfg.training.accumulate_grad_batches,
-        gradient_clip_val=cfg.training.clip_grad,
-        default_root_dir=cfg.machine.output_dir,
-        inference_mode=inference_mode
-    )
+    
+    trainer, _ = setup_trainer(cfg)
+    
     if cfg.stage == 'fit':
         trainer.fit(model, dm)
     if cfg.stage == 'validate':

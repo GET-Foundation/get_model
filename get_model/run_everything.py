@@ -6,22 +6,18 @@ import pandas as pd
 import seaborn as sns
 import torch
 import torch.utils.data
+import wandb
 import zarr
 from hydra.utils import instantiate
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import CSVLogger, WandbLogger
-from lightning.pytorch.plugins import MixedPrecision
 from matplotlib import pyplot as plt
 from minlora import LoRAParametrization
 from minlora.model import add_lora_by_name
 from omegaconf import MISSING, DictConfig, OmegaConf
 
-import wandb
 from get_model.config.config import *
 from get_model.dataset.collate import everything_collate
 from get_model.dataset.zarr_dataset import (
-    EverythingDataset,
-    InferenceEverythingDataset,
+    EverythingDataset, InferenceEverythingDataset,
     InferenceReferenceRegionDataset,
     PerturbationInferenceReferenceRegionDataset, ReferenceRegionDataset,
     ReferenceRegionMotif, ReferenceRegionMotifConfig)
@@ -32,7 +28,8 @@ from get_model.run import GETDataModule, LitModel, get_insulation_overlap
 from get_model.utils import (cosine_scheduler, extract_state_dict,
                              load_checkpoint, load_state_dict,
                              recursive_detach, recursive_numpy,
-                             recursive_save_to_zarr, rename_state_dict)
+                             recursive_save_to_zarr, rename_state_dict,
+                             setup_trainer, setup_wandb)
 
 
 class EverythingDataModule(GETDataModule):
@@ -443,41 +440,9 @@ def run(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     dm = EverythingDataModule(cfg)
     model.dm = dm
-    wandb_logger = WandbLogger(name=cfg.wandb.run_name,
-                               project=cfg.wandb.project_name)
-    wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
-    if cfg.machine.num_devices > 0:
-        strategy = 'auto'
-        accelerator = 'gpu'
-        device = cfg.machine.num_devices
-        if cfg.machine.num_devices > 1:
-            strategy = 'ddp_find_unused_parameters_true'
-    else:
-        strategy = 'auto'
-        accelerator = 'cpu'
-        device = 'auto'
-    inference_mode = True
-    if 'interpret' in cfg.task.test_mode:
-        inference_mode = False
-    trainer = L.Trainer(
-        max_epochs=cfg.training.epochs,
-        accelerator=accelerator,
-        num_sanity_val_steps=0,
-        strategy=strategy,
-        devices=device,
-        logger=[
-            wandb_logger,
-            CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')],
-        callbacks=[ModelCheckpoint(
-            monitor="val_loss", mode="min", save_top_k=1, save_last=True, filename="best")],
-        plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
-        accumulate_grad_batches=cfg.training.accumulate_grad_batches,
-        gradient_clip_val=cfg.training.clip_grad,
-        log_every_n_steps=4,
-        val_check_interval=0.5,
-        default_root_dir=cfg.machine.output_dir,
-        inference_mode=inference_mode
-    )
+    
+    trainer, _ = setup_trainer(cfg)
+    
     if cfg.stage == 'fit':
         trainer.fit(model, datamodule=dm, ckpt_path=cfg.finetune.resume_ckpt)
     if cfg.stage == 'validate':
