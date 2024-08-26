@@ -9,16 +9,12 @@ import torch
 import torch.utils.data
 import zarr
 from hydra.utils import instantiate
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.core.optimizer import LightningOptimizer
-from lightning.pytorch.loggers import CSVLogger, WandbLogger
-from lightning.pytorch.plugins import MixedPrecision
 from matplotlib import pyplot as plt
 from minlora import LoRAParametrization
 from minlora.model import add_lora_by_name
 from omegaconf import MISSING, DictConfig, OmegaConf
 from torch.optim.optimizer import Optimizer
-from tqdm import tqdm
 
 import wandb
 from get_model.config.config import *

@@ -29,7 +29,7 @@ from get_model.utils import (cosine_scheduler, extract_state_dict,
                              load_checkpoint, load_state_dict,
                              recursive_detach, recursive_numpy,
                              recursive_save_to_zarr, rename_state_dict,
-                             setup_trainer, setup_wandb)
+                             setup_trainer)
 
 
 class EverythingDataModule(GETDataModule):

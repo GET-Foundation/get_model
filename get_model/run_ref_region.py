@@ -8,10 +8,8 @@ import torch
 import torch.utils.data
 import zarr
 from hydra.utils import instantiate
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint
 from custom_callbacks import FinetunedModelCheckpoint 
-from lightning.pytorch.loggers import CSVLogger, WandbLogger
-from lightning.pytorch.plugins import MixedPrecision
 from matplotlib import pyplot as plt
 from minlora import LoRAParametrization
 from minlora.model import add_lora_by_name
@@ -29,7 +27,7 @@ from get_model.run import GETDataModule, LitModel, get_insulation_overlap
 from get_model.utils import (cosine_scheduler, extract_state_dict,
                              load_checkpoint, load_state_dict,
                              recursive_detach, recursive_numpy,
-                             recursive_save_to_zarr, rename_state_dict, setup_trainer, setup_wandb)
+                             recursive_save_to_zarr, rename_state_dict, setup_trainer)
 
 
 class ReferenceRegionDataModule(GETDataModule):
