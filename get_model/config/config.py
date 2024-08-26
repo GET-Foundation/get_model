@@ -129,9 +129,9 @@ class TrainingConfig:
 
 
 @dataclass
-class WandbConfig:
-    project_name: str = "pretrain"
-    run_name: str = "experiment_1"
+class RunConfig:
+    project_name: str = MISSING
+    run_name: str = MISSING
 
 
 @dataclass
@@ -172,6 +172,7 @@ class TaskConfig:
 
 @dataclass
 class Config:
+    run: RunConfig = field(default_factory=RunConfig)
     type: str = 'nucleotide'
     log_image: bool = False
     stage: str = 'fit'
@@ -182,7 +183,6 @@ class Config:
         default_factory=DatasetConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
-    wandb: WandbConfig = field(default_factory=WandbConfig)
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
     task: TaskConfig = field(
         default_factory=TaskConfig)
@@ -204,6 +204,7 @@ class EverythingConfig(ReferenceRegionConfig):
 
 @dataclass
 class RegionConfig:
+    run: RunConfig = field(default_factory=RunConfig)
     type: str = 'region'
     stage: str = 'fit'
     assembly: str = 'hg38'
@@ -215,7 +216,6 @@ class RegionConfig:
         default_factory=RegionDatasetConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
-    wandb: WandbConfig = field(default_factory=WandbConfig)
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
     task: TaskConfig = field(
         default_factory=TaskConfig)

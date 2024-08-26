@@ -34,7 +34,7 @@ optimizer:
   opt_eps: 1e-8
   opt_betas: [0.9, 0.999]
 
-wandb:
+run:
   project_name: "TFAtlas_ood_cell_lora_new"
   run_name: "QATAC_cluster_0"
 

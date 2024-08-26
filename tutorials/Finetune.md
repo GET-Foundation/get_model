@@ -57,7 +57,7 @@ optimizer:
   opt_eps: 1e-8 # optimizer epsilon
   opt_betas: [0.9, 0.999] # optimizer betas
  
-wandb:
+run:
   project_name: "GETRegionFinetune_k562_cage" # wandb project name
   run_name: "debug" # wandb run name
 ```
