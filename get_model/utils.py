@@ -23,12 +23,11 @@ from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.plugins import MixedPrecision
 from omegaconf import OmegaConf
-import wandb
 
 def setup_wandb(cfg):
     wandb_logger = WandbLogger(
-        name=cfg.wandb.run_name,
-        project=cfg.wandb.project_name,
+        name=cfg.run.run_name,
+        project=cfg.run.project_name,
         entity="get-v3",
     )
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
@@ -60,7 +59,7 @@ def setup_trainer(cfg):
     callbacks = [regular_checkpoint]
 
     # Add LearningRateMonitor if needed
-    if cfg.get('add_lr_monitor', False):
+    if cfg.training.get('add_lr_monitor', False):
         callbacks.append(LearningRateMonitor(logging_interval='epoch'))
 
     # Determine inference mode
@@ -71,29 +70,21 @@ def setup_trainer(cfg):
     trainer = L.Trainer(
         max_epochs=cfg.training.epochs,
         accelerator=accelerator,
-        num_sanity_val_steps=cfg.get('num_sanity_val_steps', 10),
+        num_sanity_val_steps=10,
         strategy=strategy,
         devices=device,
         logger=[
             wandb_logger,
-            CSVLogger('logs', f'{cfg.wandb.project_name}_{cfg.wandb.run_name}')
+            CSVLogger(cfg.machine.output_dir, f'{cfg.run.project_name}_{cfg.run.run_name}')
         ],
         callbacks=callbacks,
         plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
-        log_every_n_steps=cfg.get('log_every_n_steps', 25),
         default_root_dir=cfg.machine.output_dir,
+        log_every_n_steps=25,
+        val_check_interval=0.5,
         inference_mode=inference_mode,
-        val_check_interval=cfg.get('val_check_interval', 1.0),
-        limit_val_batches=cfg.get('limit_val_batches', 1.0),
-        limit_train_batches=cfg.get('limit_train_batches', 1.0),
-        limit_test_batches=cfg.get('limit_test_batches', 1.0),
-        limit_predict_batches=cfg.get('limit_predict_batches', 1.0),
-        enable_checkpointing=cfg.get('enable_checkpointing', True),
-        enable_progress_bar=cfg.get('enable_progress_bar', True),
-        enable_model_summary=cfg.get('enable_model_summary', True),
-        deterministic=cfg.get('deterministic', False),
     )
 
     return trainer, wandb_logger
