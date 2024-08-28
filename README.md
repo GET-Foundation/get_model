@@ -31,7 +31,7 @@ python get_model/debug/debug_run_ref_region_hic_oe.py --config-name eval_k562_fe
 ```
 ## Data Preparation
 
-GET requires preprocessed ATAC-seq, RNA-seq, and optionally Hi-C data. See the [data preprocessing tutorial](tutorials/DataPreprocessing.md) for detailed instructions.
+GET requires preprocessed ATAC-seq, RNA-seq, and optionally Hi-C data. See the [data preprocessing tutorial](tutorials/Dataloader.md) for detailed instructions.
 
 ## Model Architecture
 
@@ -42,7 +42,7 @@ GET uses a transformer-based architecture with several key components:
 - Transformer Encoder
 - Task-specific heads (Expression, Hi-C, etc.)
 
-For more details, see [Model Architecture](docs/ModelArchitecture.md).
+For more details, see [Model Architecture](tutorials/Model%20Customization.md).
 
 ## Training
 
@@ -65,7 +65,7 @@ GET uses Hydra for configuration management. Key configuration files:
 - Model configs: `get_model/config/model/*.yaml`
 - Dataset configs: `get_model/config/dataset/*.yaml`
 
-See [Configuration Guide](docs/Configuration.md) for more details.
+See [Configuration Guide](tutorials/Configuration.md) for more details.
 
 ## Contributing
 
