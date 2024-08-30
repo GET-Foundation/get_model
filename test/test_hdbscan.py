@@ -1,18 +1,12 @@
 #%%
 from caesar.io.zarr_io import SingleSparseZarrIO
-import cupy
 import numpy
 import zarr
-import kvikio
-import kvikio.zarr
-
 z = SingleSparseZarrIO('/home/xf2217/Projects/get_data/sample_64_cerebrum.hg38.fragments.zarr')
 # %%
 z.get_libsize()
 # %%
 z.metadata
-# %%
-import cupy as cp
 # %%
 z.get_libsize_for_chr_chunk('chr1', 1).shape
 #%%
