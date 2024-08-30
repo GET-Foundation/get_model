@@ -182,6 +182,20 @@ class RegionDatasetConfig:
     sampling_step: int = 100
     mask_ratio: float = 0
 
+@dataclass
+class RegionMotifDatasetConfig:
+    """
+    Configuration for the region motif dataset.
+    """
+    zarr_path: str = MISSING
+    celltypes: str = MISSING
+    transform: Optional[Any] = None
+    quantitative_atac: bool = False
+    sampling_step: int = 50
+    num_region_per_sample: int = 1000
+    leave_out_chromosomes: str | None = None
+    leave_out_celltypes: str | None = None
+    mask_ratio: float = 0.0
 
 @dataclass
 class OptimizerConfig:
@@ -410,6 +424,41 @@ class RegionConfig:
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
     task: TaskConfig = field(default_factory=TaskConfig)
 
+@dataclass
+class RegionZarrConfig:
+    """
+    Configuration for region.
+
+    Attributes:
+        run: Run configuration.
+        type: Type of configuration.
+        stage: Stage of the process.
+        assembly: Genome assembly.
+        eval_tss: Whether to evaluate TSS.
+        log_image: Whether to log images.
+        model: Model configuration.
+        machine: Machine configuration.
+        dataset: Dataset configuration for region.
+        training: Training configuration.
+        optimizer: Optimizer configuration.
+        finetune: Fine-tuning configuration.
+        task: Task configuration.
+    """
+    run: RunConfig = field(default_factory=RunConfig)
+    type: str = "region"
+    stage: str = "fit"
+    assembly: str = "hg38"
+    eval_tss: bool = False
+    log_image: bool = False
+    model: Any = MISSING
+    machine: MachineConfig = field(default_factory=MachineConfig)
+    dataset: RegionMotifDatasetConfig = field(default_factory=RegionMotifDatasetConfig)
+    training: TrainingConfig = field(default_factory=TrainingConfig)
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
+    task: TaskConfig = field(default_factory=TaskConfig)
+
+
 
 cs = ConfigStore.instance()
 cs.store(name="base_config", node=Config)
@@ -422,3 +471,6 @@ cse.store(name="base_everything_config", node=EverythingConfig)
 
 csr = ConfigStore.instance()
 csr.store(name="base_region_config", node=RegionConfig)
+
+csz = ConfigStore.instance()
+csz.store(name="base_region_zarr_config", node=RegionZarrConfig)

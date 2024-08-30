@@ -7,6 +7,7 @@ import pandas as pd
 import seaborn as sns
 import torch
 import torch.utils.data
+import wandb
 import zarr
 from hydra.utils import instantiate
 from lightning.pytorch.core.optimizer import LightningOptimizer
@@ -16,10 +17,11 @@ from minlora.model import add_lora_by_name
 from omegaconf import MISSING, DictConfig, OmegaConf
 from torch.optim.optimizer import Optimizer
 
-import wandb
 from get_model.config.config import *
 from get_model.dataset.zarr_dataset import (InferenceRegionDataset,
-                                            RegionDataset, get_gencode_obj)
+                                            InferenceRegionMotifDataset,
+                                            RegionDataset, RegionMotifDataset,
+                                            get_gencode_obj)
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
@@ -369,7 +371,7 @@ class RegionLitModel(LitModel):
         schedule = cosine_scheduler(
             base_value=self.cfg.optimizer.lr,
             final_value=self.cfg.optimizer.min_lr,
-            epochs=self.cfg.training.epochs,
+            epochs=self.cfg.training.epochs+1,
             niter_per_ep=num_training_steps_per_epoch,
             warmup_epochs=self.cfg.training.warmup_epochs,
             start_warmup_value=self.cfg.optimizer.min_lr,
@@ -383,12 +385,21 @@ class RegionLitModel(LitModel):
         return [optimizer], [lr_scheduler]
 
 
-def run(cfg: DictConfig):
-    model = RegionLitModel(cfg)
-    print(OmegaConf.to_yaml(cfg))
-    dm = RegionDataModule(cfg)
-    model.dm = dm
-    
+class RegionZarrDataModule(RegionDataModule):
+    def __init__(self, cfg: DictConfig):
+        super().__init__(cfg)
+
+    def build_training_dataset(self, is_train=True):
+        return RegionMotifDataset(**self.cfg.dataset, is_train=is_train)
+
+    def build_inference_dataset(self, is_train=False, gene_list=None, gencode_obj=None):
+        if gencode_obj is None:
+            gencode_obj = get_gencode_obj(
+                self.cfg.assembly, self.cfg.machine.data_path)
+
+        return InferenceRegionMotifDataset(**self.cfg.dataset, is_train=is_train, gene_list=self.cfg.task.gene_list if gene_list is None else gene_list, gencode_obj=gencode_obj)
+
+def run_shared(cfg, model, dm):
     trainer, _ = setup_trainer(cfg)
     
     if cfg.stage == 'fit':
@@ -397,3 +408,19 @@ def run(cfg: DictConfig):
         trainer.validate(model, datamodule=dm)
     if cfg.stage == 'predict':
         trainer.predict(model, datamodule=dm)
+
+def run(cfg: DictConfig):
+    model = RegionLitModel(cfg)
+    print(OmegaConf.to_yaml(cfg))
+    dm = RegionDataModule(cfg)
+    model.dm = dm
+    
+    run_shared(cfg, model, dm)
+
+def run_zarr(cfg: DictConfig):
+    model = RegionLitModel(cfg)
+    print(OmegaConf.to_yaml(cfg))
+    dm = RegionZarrDataModule(cfg)
+    model.dm = dm
+    
+    run_shared(cfg, model, dm)

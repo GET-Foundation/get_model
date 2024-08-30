@@ -100,7 +100,7 @@ def print_shape(x):
     """a recursive function to print the shape of values in a nested dictionary"""
     if isinstance(x, dict):
         for k, v in x.items():
-            print(k)
+            print(k, end=': ')
             print_shape(v)
     elif isinstance(x, np.ndarray) or isinstance(x, torch.Tensor):
         print(x.shape)
