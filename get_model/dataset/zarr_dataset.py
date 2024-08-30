@@ -3776,9 +3776,7 @@ class RegionMotif:
         )
         df["End"] = df["peak_names"].apply(lambda x: int(x.split(":")[1].split("-")[1]))
         self._peaks = (
-            df.sort_values(["Chromosome", "Start", "End"])
-            .reset_index(drop=True)
-            .reset_index()
+            df.reset_index(drop=True).reset_index()
         )
 
     def _load_celltype_data(self):
@@ -4024,6 +4022,7 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
                 peak_coord = region_motif.peaks.iloc[start_idx:end_idx][
                     ["Start", "End"]
                 ].values
+                tss_peak = tss_peak - start_idx
                 self.sample_indices.append(
                     (
                         celltype,
@@ -4076,7 +4075,7 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
             "region_motif": region_motif_i.astype(np.float32),
             "mask": mask,
             "gene_name": gene_name,
-            "tss_peak": tss,
+            "tss_peak": tss.sum(axis=1),
             "chromosome": chrom,
             "peak_coord": peak_coord,
             "all_tss_peak": np.pad(

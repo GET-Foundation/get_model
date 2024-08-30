@@ -25,7 +25,7 @@ from get_model.dataset.zarr_dataset import (InferenceDataset,
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.utils import (extract_state_dict, load_checkpoint,
-                             load_state_dict, recursive_detach,
+                             load_state_dict, recursive_concat_numpy, recursive_detach,
                              recursive_numpy, recursive_save_to_zarr,
                              rename_state_dict, setup_trainer)
 
@@ -79,6 +79,7 @@ class LitModel(L.LightningModule):
         self.lr = cfg.optimizer.lr
         self.save_hyperparameters()
         self.dm = None
+        self.accumulated_results = []
 
     def get_model(self):
         model = instantiate(self.cfg.model)
@@ -393,12 +394,29 @@ class LitModel(L.LightningModule):
             'strand': recursive_numpy(recursive_detach(batch['strand'])),
             'shift': shift,
         }
-        zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.zarr" 
+        zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.run.run_name}/interpret.zarr" 
         from numcodecs import VLenUTF8
         object_codec = VLenUTF8()
         z = zarr.open(zarr_path, mode='a')
         recursive_save_to_zarr(z, result_df,  object_codec=object_codec, overwrite=True)
     
+    def on_predict_epoch_end(self):
+        if self.cfg.task.test_mode == 'interpret':
+            # Save accumulated results to zarr
+            zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.run.project_name}/{self.cfg.run.run_name}/interpret.zarr"
+            print(f"Saving to {zarr_path}")
+            from numcodecs import VLenUTF8
+            object_codec = VLenUTF8()
+            z = zarr.open(zarr_path, mode='w')
+
+            accumulated_results = recursive_concat_numpy(
+                self.accumulated_results)
+            recursive_save_to_zarr(
+                z, accumulated_results, object_codec=object_codec, overwrite=True)
+
+            # Clear accumulated results
+            self.accumulated_results = []
+            
     def configure_optimizers(self):
         # a adam optimizer with a scheduler using lightning function
         optimizer = torch.optim.Adam(
@@ -591,6 +609,16 @@ class GETDataModule(L.LightningDataModule):
             collate_fn=get_rev_collate_fn if 'perturb' not in self.cfg.task.test_mode else get_perturb_collate_fn,
         )
 
+def run_shared(cfg, model, dm):
+    trainer, _ = setup_trainer(cfg)
+    
+    if cfg.stage == 'fit':
+        trainer.fit(model, dm, ckpt_path=cfg.finetune.resume_ckpt)
+    if cfg.stage == 'validate':
+        trainer.validate(model, datamodule=dm, ckpt_path=cfg.finetune.resume_ckpt)
+    if cfg.stage == 'predict':
+        trainer.predict(model, datamodule=dm, ckpt_path=cfg.finetune.resume_ckpt)
+    return trainer
 
 def run(cfg: DictConfig):
     torch.set_float32_matmul_precision('medium')
@@ -598,16 +626,7 @@ def run(cfg: DictConfig):
     dm = GETDataModule(cfg)
     model.dm = dm
     
-    trainer, _ = setup_trainer(cfg)
-    
-    # tuner = Tuner(trainer)
-    # tuner.lr_find(model, datamodule=dm)
-    if cfg.stage == 'fit':
-        trainer.fit(model, dm)
-    if cfg.stage == 'validate':
-        trainer.validate(model, datamodule=dm)
-    if cfg.stage == 'predict':
-        trainer.predict(model, datamodule=dm)
+    return run_shared(cfg, model, dm)
 
 
 def run_downstream(cfg: DictConfig):

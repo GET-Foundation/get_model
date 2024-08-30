@@ -25,7 +25,7 @@ from get_model.dataset.zarr_dataset import (InferenceRegionDataset,
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
-from get_model.run import LitModel, get_insulation_overlap
+from get_model.run import LitModel, get_insulation_overlap, run_shared
 from get_model.utils import (cosine_scheduler, extract_state_dict,
                              load_checkpoint, load_state_dict,
                              recursive_concat_numpy, recursive_detach,
@@ -104,7 +104,6 @@ class RegionDataModule(L.LightningDataModule):
 class RegionLitModel(LitModel):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
-        self.accumulated_results = []
 
     def optimizer_step(self, epoch: int, batch_idx: int, optimizer: Optimizer | LightningOptimizer, optimizer_closure: Callable[[], Any] | None = None) -> None:
         self.lr_schedulers().step()
@@ -163,9 +162,9 @@ class RegionLitModel(LitModel):
             result_df = pd.DataFrame(result_df)
             # mkdir if not exist
             os.makedirs(
-                f"{self.cfg.machine.output_dir}/{self.cfg.wandb.project_name}", exist_ok=True)
+                f"{self.cfg.machine.output_dir}/{self.cfg.run.project_name}", exist_ok=True)
             result_df.to_csv(
-                f"{self.cfg.machine.output_dir}/{self.cfg.wandb.project_name}/{self.cfg.wandb.run_name}.csv", index=False, mode='a', header=False
+                f"{self.cfg.machine.output_dir}/{self.cfg.run.project_name}/{self.cfg.run.run_name}.csv", index=False, mode='a', header=False
             )
         elif self.cfg.task.test_mode == 'perturb':
             # TODO: need to figure out if batching is working
@@ -198,7 +197,7 @@ class RegionLitModel(LitModel):
             # Save results to a csv as multiple rows
             results_df = pd.DataFrame(results)
             results_df.to_csv(
-                f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", index=False, mode='a', header=False
+                f"{self.cfg.machine.output_dir}/{self.cfg.run.run_name}.csv", index=False, mode='a', header=False
             )
             # except Exception as    e:
             # print(e)
@@ -329,21 +328,7 @@ class RegionLitModel(LitModel):
     def on_validation_epoch_end(self):
         pass
 
-    def on_predict_epoch_end(self):
-        if self.cfg.task.test_mode == 'interpret':
-            # Save accumulated results to zarr
-            zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.wandb.project_name}/{self.cfg.wandb.run_name}.zarr"
-            from numcodecs import VLenUTF8
-            object_codec = VLenUTF8()
-            z = zarr.open(zarr_path, mode='w')
 
-            accumulated_results = recursive_concat_numpy(
-                self.accumulated_results)
-            recursive_save_to_zarr(
-                z, accumulated_results, object_codec=object_codec, overwrite=True)
-
-            # Clear accumulated results
-            self.accumulated_results = []
 
     def configure_optimizers(self):
         if hasattr(self.model.cfg, 'encoder'):
@@ -397,17 +382,9 @@ class RegionZarrDataModule(RegionDataModule):
             gencode_obj = get_gencode_obj(
                 self.cfg.assembly, self.cfg.machine.data_path)
 
-        return InferenceRegionMotifDataset(**self.cfg.dataset, is_train=is_train, gene_list=self.cfg.task.gene_list if gene_list is None else gene_list, gencode_obj=gencode_obj)
+        return InferenceRegionMotifDataset(**self.cfg.dataset, assembly=self.cfg.assembly, is_train=is_train, gene_list=self.cfg.task.gene_list if gene_list is None else gene_list, gencode_obj=gencode_obj)
 
-def run_shared(cfg, model, dm):
-    trainer, _ = setup_trainer(cfg)
-    
-    if cfg.stage == 'fit':
-        trainer.fit(model, dm)
-    if cfg.stage == 'validate':
-        trainer.validate(model, datamodule=dm)
-    if cfg.stage == 'predict':
-        trainer.predict(model, datamodule=dm)
+
 
 def run(cfg: DictConfig):
     model = RegionLitModel(cfg)
@@ -415,7 +392,7 @@ def run(cfg: DictConfig):
     dm = RegionDataModule(cfg)
     model.dm = dm
     
-    run_shared(cfg, model, dm)
+    return run_shared(cfg, model, dm)
 
 def run_zarr(cfg: DictConfig):
     model = RegionLitModel(cfg)
@@ -423,4 +400,4 @@ def run_zarr(cfg: DictConfig):
     dm = RegionZarrDataModule(cfg)
     model.dm = dm
     
-    run_shared(cfg, model, dm)
+    return run_shared(cfg, model, dm)

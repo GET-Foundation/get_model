@@ -67,7 +67,7 @@ def save_mpra_data(predictions, cfg: DictConfig, dm: MPRADataModule):
     reshaped_preds = all_preds.reshape(-1, cfg.model.num_region_per_sample, 2)
     
     # Create the output directory structure
-    base_output_dir = os.path.join(cfg.mpra.output_dir, cfg.wandb.project_name)
+    base_output_dir = os.path.join(cfg.mpra.output_dir, cfg.run.project_name)
     os.makedirs(base_output_dir, exist_ok=True)
 
     # Save predictions for each chunk

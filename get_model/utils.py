@@ -8,6 +8,7 @@
 # --------------------------------------------------------'
 import io
 import math
+import os
 
 import hydra
 import numpy as np
@@ -28,6 +29,7 @@ def setup_wandb(cfg):
     wandb_logger = WandbLogger(
         name=cfg.run.run_name,
         project=cfg.run.project_name,
+        save_dir=os.path.join(cfg.machine.output_dir, cfg.run.project_name, cfg.run.run_name),
         entity="get-v3",
     )
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
@@ -44,6 +46,9 @@ def setup_trainer(cfg):
         strategy = 'auto'
         accelerator = 'cpu'
         device = 'auto'
+    
+    # create output dir if not exist
+    os.makedirs(os.path.join(cfg.machine.output_dir, cfg.run.project_name, cfg.run.run_name), exist_ok=True)
 
     wandb_logger = setup_wandb(cfg)
 
@@ -53,7 +58,8 @@ def setup_trainer(cfg):
         mode="min", 
         save_top_k=1, 
         save_last=True, 
-        filename="best"
+        filename="best",
+        dirpath=os.path.join(cfg.machine.output_dir, cfg.run.project_name, cfg.run.run_name, "checkpoints"),
     )
     
     callbacks = [regular_checkpoint]
@@ -75,16 +81,16 @@ def setup_trainer(cfg):
         devices=device,
         logger=[
             wandb_logger,
-            CSVLogger(cfg.machine.output_dir, f'{cfg.run.project_name}_{cfg.run.run_name}')
+            CSVLogger(save_dir=os.path.join(cfg.machine.output_dir, cfg.run.project_name, cfg.run.run_name, "csv_logs"))
         ],
         callbacks=callbacks,
         plugins=[MixedPrecision(precision='16-mixed', device="cuda")],
         accumulate_grad_batches=cfg.training.accumulate_grad_batches,
         gradient_clip_val=cfg.training.clip_grad,
-        default_root_dir=cfg.machine.output_dir,
         log_every_n_steps=25,
         val_check_interval=0.5,
         inference_mode=inference_mode,
+        default_root_dir=os.path.join(cfg.machine.output_dir, cfg.run.project_name, cfg.run.run_name),
     )
 
     return trainer, wandb_logger
