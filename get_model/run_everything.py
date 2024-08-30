@@ -24,7 +24,7 @@ from get_model.dataset.zarr_dataset import (
 from get_model.model.model_refactored import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
-from get_model.run import GETDataModule, LitModel, get_insulation_overlap
+from get_model.run import GETDataModule, LitModel, get_insulation_overlap, run_shared
 from get_model.utils import (cosine_scheduler, extract_state_dict,
                              load_checkpoint, load_state_dict,
                              recursive_detach, recursive_numpy,
@@ -213,7 +213,7 @@ class RegionLitModel(LitModel):
                         {'gene_name': gene_name, 'key': key, 'pred': pred[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'obs': obs[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'atpm': atpm})
             result_df = pd.DataFrame(result_df)
             result_df.to_csv(
-                f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", index=False, mode='a', header=False
+                f"{self.cfg.machine.output_dir}/{self.cfg.run.run_name}.csv", index=False, mode='a', header=False
             )
         elif self.cfg.task.test_mode == 'perturb':
             # TODO: need to figure out if batching is working
@@ -245,7 +245,7 @@ class RegionLitModel(LitModel):
             # Save results to a csv as multiple rows
             results_df = pd.DataFrame(results)
             results_df.to_csv(
-                f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.csv", index=False, mode='a', header=False
+                f"{self.cfg.machine.output_dir}/{self.cfg.run.run_name}.csv", index=False, mode='a', header=False
             )
             # except Exception as e:
             # print(e)
@@ -281,7 +281,7 @@ class RegionLitModel(LitModel):
                 'gene_name': gene_names,
             }
             # save to zarr
-            zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.wandb.run_name}.zarr"
+            zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.run.run_name}.zarr"
             from numcodecs import VLenUTF8
             object_codec = VLenUTF8()
             z = zarr.open(zarr_path, mode='a')
@@ -441,15 +441,6 @@ def run(cfg: DictConfig):
     dm = EverythingDataModule(cfg)
     model.dm = dm
     
-    trainer, _ = setup_trainer(cfg)
-    
-    if cfg.stage == 'fit':
-        trainer.fit(model, datamodule=dm, ckpt_path=cfg.finetune.resume_ckpt)
-    if cfg.stage == 'validate':
-        trainer.validate(model, datamodule=dm,
-                         ckpt_path=cfg.finetune.resume_ckpt)
-    if cfg.stage == 'predict':
-        trainer.predict(model, datamodule=dm,
-                        ckpt_path=cfg.finetune.resume_ckpt)
+    return run_shared(cfg, model, dm)
 
 

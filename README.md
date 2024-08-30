@@ -8,7 +8,6 @@ GET: a foundation model of transcription across human cell types
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
   - [Quick Start](#quick-start)
-  - [Data Preparation](#data-preparation)
   - [Model Architecture](#model-architecture)
   - [Training](#training)
   - [Evaluation](#evaluation)
@@ -25,13 +24,12 @@ pip install -e .
 
 ## Quick Start
 
-To run a basic training job:
-```bash
-python get_model/debug/debug_run_ref_region_hic_oe.py --config-name eval_k562_fetal_ref_region_k562_hic_oe stage=fit
-```
-## Data Preparation
+e provide a tutorial on how to prepare the data, finetune the model, and do interpretation analysis [here](tutorials/full_v1_pipeline.py).
 
-GET requires preprocessed ATAC-seq, RNA-seq, and optionally Hi-C data. See the [data preprocessing tutorial](tutorials/Dataloader.md) for detailed instructions.
+To run a basic training job in command line:
+```bash
+python get_model/debug/debug_run_region.py --config-name finetune_tutorial stage=fit
+```
 
 ## Model Architecture
 
@@ -54,7 +52,7 @@ See [Fine-tuning Tutorial](tutorials/Finetune.md) for more information.
 
 To evaluate a trained model:
 ```bash
-python get_model/debug/debug_run_ref_region_hic_oe.py --config-name eval_k562_fetal_ref_region_k562_hic_oe stage=validate
+python get_model/debug/debug_run_region.py --config-name finetune_tutorial stage=validate
 ```
 
 ## Configuration
