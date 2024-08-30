@@ -26,7 +26,7 @@ bash scripts/setup_env.sh /path/to/project/root
 
 ## Quick Start
 
-e provide a tutorial on how to prepare the data, finetune the model, and do interpretation analysis [here](tutorials/full_v1_pipeline.py).
+We provide a tutorial on how to prepare the data, finetune the model, and do interpretation analysis [here](tutorials/full_v1_pipeline.py).
 
 To run a basic training job in command line:
 ```bash
