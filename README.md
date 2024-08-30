@@ -18,8 +18,10 @@ GET: a foundation model of transcription across human cell types
   - [Contact](#contact)
 
 ## Installation
+Checkout scripts/setup_env.sh to setup the environment.
+
 ```bash
-pip install -e .
+bash scripts/setup_env.sh /path/to/project/root
 ```
 
 ## Quick Start
