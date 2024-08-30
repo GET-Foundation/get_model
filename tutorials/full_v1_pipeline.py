@@ -1,20 +1,6 @@
-# Install necessary packages in the most simplistic setting. Ignore this if you follow the main installation instructions.
-# ! pip install pandas zarr scipy numcodecs
-# ! apt-get update && apt-get install -y bedtools
+#%%
 # NOTE: tabix has to be >= 1.17
-# ! apt-get install gcc
-# ! apt-get install make
-# ! apt-get install libbz2-dev
-# ! apt-get install zlib1g-dev
-# ! apt-get install libncurses5-dev
-# ! apt-get install libncursesw5-dev
-# ! apt-get install liblzma-dev
-# ! cd /usr/bin
-# ! wget https://github.com/samtools/htslib/releases/download/1.17/htslib-1.17.tar.bz2
-# ! tar -vxjf htslib-1.17.tar.bz2
-# ! cd htslib-1.17 && ./configure && make && make install
-# ! export PATH="$PATH:/usr/bin/htslib-1.17"
-# ! source ~/.profile
+! tabix --version
 #%%
 import os
 

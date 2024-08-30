@@ -1,7 +1,5 @@
 # Set the root directory where the project will be set up
-USER=$1
-ROOT_DIR=/pmglocal/${USER}/GET_STARTED
-DATA_DIR=/burg/pmg/users/xf2217/get_data
+ROOT_DIR=$1
 
 # Check if the specified directory does not exist, and if so, create the necessary directories
 if [ ! -d $ROOT_DIR ]; then
@@ -34,13 +32,6 @@ mamba env create -f ${CODEBASE_DIR}/environment.yml -p ${ROOT_DIR}/mambaforge/ge
 
 # Activate the newly created mamba environment
 source activate ${ROOT_DIR}/mambaforge/get_started
-
-# Copy data from a specified location to the project directory
-#cp -r $DATA_DIR ${ROOT_DIR}/get_data
-
-# Navigate to the data directory and decompress all .tar files
-# cd ${ROOT_DIR}/get_data
-#for f in *.tar; do tar -xvf $f; done
 
 # Return to the codebase directory and install the package in editable mode
 cd $CODEBASE_DIR
