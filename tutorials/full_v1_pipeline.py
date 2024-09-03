@@ -21,7 +21,7 @@ from get_model.utils import print_shape
 # %%
 motif_bed_url = "https://resources.altius.org/~jvierstra/projects/motif-clustering/releases/v1.0/hg38.archetype_motifs.v1.0.bed.gz"
 motif_bed_index_url = "https://resources.altius.org/~jvierstra/projects/motif-clustering/releases/v1.0/hg38.archetype_motifs.v1.0.bed.gz.tbi"
-peak_bed = "/home/xf2217/Projects/pretrain_human_bingren_shendure_apr2023/fetal_adult/118.atac.bed"
+peak_bed = "astrocyte.atac.bed"
 reference_peaks = None
 
 if (
@@ -48,7 +48,7 @@ get_motif_output = get_motif(joint_peaks, peaks_motif)
 
 # %%
 # create peak motif zarr file
-create_peak_motif(get_motif_output, "output.zarr")
+create_peak_motif(get_motif_output, "output.zarr", peak_bed)
 # %%
 # add aTPM data for multiple cell types
 add_atpm(

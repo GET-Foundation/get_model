@@ -288,7 +288,7 @@ def get_motif(peak_file, motif_file):
     return "get_motif.bed"
 
 
-def create_peak_motif(peak_motif_bed, output_zarr):
+def create_peak_motif(peak_motif_bed, output_zarr, peak_bed):
     """
     Create a peak motif zarr file from a peak motif bed file.
 

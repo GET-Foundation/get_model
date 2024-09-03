@@ -39,3 +39,4 @@ test/abc
 *tsv
 experiments
 
+tutorials/*.zarr
