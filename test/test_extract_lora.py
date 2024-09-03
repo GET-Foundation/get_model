@@ -2,7 +2,7 @@
 #%%
 import minlora
 import torch
-from get_model.model.model_refactored import GETRegionFinetune, GETRegionFinetuneModelConfig
+from get_model.model.model import GETRegionFinetune, GETRegionFinetuneModelConfig
 # %%
 state_dict = torch.load('../GETRegionFinetune/gjs55hs9/checkpoints/last.ckpt')
 # %%

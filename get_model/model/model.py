@@ -1,34 +1,216 @@
-# simplified GET model
-import os
-from collections import OrderedDict
-from typing import Optional
+import logging
+from dataclasses import dataclass, field
 
-import hydra
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from omegaconf import DictConfig
-from timm.models.layers import trunc_normal_
-from timm.models.registry import register_model
+import torch.utils.data
+import torchmetrics
+from hydra.utils import instantiate
+from omegaconf import MISSING, DictConfig
+from torch.nn.init import trunc_normal_
 
-from get_model.model.modules import *
-from get_model.model.motif import parse_meme_file
-from get_model.model.pooling import (ATACSplitPool, ATACSplitPoolMaxNorm,
-                                     ConvPool, SplitPool)
-# from rotary_embedding_torch import RotaryEmbedding
-from get_model.model.position_encoding import (AbsolutePositionalEncoding,
-                                               CTCFPositionalEncoding)
-from get_model.model.transformer import GETTransformer
-from get_model.utils import freeze_layers, load_checkpoint, load_state_dict, remove_keys, rename_keys
+from get_model.model.modules import (ATACHead, ATACHeadConfig, ContactMapHead, ContactMapHeadConfig, ConvBlock, DistanceContactHead, DistanceContactHeadConfig, HiCHead, HiCHeadConfig,
+                                     ATACSplitPool,
+                                     ATACSplitPoolConfig, ATACSplitPoolMaxNorm,
+                                     ATACSplitPoolMaxNormConfig, BaseConfig,
+                                     BaseModule, ConvPool, ConvPoolConfig,
+                                     ExpressionHead, ExpressionHeadConfig,
+                                     MotifScanner, MotifScannerConfig,
+                                     RegionEmbed, RegionEmbedConfig, SplitPool, SplitPoolConfig)
+from get_model.model.position_encoding import AbsolutePositionalEncoding
+from get_model.model.transformer import GETTransformer, GETTransformerWithContactMap, GETTransformerWithContactMapAxial, GETTransformerWithContactMapOE
 
 
-class BaseGETModel(nn.Module):
-    def __init__(self, cfg):
-        super(BaseGETModel, self).__init__()
-        self.loss_specification = cfg.loss_specification
-        self.stats_specification = cfg.stats_specification
-        # Define common model properties and methods
-    
+class MNLLLoss(nn.Module):
+    def __init__(self):
+        """
+From @jmschrei/bpnet-lite
+A loss function based on the multinomial negative log-likelihood.
+
+    This loss function takes in a tensor of normalized log probabilities such
+    that the sum of each row is equal to 1 (e.g. from a log softmax) and
+    an equal sized tensor of true counts and returns the probability of
+    observing the true counts given the predicted probabilities under a
+    multinomial distribution. Can accept tensors with 2 or more dimensions
+    and averages over all except for the last axis, which is the number
+    of categories.
+
+    Adapted from Alex Tseng.
+
+    Parameters
+    ----------
+    logps: torch.tensor, shape=(n, ..., L)
+            A tensor with `n` examples and `L` possible categories.
+
+    true_counts: torch.tensor, shape=(n, ..., L)
+            A tensor with `n` examples and `L` possible categories.
+
+    Returns
+    -------
+    loss: float
+            The multinomial log likelihood loss of the true counts given the
+            predicted probabilities, averaged over all examples and all other
+            dimensions.
+        """
+        super().__init__()
+
+    def forward(self, logps, true_counts):
+        log_fact_sum = torch.lgamma(torch.sum(true_counts, dim=-1) + 1)
+        log_prod_fact = torch.sum(torch.lgamma(true_counts + 1), dim=-1)
+        log_prod_exp = torch.sum(true_counts * logps, dim=-1)
+        return (-log_fact_sum + log_prod_fact - log_prod_exp).mean()
+
+
+class log1pMSELoss(nn.Module):
+    def __init__(self):
+        """
+From @jmschrei/bpnet-lite
+A MSE loss on the log(x+1) of the inputs.
+
+    This loss will accept tensors of predicted counts and a vector of true
+    counts and return the MSE on the log of the labels. The squared error
+    is calculated for each position in the tensor and then averaged, regardless
+    of the shape.
+
+    Note: The predicted counts are in log space but the true counts are in the
+    original count space.
+
+    Parameters
+    ----------
+    log_predicted_counts: torch.tensor, shape=(n, ...)
+            A tensor of log predicted counts where the first axis is the number of
+            examples. Important: these values are already in log space.
+
+    true_counts: torch.tensor, shape=(n, ...)
+            A tensor of the true counts where the first axis is the number of
+            examples.
+
+    Returns
+    -------
+    loss: torch.tensor, shape=(n, 1)
+            The MSE loss on the log of the two inputs, averaged over all examples
+            and all other dimensions.
+    """
+        super().__init__()
+
+    def forward(self, log_predicted_counts, true_counts):
+        log_true = torch.log(true_counts + 1)
+        return torch.mean(torch.square(log_true - log_predicted_counts))
+
+
+@dataclass
+class LossConfig:
+    components: dict = MISSING
+    weights: dict = MISSING
+
+
+@dataclass
+class MetricsConfig:
+    components: dict = MISSING
+
+
+@dataclass
+class EncoderConfig:
+    num_heads: int = MISSING
+    embed_dim: int = MISSING
+    num_layers: int = MISSING
+    drop_path_rate: float = MISSING
+    drop_rate: float = MISSING
+    attn_drop_rate: float = MISSING
+    use_mean_pooling: bool = False
+    flash_attn: bool = MISSING
+
+
+class GETLoss(nn.Module):
+    def __init__(self, cfg: LossConfig):
+        """
+        Initializes the GETLoss class.
+
+        Args:
+            cfg (dict or object): The configuration for the loss function. If `cfg` is a dictionary, it should contain
+                the names and configurations of multiple loss functions. If `cfg` is an object, it should be a single
+                loss function configuration.
+
+        """
+        super(GETLoss, self).__init__()
+        self.cfg = cfg
+        if isinstance(cfg, DictConfig):
+            self.losses = {name: (
+                component, cfg.weights[f'{name}']) for name, component in cfg.components.items()}
+        else:
+            self.losses = instantiate(cfg)
+
+    def forward(self, pred, obs):
+        """Compute the loss"""
+        if isinstance(self.losses, dict):
+            return {f"{name}_loss": loss_fn(pred[name], obs[name]) * weight for name, (loss_fn, weight) in self.losses.items()}
+        elif isinstance(self.losses, nn.Module):
+            return self.losses(pred, obs)
+
+    def freeze_component(self, component_name):
+        """Freeze a component of the loss function by set the weight to 0"""
+        if component_name in self.losses:
+            self.losses[component_name] = (self.losses[component_name][0], 0)
+        else:
+            raise ValueError(
+                f"Component '{component_name}' not found in the loss function.")
+
+
+class RegressionMetrics(nn.Module):
+    def __init__(self, _cfg_: MetricsConfig):
+        super(RegressionMetrics, self).__init__()
+        self.cfg = _cfg_
+        self.metrics = nn.ModuleDict({
+            target: nn.ModuleDict({
+                metric_name: self._get_metric(metric_name) for metric_name in metric_names
+            }) for target, metric_names in _cfg_.components.items()
+        })
+
+    def _get_metric(self, metric_name):
+        if metric_name == 'pearson':
+            return torchmetrics.PearsonCorrCoef()
+        elif metric_name == 'spearman':
+            return torchmetrics.SpearmanCorrCoef()
+        elif metric_name == 'mse':
+            return torchmetrics.MeanSquaredError()
+        elif metric_name == 'r2':
+            return torchmetrics.R2Score()
+        else:
+            raise ValueError(f"Unsupported metric: {metric_name}")
+
+    def forward(self, _pred_, _obs_):
+        """Compute the metrics"""
+        batch_size = _pred_[list(_pred_.keys())[0]].shape[0]
+        result = {
+            target: {
+                metric_name: metric(
+                    _pred_[target].reshape(-1, 1),
+                    _obs_[target].reshape(-1, 1))
+                for metric_name, metric in target_metrics.items()
+            }
+            for target, target_metrics in self.metrics.items()
+        }
+        # flatten the result
+        result = {f"{target}_{metric_name}": result[target][metric_name]
+                  for target in result for metric_name in result[target]}
+        return result
+
+
+@dataclass
+class BaseGETModelConfig:
+    freezed: bool | str = False
+    loss: LossConfig = MISSING
+    metrics: MetricsConfig = MISSING
+
+
+class BaseGETModel(BaseModule):
+    def __init__(self, cfg: BaseConfig):
+        super().__init__(cfg)
+        self.cfg = cfg
+        self.loss = GETLoss(cfg.loss)
+        self.metrics = RegressionMetrics(cfg.metrics)
+
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             nn.init.xavier_uniform_(m.weight)
@@ -38,1210 +220,1603 @@ class BaseGETModel(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def reset_head(self, output_dim, global_pool=""):
-        self.output_dim = output_dim
-        self.head = (
-            nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
-        )
-
-    def data_prep(self, batch):
-        # Define the data preparation logic
+    def get_input(self, batch):
+        """Prepare the input for the model"""
         raise NotImplementedError
 
-    def forward(self, *args, **kwargs):
-        # Define the forward pass of the model
+    def forward(self, batch):
         raise NotImplementedError
 
-    def before_loss(self, *args, **kwargs):
-        # Define the training statistics
-        raise NotImplementedError
-    
-    def loss_fn(self):
-        # Define the loss function
+    def before_loss(self, output, batch):
+        """Prepare the output and target for the loss function
+        The goal is to construct either:
+        1. pred and obs tensors, in which case a defined loss function is applied to pred and obs
+        2. pred: {name: tensor} and obs: {name: tensor}, in which case we will use the
+        loss_cfg: {name: loss_fn} to determine the loss function for each name"""
         raise NotImplementedError
 
-    def test_stats(self, *args, **kwargs):
-        # Define the testing statistics
+    def after_loss(self, loss):
+        """Prepare the loss for the optimizer"""
+        if isinstance(loss, dict):
+            # combine losses
+            return sum(loss.values())
+        else:
+            return loss
+
+    def freeze_layers(self, patterns_to_freeze=None, invert_match=False):
+        """
+        Freeze layers in a model based on matching patterns.
+
+        Parameters:
+        - self (torch.nn.Module): The model whose layers will be frozen.
+        - patterns_to_freeze (list of str, optional): A list of string patterns. Layers matching any of these patterns will be frozen.
+        - invert_match (bool): If True, layers matching the patterns will remain trainable and all others will be frozen. Default is False.
+
+        If `patterns_to_freeze` is None or an empty list, and `invert_match` is False, no layers will be frozen.
+        If `patterns_to_freeze` is None or an empty list, and `invert_match` is True, all layers will be frozen.
+        """
+
+        # Ensure there's a list of patterns to check against.
+        if patterns_to_freeze is None:
+            patterns_to_freeze = []
+
+        for name, param in self.named_parameters():
+            # Determine if the current parameter name matches any pattern.
+            matches_pattern = any(
+                pattern in name for pattern in patterns_to_freeze)
+
+            # Decide whether to freeze based on `invert_match` and if the name matches any pattern.
+            should_freeze = matches_pattern if not invert_match else not matches_pattern
+
+            if should_freeze:
+                param.requires_grad = False
+                print(f"Freezed weights of {name}")
+
+    def generate_dummy_data(self):
+        """Return a dummy input for the model"""
         raise NotImplementedError
-    
-    def global_test_stats(self, *args, **kwargs):
-        # Define the global testing statistics
-        raise NotImplementedError
-    
+
+    def get_layer(self, layer_name):
+        if hasattr(self, layer_name):
+            return getattr(self, layer_name)
+        else:
+            raise ValueError(f"Layer '{layer_name}' not found in the model.")
+
+    def get_layer_names(self):
+        return list(self._modules.keys())
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {'pos_embed', 'cls_token'}
+
+
+@dataclass
+class GETPretrainModelConfig(BaseGETModelConfig):
+    num_regions: int = 10
+    num_motif: int = 637
+    embed_dim: int = 768
+    num_layers: int = 12
+    num_heads: int = 12
+    dropout: float = 0.1
+    output_dim: int = 800
+    flash_attn: bool = False
+    pool_method: str = 'mean'
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: ATACSplitPoolConfig = field(
+        default_factory=ATACSplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_mask: dict = field(default_factory=lambda: {
+                            'in_features': 768, 'out_features': 800})
+    mask_token: dict = field(default_factory=lambda: {
+                             'embed_dim': 768, 'std': 0.02})
+
+
+class GETPretrain(BaseGETModel):
+    def __init__(self, cfg: GETPretrainModelConfig):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        self.atac_attention = ATACSplitPool(cfg.atac_attention)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_mask = nn.Linear(**cfg.head_mask)
+        self.mask_token = nn.Parameter(
+            torch.zeros(1, 1, cfg.mask_token.embed_dim))
+        trunc_normal_(self.mask_token, std=cfg.mask_token.std)
+
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        return {'sample_peak_sequence': batch['sample_peak_sequence'],
+                'sample_track': batch['sample_track'],
+                'loss_mask': batch['loss_mask'],
+                'padding_mask': batch['padding_mask'],
+                'chunk_size': batch['chunk_size'],
+                'n_peaks': batch['n_peaks'],
+                'max_n_peaks': batch['max_n_peaks'],
+                'motif_mean_std': batch['motif_mean_std']}
+
+    def forward(self, sample_peak_sequence, sample_track, loss_mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+        x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
+        # x_region = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
+        x_original = self.atac_attention(
+            x, sample_track, chunk_size, n_peaks, max_n_peaks)
+        x = self.region_embed(x_original)
+        B, N, C = x_original.shape
+        mask_token = self.mask_token.expand(B, N, -1)
+        w = loss_mask.type_as(mask_token)
+        x = x * (1 - w) + mask_token * w
+        x, _ = self.encoder(x, mask=padding_mask)
+        x_masked = self.head_mask(x)
+        return x_masked, x_original, loss_mask
+
+    def before_loss(self, output, batch):
+        x_masked, x_original, loss_mask = output
+        pred = {'masked': x_masked * loss_mask}
+        obs = {'masked': x_original * loss_mask}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, L = 2, 10, 200
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'sample_track': torch.randn(B, R*L).float().abs(),
+            'loss_mask': torch.randint(0, 2, (B, R)).bool().unsqueeze(-1),
+            'padding_mask': torch.randint(0, 2, (B, R)).bool(),
+            'chunk_size':  torch.Tensor(([L]*R + [0]) * B).int().tolist(),
+            'n_peaks': (torch.zeros(B,) + R).int(),
+            'max_n_peaks': R,
+            'motif_mean_std': torch.randn(B, 2, 639).abs().float()
+        }
+
+
+@dataclass
+class GETPretrainMaxNormModelConfig(GETPretrainModelConfig):
+    atac_attention: ATACSplitPoolMaxNormConfig = field(
+        default_factory=ATACSplitPoolMaxNormConfig)
+
+
+class GETPretrainMaxNorm(GETPretrain):
+    def __init__(self, cfg: GETPretrainMaxNormModelConfig):
+        super().__init__(cfg)
+        self.atac_attention = ATACSplitPoolMaxNorm(cfg.atac_attention)
+
+
+@dataclass
+class GETFinetuneModelConfig(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: ATACSplitPoolConfig = field(
+        default_factory=ATACSplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    use_atac: bool = False
+    final_bn: bool = False
+
+
 class GETFinetune(BaseGETModel):
-    """A GET model for finetuning using classification head."""
+    def __init__(self, cfg: GETFinetuneModelConfig):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        self.atac_attention = ATACSplitPool(cfg.atac_attention)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
 
-    def __init__(
-        self,
-        num_regions=200,
-        num_motif=637,
-        motif_dim=639,
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=1,
-        pos_emb_components=["CTCF", "Rotary", "Absolute"],
-        atac_attention=True,
-        flash_attn=False,
-        atac_kernel_num=16,
-        atac_kernel_size=3,
-        joint_kernel_num=16,
-        joint_kernel_size=3,
-        use_atac=False,
-        final_bn=False,
-    ):
-        super().__init__()
-        self.num_regions = num_regions
-        self.num_motif = num_motif
-        self.num_res_block = num_res_block
-        self.motif_prior = motif_prior
-        self.embed_dim = embed_dim
-        self.num_layers = num_layers
-        self.d_model = d_model
-        self.nhead = nhead
-        self.dropout = dropout
-        self.output_dim = output_dim
-        self.pos_emb_components = pos_emb_components
-        self.atac_kernel_num = atac_kernel_num
-        self.atac_kernel_size = atac_kernel_size
-        self.joint_kernel_num = joint_kernel_num
-        self.joint_kernel_size = joint_kernel_size
-        self.motif_scanner = MotifScanner(
-            num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True,
-            motif_prior=motif_prior,
-            learnable=False,
-        )
-        self.atac_attention = ATACSplitPool(
-            pool_method='mean',
-            atac_kernel_num=atac_kernel_num,
-            motif_dim=motif_dim,
-            joint_kernel_num=joint_kernel_num,
-            atac_kernel_size=atac_kernel_size,
-            joint_kernel_size=joint_kernel_size,
-            final_bn=final_bn,
-        )
-        # self.split_pool = SplitPool()
-        self.region_embed = RegionEmbed(num_regions, motif_dim+joint_kernel_num, embed_dim)
-        self.pos_embed = []
-        if "CTCF" in self.pos_emb_components: 
-            self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
-        # if "Rotary" in self.pos_emb_components:
-            # self.pos_embed.append(RotaryEmbedding(embed_dim))
-        if "Absolute" in self.pos_emb_components:
-            self.pos_embed.append(AbsolutePositionalEncoding(embed_dim))
-        self.pos_embed = nn.ModuleList(self.pos_embed)
-        self.encoder = GETTransformer(
-            d_model,
-            nhead,
-            num_layers,
-            drop_path_rate=dropout,
-            drop_rate=dropout,
-            attn_drop_rate=dropout,
-            use_mean_pooling=False,
-            flash_attn=flash_attn,
-        )
-        # self.head_atac = nn.Conv1d(d_model, 1, 1)
-        # self.head_mask = nn.Linear(d_model, output_dim)
-        self.head_exp = (
-            ExpressionHead(d_model, output_dim, use_atac)
-            if output_dim > 0
-            else nn.Identity()
-        )
-        # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        # trunc_normal_(self.mask_token, std=0.02)
         self.apply(self._init_weights)
 
-    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels):
-        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
-        # peak_seq: [B, L, 4]
-        # [B, L, 4] --> [B, L, 1274]
-        x = self.motif_scanner(peak_seq)
-        x = x - motif_mean_std[:,0, :].unsqueeze(1)
-        x = x / motif_mean_std[:,1, :].unsqueeze(1)
-        x = F.relu(x)
-        # [B, L, 1274] --> [B, R, 1274]
-        # gloabl pooling inner product with peak
-        x_original = self.atac_attention(x, atac, chunk_size, n_peaks, max_n_peaks)
-        # x = self.atac_attention(x, atac)
-        # x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
+    def get_input(self, batch):
+        return {
+            'sample_peak_sequence': batch['sample_peak_sequence'],
+            'sample_track': batch['sample_track'],
+            'padding_mask': batch['padding_mask'],
+            'chunk_size': batch['chunk_size'],
+            'n_peaks': batch['n_peaks'],
+            'max_n_peaks': batch['max_n_peaks'],
+            'motif_mean_std': batch['motif_mean_std'],
+        }
 
+    def forward(self, sample_peak_sequence, sample_track, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+        x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
+        x_original = self.atac_attention(
+            x, sample_track, chunk_size, n_peaks, max_n_peaks)
         x = self.region_embed(x_original)
-        B, N, C = x_original.shape
-
-
-        for pos_emb_component in self.pos_embed:
-            if isinstance(pos_emb_component, CTCFPositionalEncoding):
-                x = pos_emb_component(x, ctcf_pos)
-            else:
-                x = pos_emb_component(x)
-
-        tss_mask = None # TODO: Set tss_mask to None for now
-        x, _ = self.encoder(x, mask=padding_mask)
-        # atac = F.softplus(self.head_atac(x.permute(0, 2, 1))).permute(0, 2, 1).squeeze(-1)
-        atac = None
-
-        exp = F.softplus(self.head_exp(x, atac))
-        return atac, exp, None
-
-class GETFinetuneExpATAC(nn.Module):
-    """A GET model for finetuning using classification head."""
-
-    def __init__(
-        self,
-        num_regions=200,
-        num_motif=637,
-        motif_dim=639,
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=1,
-        pos_emb_components=["CTCF", "Rotary", "Absolute"],
-        atac_attention=True,
-        flash_attn=False,
-        atac_kernel_num=16,
-        atac_kernel_size=3,
-        joint_kernel_num=16,
-        joint_kernel_size=3,
-        use_atac=False,
-        final_bn=False,
-    ):
-        super().__init__()
-        self.num_regions = num_regions
-        self.num_motif = num_motif
-        self.num_res_block = num_res_block
-        self.motif_prior = motif_prior
-        self.embed_dim = embed_dim
-        self.num_layers = num_layers
-        self.d_model = d_model
-        self.nhead = nhead
-        self.dropout = dropout
-        self.output_dim = output_dim
-        self.pos_emb_components = pos_emb_components
-        self.atac_kernel_num = atac_kernel_num
-        self.atac_kernel_size = atac_kernel_size
-        self.joint_kernel_num = joint_kernel_num
-        self.joint_kernel_size = joint_kernel_size
-        self.motif_scanner = MotifScanner(
-            num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True,
-            motif_prior=motif_prior,
-            learnable=False,
-        )
-        self.atac_attention = ATACSplitPool(
-            pool_method='mean',
-            atac_kernel_num=atac_kernel_num,
-            motif_dim=motif_dim,
-            joint_kernel_num=joint_kernel_num,
-            atac_kernel_size=atac_kernel_size,
-            joint_kernel_size=joint_kernel_size,
-            final_bn=final_bn,
-        )
-        # self.split_pool = SplitPool()
-        self.region_embed = RegionEmbed(num_regions, motif_dim+joint_kernel_num, embed_dim)
-        self.pos_embed = []
-        if "CTCF" in self.pos_emb_components: 
-            self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
-        # if "Rotary" in self.pos_emb_components:
-            # self.pos_embed.append(RotaryEmbedding(embed_dim))
-        if "Absolute" in self.pos_emb_components:
-            self.pos_embed.append(AbsolutePositionalEncoding(embed_dim))
-        self.pos_embed = nn.ModuleList(self.pos_embed)
-        self.encoder = GETTransformer(
-            d_model,
-            nhead,
-            num_layers,
-            drop_path_rate=dropout,
-            drop_rate=dropout,
-            attn_drop_rate=dropout,
-            use_mean_pooling=False,
-            flash_attn=flash_attn,
-        )
-        self.head_atac = ATACHead(motif_dim+joint_kernel_num, d_model, 1)
-        # self.head_mask = nn.Linear(d_model, output_dim)
-        self.head_exp = (
-            ExpressionHead(d_model, output_dim, use_atac)
-            if output_dim > 0
-            else nn.Identity()
-        )
-        self.head_confidence = (
-            ExpressionHead(d_model, 50, use_atac)
-            if output_dim > 0
-            else nn.Identity()
-        )
-        # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        # trunc_normal_(self.mask_token, std=0.02)
-        self.apply(self._init_weights)
-
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-
-    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels):
-        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
-        # peak_seq: [B, L, 4]
-        # [B, L, 4] --> [B, L, 1274]
-        x = self.motif_scanner(peak_seq)
-        x = x - motif_mean_std[:,0, :].unsqueeze(1)
-        x = x / motif_mean_std[:,1, :].unsqueeze(1)
-        x = F.relu(x)
-        # [B, L, 1274] --> [B, R, 1274]
-        # gloabl pooling inner product with peak
-        
-        x_original = self.atac_attention(x, atac, chunk_size, n_peaks, max_n_peaks)
-        # x = self.atac_attention(x, atac)
-        # x_original = self.split_pool(x         , chunk_size, n_peaks, max_n_peaks)
-        tss_mask = other_labels[:,:, 1]
-        # x_original = torch.cat([x_original, atpm], dim=-1)
-        atpm = F.softplus(self.head_atac(x_original))
-        x = self.region_embed(x_original)
-
-        B, N, C = x_original.shape
-
-
-        for pos_emb_component in self.pos_embed:
-            if isinstance(pos_emb_component, CTCFPositionalEncoding):
-                x = pos_emb_component(x, ctcf_pos)
-            else:
-                x = pos_emb_component(x)
 
         x, _ = self.encoder(x, mask=padding_mask)
-        exp = F.softplus(self.head_exp(x, None))
-        confidence = F.softplus(self.head_confidence(x, None))
-        return atpm, exp, confidence
+        exp = F.softplus(self.head_exp(x))
+        return exp
 
-    def reset_head(self, output_dim):
-        self.output_dim = output_dim
-        self.head_exp = (
-            nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
-        )
-        self.head_atac = ATACHead(self.embed_dim, self.d_model, 1)
-        self.head_confidence = ExpressionHead(self.embed_dim, 50, False)
+    def before_loss(self, output, batch):
+        pred = {'exp': output}
+        obs = {'exp': batch['exp_label']}
+        return pred, obs
 
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {"pos_embed", "cls_token"}
-
-class GETFinetuneATAC(nn.Module):
-    """A GET model for finetuning using classification head."""
-
-    def __init__(
-        self,
-        num_regions=200,
-        num_motif=637,
-        motif_dim=639,
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=1,
-        pos_emb_components=["CTCF", "Rotary", "Absolute"],
-        atac_attention=True,
-        flash_attn=False,
-        atac_kernel_num=16,
-        atac_kernel_size=3,
-        joint_kernel_num=16,
-        joint_kernel_size=3,
-        use_atac=True,
-        final_bn=False,
-    ):
-        super().__init__()
-        self.num_regions = num_regions
-        self.num_motif = num_motif
-        self.num_res_block = num_res_block
-        self.motif_prior = motif_prior
-        self.embed_dim = embed_dim
-        self.num_layers = num_layers
-        self.d_model = d_model
-        self.nhead = nhead
-        self.dropout = dropout
-        self.output_dim = output_dim
-        self.pos_emb_components = pos_emb_components
-        self.atac_kernel_num = atac_kernel_num
-        self.atac_kernel_size = atac_kernel_size
-        self.joint_kernel_num = joint_kernel_num
-        self.joint_kernel_size = joint_kernel_size
-        self.motif_scanner = MotifScanner(
-            num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True,
-            motif_prior=motif_prior,
-            learnable=False,
-        )
-        self.atac_attention = ATACSplitPool(
-            pool_method='mean',
-            atac_kernel_num=atac_kernel_num,
-            motif_dim=motif_dim,
-            joint_kernel_num=joint_kernel_num,
-            atac_kernel_size=atac_kernel_size,
-            joint_kernel_size=joint_kernel_size,
-            final_bn=final_bn,
-        )
-        # self.split_pool = SplitPool()
-        self.region_embed = RegionEmbed(num_regions, motif_dim+joint_kernel_num, embed_dim)
-        self.pos_embed = []
-        if "CTCF" in self.pos_emb_components: 
-            self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
-        # if "Rotary" in self.pos_emb_components:
-            # self.pos_embed.append(RotaryEmbedding(embed_dim))
-        if "Absolute" in self.pos_emb_components:
-            self.pos_embed.append(AbsolutePositionalEncoding(embed_dim))
-        self.pos_embed = nn.ModuleList(self.pos_embed)
-        
-        self.encoder = GETTransformer(
-            d_model,
-            nhead,
-            num_layers,
-            drop_path_rate=dropout,
-            drop_rate=dropout,
-            attn_drop_rate=dropout,
-            use_mean_pooling=False,
-            flash_attn=flash_attn,
-        )
-        self.head_atac = ATACHead(d_model, 1)
-        # self.head_mask = nn.Linear(d_model, output_dim)
-        self.head_exp = (
-            ExpressionHead(d_model, output_dim, use_atac)
-            if output_dim > 0
-            else nn.Identity()
-        )
-        # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        # trunc_normal_(self.mask_token, std=0.02)
-        self.apply(self._init_weights)
+    def generate_dummy_data(self):
+        B, R, L = 2, 10, 200
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'sample_track': torch.randn(B, R*L).float().abs(),
+            'padding_mask': torch.randint(0, 2, (B, R)).bool(),
+            'chunk_size':  torch.Tensor(([L]*R + [0]) * B).int().tolist(),
+            'n_peaks': (torch.zeros(B,) + R).int(),
+            'max_n_peaks': R,
+            'motif_mean_std': torch.randn(B, 2, 639).abs().float(),
+        }
 
 
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
+@dataclass
+class GETFinetuneGBMConfig(GETFinetuneModelConfig):
+    head_atac: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
 
-    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
-        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
-        # peak_seq: [B, L, 4]
-        # [B, L, 4] --> [B, L, 1274]
-        x = self.motif_scanner(peak_seq)
-        x = x - motif_mean_std[:,0, :].unsqueeze(1)
-        x = x / motif_mean_std[:,1, :].unsqueeze(1)
-        x = F.relu(x)
-        # [B, L, 1274] --> [B, R, 1274]
-        # gloabl pooling inner product with peak
-        x_original = self.atac_attention(x, atac, chunk_size, n_peaks, max_n_peaks)
-        # x = self.atac_attention(x, atac)
-        # x_original = self.split_pool(x, chunk_size, n_peaks, max_n_peaks)
 
+class GETFinetuneGBM(GETFinetune):
+    def __init__(self, cfg: GETFinetuneGBMConfig):
+        super().__init__(cfg)
+        self.head_atac = ATACHead(cfg.head_atac)
+
+    def forward(self, sample_peak_sequence, sample_track, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+        x = self.motif_scanner(sample_peak_sequence, motif_mean_std)
+        x_original = self.atac_attention(
+            x, sample_track, chunk_size, n_peaks, max_n_peaks)
         x = self.region_embed(x_original)
-        B, N, C = x_original.shape
-
-
-        for pos_emb_component in self.pos_embed:
-            if isinstance(pos_emb_component, CTCFPositionalEncoding):
-                x = pos_emb_component(x, ctcf_pos)
-            else:
-                x = pos_emb_component(x)
-
-        tss_mask = None # TODO: Set tss_mask to None for now
-        x, _ = self.encoder(x, mask=padding_mask)
-        atac = F.softplus(self.head_atac(x.permute(0, 2, 1))).permute(0, 2, 1).squeeze(-1)
-
-        exp = F.softplus(self.head_exp(x, atac))
-        return atac, exp, None
-
-    def reset_head(self, output_dim):
-        self.output_dim = output_dim
-        self.head_exp = (
-            nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
-        )
-
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {"pos_embed", "cls_token"}
-
-class GETFinetuneExpATACFromSequence(nn.Module):
-    """A GET model for finetuning using classification head."""
-
-    def __init__(
-        self,
-        num_regions=200,
-        num_motif=637,
-        motif_dim=639,
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=1,
-        pos_emb_components=["CTCF", "Rotary", "Absolute"],
-        flash_attn=False,
-        use_atac=False,
-    ):
-        super().__init__()
-        self.num_regions = num_regions
-        self.num_motif = num_motif
-        self.num_res_block = num_res_block
-        self.motif_prior = motif_prior
-        self.embed_dim = embed_dim
-        self.motif_dim = motif_dim
-        self.num_layers = num_layers
-        self.d_model = d_model
-        self.nhead = nhead
-        self.dropout = dropout
-        self.output_dim = output_dim
-        self.pos_emb_components = pos_emb_components
-        self.motif_scanner = MotifScanner(
-            num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True,
-            motif_prior=motif_prior,
-            learnable=False,
-        )
-        self.atac_attention = SplitPool(
-            pool_method='mean',
-        )
-        # self.split_pool = SplitPool()
-        self.region_embed = RegionEmbed(num_regions, motif_dim, embed_dim)
-        self.pos_embed = []
-        if "CTCF" in self.pos_emb_components: 
-            self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
-        # if "Rotary" in self.pos_emb_components:
-            # self.pos_embed.append(RotaryEmbedding(embed_dim))
-        if "Absolute" in self.pos_emb_components:
-            self.pos_embed.append(AbsolutePositionalEncoding(embed_dim))
-        self.pos_embed = nn.ModuleList(self.pos_embed)
-        self.encoder = GETTransformer(
-            d_model,
-            nhead,
-            num_layers,
-            drop_path_rate=dropout,
-            drop_rate=dropout,
-            attn_drop_rate=dropout,
-            use_mean_pooling=False,
-            flash_attn=flash_attn,
-        )
-        self.head_atac = ATACHead(motif_dim, d_model, 1)
-        # self.head_mask = nn.Linear(d_model, output_dim)
-        self.head_exp = (
-            ExpressionHead(d_model, output_dim, use_atac)
-            if output_dim > 0
-            else nn.Identity()
-        )
-        self.head_confidence = (
-            ExpressionHead(d_model, 50, use_atac)
-            if output_dim > 0
-            else nn.Identity()
-        )
-        # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        # trunc_normal_(self.mask_token, std=0.02)
-        self.apply(self._init_weights)
-
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-
-    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels):
-        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
-        # peak_seq: [B, L, 4]
-        # [B, L, 4] --> [B, L, 1274]
-        x = self.motif_scanner(peak_seq)
-        x = x - motif_mean_std[:,0, :].unsqueeze(1)
-        x = x / motif_mean_std[:,1, :].unsqueeze(1)
-        x = F.relu(x)
-        # [B, L, 1274] --> [B, R, 1274]
-        # gloabl pooling inner product with peak
-        x_original = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
-        # x = self.atac_attention(x, atac)
-        atpm = F.softplus(self.head_atac(x_original))
-
-        # x_original = self.split_pool(x         , chunk_size, n_peaks, max_n_peaks)
-        tss_mask = other_labels[:,:, 1]
-        # x_original = torch.cat([x_original, atpm], dim=-1)
-        
-        x = self.region_embed(x_original)
-
-        B, N, C = x_original.shape
-
-
-        for pos_emb_component in self.pos_embed:
-            if isinstance(pos_emb_component, CTCFPositionalEncoding):
-                x = pos_emb_component(x, ctcf_pos)
-            else:
-                x = pos_emb_component(x)
 
         x, _ = self.encoder(x, mask=padding_mask)
-        exp = F.softplus(self.head_exp(x, None))
-        confidence = F.softplus(self.head_confidence(x, None))
-        return atpm, exp, confidence
+        exp = F.softplus(self.head_exp(x))
+        atac = F.softplus(self.head_atac(x_original))
+        return exp, atac
 
-    def reset_head(self, output_dim):
-        self.output_dim = output_dim
-        self.head_exp = (
-            nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
-        )
-        self.head_atac = ATACHead(self.motif_dim, self.d_model, 1)
-        self.head_confidence = ExpressionHead(self.embed_dim, 50, False)
+    def before_loss(self, output, batch):
+        pred = {'exp': output[0], 'atac': output[1]}
+        obs = {'exp': batch['exp_label'], 'atac': batch['atpm'].unsqueeze(-1)}
+        return pred, obs
 
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {"pos_embed", "cls_token"}
 
-class GETFinetuneExpATACWithHiC(nn.Module):
-    """A GET model for finetuning using classification head."""
+@dataclass
+class GETFinetuneMaxNormModelConfig(GETFinetuneModelConfig):
+    atac_attention: ATACSplitPoolMaxNormConfig = MISSING
 
-    def __init__(
-        self,
-        num_regions=200,
-        num_motif=637,
-        motif_dim=639,
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=1,
-        pos_emb_components=["CTCF", "Rotary", "Absolute"],
-        atac_attention=True,
-        flash_attn=False,
-        atac_kernel_num=16,
-        atac_kernel_size=3,
-        joint_kernel_num=16,
-        joint_kernel_size=3,
-        use_atac=False,
-        final_bn=False,
-    ):
-        super().__init__()
-        self.num_regions = num_regions
-        self.num_motif = num_motif
-        self.num_res_block = num_res_block
-        self.motif_prior = motif_prior
-        self.embed_dim = embed_dim
-        self.num_layers = num_layers
-        self.d_model = d_model
-        self.nhead = nhead
-        self.dropout = dropout
-        self.output_dim = output_dim
-        self.pos_emb_components = pos_emb_components
-        self.atac_kernel_num = atac_kernel_num
-        self.atac_kernel_size = atac_kernel_size
-        self.joint_kernel_num = joint_kernel_num
-        self.joint_kernel_size = joint_kernel_size
-        self.motif_scanner = MotifScanner(
-            num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True,
-            motif_prior=motif_prior,
-            learnable=False,
-        )
-        self.atac_attention = ATACSplitPool(
-            pool_method='mean',
-            atac_kernel_num=atac_kernel_num,
-            motif_dim=motif_dim,
-            joint_kernel_num=joint_kernel_num,
-            atac_kernel_size=atac_kernel_size,
-            joint_kernel_size=joint_kernel_size,
-            final_bn=final_bn,
-            binary_atac=True,
-        )
-        # self.split_pool = SplitPool()
-        self.region_embed = RegionEmbed(num_regions, motif_dim+joint_kernel_num, embed_dim)
-        self.pos_embed = []
-        if "CTCF" in self.pos_emb_components: 
-            self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
-        # if "Rotary" in self.pos_emb_components:
-            # self.pos_embed.append(RotaryEmbedding(embed_dim))
-        if "Absolute" in self.pos_emb_components:
-            self.pos_embed.append(AbsolutePositionalEncoding(embed_dim))
-        self.pos_embed = nn.ModuleList(self.pos_embed)
-        self.encoder = GETTransformer(
-            d_model,
-            nhead,
-            num_layers,
-            drop_path_rate=dropout,
-            drop_rate=dropout,
-            attn_drop_rate=dropout,
-            use_mean_pooling=False,
-            flash_attn=flash_attn,
-        )
-        self.head_atac = ATACHead(motif_dim+joint_kernel_num, d_model, 1)
-        # self.head_mask = nn.Linear(d_model, output_dim)
-        self.head_exp = (
-            ExpressionHead(d_model, output_dim, use_atac)
-            if output_dim > 0
-            else nn.Identity()
-        )
-        self.head_confidence = (
-            ExpressionHead(d_model, 50, use_atac)
-            if output_dim > 0
-            else nn.Identity()
-        )
-        # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        # trunc_normal_(self.mask_token, std=0.02)
+
+class GETFinetuneMaxNorm(GETFinetune):
+    def __init__(self, cfg: GETFinetuneMaxNormModelConfig):
+        super().__init__(cfg)
+        self.atac_attention = ATACSplitPoolMaxNorm(cfg.atac_attention)
+
+
+@dataclass
+class GETRegionPretrainModelConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_mask: dict = field(default_factory=lambda: {
+                            'in_features': 768, 'out_features': 283})
+    mask_token: dict = field(default_factory=lambda: {
+                             'embed_dim': 768, 'std': 0.02})
+
+
+class GETRegionPretrain(BaseGETModel):
+    def __init__(self, cfg: GETRegionPretrainModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_mask = nn.Linear(**cfg.head_mask)
+        self.mask_token = nn.Parameter(
+            torch.zeros(1, 1, cfg.mask_token.embed_dim))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        trunc_normal_(self.mask_token, std=cfg.mask_token.std)
+
         self.apply(self._init_weights)
 
+    def get_input(self, batch):
+        return {
+            'region_motif': batch['region_motif'],
+            'mask': batch['mask'].unsqueeze(-1).bool()
+        }
+
+    def forward(self, region_motif, mask):
+        x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        mask_token = self.mask_token.expand(B, N, -1)
+        w = mask.type_as(mask_token)
+        x = x * (1 - w) + mask_token * w
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, _ = self.encoder(x)
+        x = x[:, 1:][mask.squeeze()].reshape(B, -1, C)
+        x_masked = self.head_mask(x)
+        return x_masked, region_motif, mask
+
+    def before_loss(self, output, batch):
+        x_masked, x_original, loss_mask = output
+        B, _, C = x_original.shape
+        pred = {'masked': x_masked}
+        obs = {'masked': x_original[loss_mask.squeeze()].reshape(B, -1, C)}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+        }
+
+
+@dataclass
+class GETRegionFinetuneModelConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    use_atac: bool = False
+
+
+class GETRegionFinetune(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+        return {
+            'region_motif': batch['region_motif'],
+        }
+
+    def forward(self, region_motif):
+
+        x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, _ = self.encoder(x)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        return exp
+
+    def before_loss(self, output, batch):
+
+        pred = {'exp': output}
+        obs = {'exp': batch['exp_label']}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+        }
+
+
+class GETRegionFinetunePositional(GETRegionFinetune):
+    def __init__(self, cfg: GETRegionFinetuneModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.pos_embed = AbsolutePositionalEncoding(
+            cfg.region_embed.embed_dim, dropout=0.1, max_len=1000)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+        return {
+            'region_motif': batch['region_motif'],
+        }
+
+    def forward(self, region_motif):
+
+        x = self.region_embed(region_motif)
+        x = self.pos_embed(x)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, _ = self.encoder(x)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        return exp
+
+    def before_loss(self, output, batch):
+
+        pred = {'exp': output}
+        obs = {'exp': batch['exp_label']}
+        return pred, obs
+
+
+@dataclass
+class MLPRegionFinetuneModelConfig(BaseGETModelConfig):
+    use_atac: bool = False
+    input_dim: int = 283
+    output_dim: int = 2
+
+
+class MLPRegionFinetune(GETRegionFinetune):
+    def __init__(self, cfg: MLPRegionFinetuneModelConfig):
+        super(GETRegionFinetune, self).__init__(cfg)
+        self.linear1 = torch.nn.Linear(cfg.input_dim, 512)
+        self.relu1 = torch.nn.ReLU()
+        self.linear2 = torch.nn.Linear(512, 256)
+        self.relu2 = torch.nn.ReLU()
+        self.linear3 = torch.nn.Linear(256, cfg.output_dim)
+
+    def forward(self, region_motif):
+        x = self.linear1(region_motif)
+        x = self.relu1(x)
+        x = self.linear2(x)
+        x = self.relu2(x)
+        x = self.linear3(x)
+        x = torch.nn.Softplus()(x)
+        return x
+
+
+@dataclass
+class GETRegionFinetuneATACModelConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+
+
+class GETRegionFinetuneATAC(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        input = batch['region_motif'].clone()
+        input[:, :, -1] = 1
+        return {
+            'region_motif': input,
+        }
+
+    def forward(self, region_motif):
+
+        x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, _ = self.encoder(x)
+        x = x[:, 1:]
+        atpm = nn.Softplus()(self.head_exp(x))
+        return atpm
+
+    def before_loss(self, output, batch):
+
+        pred = {'atpm': output}
+        obs = {'atpm': batch['region_motif'][:, :, -1].unsqueeze(-1)}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+        }
+
+
+@dataclass
+class GETRegionFinetuneHiCModelConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_hic: HiCHeadConfig = field(
+        default_factory=HiCHeadConfig)
+
+
+class GETRegionFinetuneHiC(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneHiCModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_hic = HiCHead(cfg.head_hic)
+
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        return {
+            'region_motif': batch['region_motif'],
+        }
+
+    def forward(self, region_motif):
+
+        x = self.region_embed(region_motif)
+
+        x, _ = self.encoder(x)
+        hic = self.head_hic(x)
+        return hic
+
+    def before_loss(self, output, batch):
+
+        pred = {'hic': output.squeeze(-1)}
+        obs = {'hic': batch['hic_matrix'].float()}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+        }
+
+
+@dataclass
+class DistanceContactMapModelConfig(BaseGETModelConfig):
+    pass
+
+
+class DistanceContactMap(BaseGETModel):
+    """A simple and small Conv2d model to predict the contact map from the log distance map.
+    The output has the same shape as the input distance map.
+    """
+
+    def __init__(self, cfg: DistanceContactMapModelConfig):
+        super().__init__(cfg)
+        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.conv3 = nn.Conv2d(64, 1, 3, padding=1)
+        self.apply(self._init_weights)
 
     def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
+        if isinstance(m, nn.Conv2d):
             nn.init.xavier_uniform_(m.weight)
-            if isinstance(m, nn.Linear) and m.bias is not None:
+            if isinstance(m, nn.Conv2d) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels, hic_matrix):
-        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
-        # peak_seq: [B, L, 4]
-        # [B, L, 4] --> [B, L, 1274]
-        x = self.motif_scanner(peak_seq)
-        x = x - motif_mean_std[:,0, :].unsqueeze(1)
-        x = x / motif_mean_std[:,1, :].unsqueeze(1)
-        x = F.relu(x)
-        # [B, L, 1274] --> [B, R, 1274]
-        # gloabl pooling inner product with peak
-        
-        x_original = self.atac_attention(x, atac, chunk_size, n_peaks, max_n_peaks)
-        # x = self.atac_attention(x, atac)
-        # x_original = self.split_pool(x         , chunk_size, n_peaks, max_n_peaks)
-        tss_mask = other_labels[:,:, 1]
-        # x_original = torch.cat([x_original, atpm], dim=-1)
-        atpm = F.softplus(self.head_atac(x_original))
-        x = self.region_embed(x_original)
+    def forward(self, distance_map):
+        x = F.gelu(self.conv1(distance_map))
+        x = F.gelu(self.conv2(x))
+        x = self.conv3(x)
+        hic = F.softplus(x)
+        return hic
 
-        B, N, C = x_original.shape
+    def get_input(self, batch):
+        peak_coord = batch['peak_coord']
+        peak_coord_mean = peak_coord[:, :, 0]
+        # pair-wise distance using torch
+        # Add new dimensions to create column and row vectors
+        peak_coord_mean_col = peak_coord_mean.unsqueeze(
+            2)  # Adds a new axis (column vector)
+        peak_coord_mean_row = peak_coord_mean.unsqueeze(
+            1)  # Adds a new axis (row vector)
+
+        # Compute the pairwise difference
+        distance = torch.log10(
+            (peak_coord_mean_col - peak_coord_mean_row).abs() + 1).unsqueeze(1)
+        return {
+            'distance_map': distance,
+        }
+
+    def before_loss(self, output, batch):
+        pred = {'hic': output.squeeze(1)}
+        obs = {'hic': batch['hic_matrix'].float()}
+        # if a element in batch['hic_matrix'].sum(1).sum(1) == 0, we should ignore the loss for that element
+        if (batch['hic_matrix'].sum(1).sum(1) == 0).any():
+            mask = batch['hic_matrix'].sum(1).sum(1) != 0
+            obs['hic'][mask] = pred['hic'][mask].detach()
+
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R = 2, 900
+        return {
+            'distance_map': torch.randn(B, 1, R, R).float(),
+        }
 
 
-        for pos_emb_component in self.pos_embed:
-            if isinstance(pos_emb_component, CTCFPositionalEncoding):
-                x = pos_emb_component(x, ctcf_pos)
-            else:
-                x = pos_emb_component(x)
+@dataclass
+class GETRegionFinetuneExpHiCABCConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    header_hic: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    header_abc: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    distance_contact_map: DistanceContactHeadConfig = field(
+        default_factory=DistanceContactHeadConfig)
 
-        x, _ = self.encoder(x, mask=padding_mask, bias=hic_matrix)
-        exp = F.softplus(self.head_exp(x, None))
-        confidence = F.softplus(self.head_confidence(x, None))
-        return atpm, exp, confidence
 
-    def reset_head(self, output_dim):
-        self.output_dim = output_dim
-        self.head_exp = (
-            nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
-        )
-        self.head_atac = ATACHead(self.embed_dim, self.d_model, 1)
-        self.head_confidence = ExpressionHead(self.embed_dim, 50, False)
+class GETRegionFinetuneExpHiCABC(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneExpHiCABCConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformerWithContactMap(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.hic_header = ContactMapHead(cfg.header_hic)
+        self.abc_header = ContactMapHead(cfg.header_abc)
+        self.distance_contact_map = DistanceContactHead(
+            cfg.distance_contact_map)
+        self.distance_contact_map.eval()
+        self.proj_distance = nn.Linear(cfg.embed_dim, 128)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        logging.info(
+            f"GETRegionFinetuneExpHiCABC can only be used with quantitative_atac=True in order to generate the ABC score.")
+        self.apply(self._init_weights)
 
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {"pos_embed", "cls_token"}
+    def get_input(self, batch, perturb=False):
+        peak_coord = batch['peak_coord']
+        peak_coord_mean = peak_coord[:, :, 0]
+        # pair-wise distance using torch
+        # Add new dimensions to create column and row vectors
+        peak_coord_mean_col = peak_coord_mean.unsqueeze(
+            2)  # Adds a new axis (column vector)
+        peak_coord_mean_row = peak_coord_mean.unsqueeze(
+            1)  # Adds a new axis (row vector)
 
-class GETFinetuneChrombpNet(nn.Module):
-    def __init__(
-        self,
-        num_motif=637,
-        motif_dim=639,
-        embed_dim=768,
-        num_regions=200,
-        motif_prior=True,
-        learnable_motif=False,
-        num_layers=7,
-        d_model=768,
-        nhead=1,
-        dropout=0.1,
-        output_dim=1,
-        with_bias=False,
-        bias_ckpt=None,
-    ):
-        super().__init__()
-        self.num_regions = num_regions
-        self.num_motif = num_motif
-        self.motif_prior = motif_prior
-        self.embed_dim = embed_dim
-        self.num_layers = num_layers
-        self.d_model = d_model
-        self.nhead = nhead
-        self.dropout = dropout
-        self.output_dim = output_dim
-        self.motif_scanner = MotifScanner(
-            num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True,
-            motif_prior=motif_prior,
-            learnable=learnable_motif,
-        )
-        self.atac_attention = ConvPool(
-            pool_method='mean',
-            n_dil_layers=self.num_layers,
-            motif_dim=motif_dim,
-            hidden_dim=embed_dim
-        )
-        self.with_bias = with_bias
+        # Compute the pairwise difference
+        distance = torch.log10(
+            (peak_coord_mean_col - peak_coord_mean_row).abs() + 1).unsqueeze(1)
+        region_model = batch['region_motif'].clone()
+        batch['distance_map'] = distance
+        # region_model[:, :, -1] = 1 # set atac to binary
+        return {
+            'region_motif': region_model,
+            'distance_map': distance,
+        }
+
+    def forward(self, region_motif, distance_map):
+        x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, fused_distance_map, _ = self.encoder(x, distance_map)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        fused_distance_map = self.proj_distance(
+            fused_distance_map).transpose(1, 3).transpose(2, 3)
+        hic = self.hic_header(fused_distance_map).squeeze(1)
+        abc = self.abc_header(fused_distance_map).squeeze(1)
+        return exp, hic, abc
+
+    def before_loss(self, output, batch):
+        exp, hic_contact_map, abc_contact_map = output
+        atac = batch['region_motif'][:, :, -1]
+        # outer sum of atac and itself
+        atac = torch.sqrt(atac.unsqueeze(1) * atac.unsqueeze(2))
+        # test if batch['hic_matrix'] has shape and not a scalar
+        if len(batch['hic_matrix'][0].shape) >= 2:
+            hic = batch['hic_matrix'].float()
+            real_hic = True
+        else:
+            logging.info(
+                f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
+            hic = self.distance_contact_map(
+                batch['distance_map']).detach().squeeze(1)
+            real_hic = False
+        # abc = atac * hic
+        pred = {
+            'exp': exp,
+            'hic': hic_contact_map,
+            # 'abc': abc_contact_map,
+        }
+        obs = {
+            'exp': batch['exp_label'],
+            'hic': hic,
+            # 'abc': abc,
+        }
+        if real_hic:
+            mask = hic.sum(1).sum(1) == 0
+            obs['hic'][mask] = pred['hic'][mask].detach()
+            # obs['abc'][mask] = pred['abc'][mask].detach()
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+            'distance_map': torch.randn(B, R, R).float(),
+        }
+
+
+@dataclass
+class GETRegionFinetuneHiCOEConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    header_hic: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    distance_contact_map: DistanceContactHeadConfig = field(
+        default_factory=DistanceContactHeadConfig)
+
+
+class GETRegionFinetuneHiCOE(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneHiCOEConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformerWithContactMapOE(**cfg.encoder)
+        self.hic_header = ContactMapHead(cfg.header_hic, activation='none')
+        self.distance_contact_map = DistanceContactHead(
+            cfg.distance_contact_map)
+        self.distance_contact_map.eval()
+        self.proj_distance = nn.Linear(cfg.embed_dim+1, 128)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        logging.info(
+            f"GETRegionFinetuneExpHiCABC can only be used with quantitative_atac=True in order to generate the ABC score.")
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+        peak_coord = batch['peak_coord']
+        peak_length = peak_coord[:, :, 1] - peak_coord[:, :, 0]
+        peak_coord_mean = peak_coord[:, :, 0]
+        # pair-wise distance using torch
+        # Add new dimensions to create column and row vectors
+        peak_coord_mean_col = peak_coord_mean.unsqueeze(
+            2)  # Adds a new axis (column vector)
+        peak_coord_mean_row = peak_coord_mean.unsqueeze(
+            1)  # Adds a new axis (row vector)
+
+        # Compute the pairwise difference
+        distance = torch.log10(
+            (peak_coord_mean_col - peak_coord_mean_row).abs() + 1).unsqueeze(1)
+        region_model = batch['region_motif'].clone()
+        batch['distance_map'] = distance
+        # region_model[:, :, -1] = 1 # set atac to binary
+        return {
+            'region_motif': region_model,
+            'distance_map': distance,
+            'peak_length': peak_length/1000
+        }
+
+    def forward(self, region_motif, distance_map, peak_length):
+        # concat peak_length to the region_motif
+        region_motif  = torch.cat([region_motif, peak_length.unsqueeze(-1)], dim=-1)
+        x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, fused_distance_map, _ = self.encoder(x, distance_map)
+        # x = x[:, 1:]
+        fused_distance_map = self.proj_distance(
+            fused_distance_map).transpose(1, 3).transpose(2, 3)
+
+        hic = self.hic_header(fused_distance_map).squeeze(1)
+        return hic
+
+    def before_loss(self, output, batch):
+        hic_contact_map = output
+        if len(batch['hic_matrix'][0].shape) >= 2:
+            hic = batch['hic_matrix'].to(torch.float16)
+            real_hic = True
+        else:
+            logging.info(
+                f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
+            hic = self.distance_contact_map(
+                batch['distance_map']).detach().squeeze(1)
+            real_hic = False
+        pred = {
+            'hic': hic_contact_map,
+        }
+        obs = {
+            'hic': hic.float(),
+        }
+        if real_hic:
+            mask = (hic==0)
+            obs['hic'][mask] = pred['hic'][mask].detach()
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+            'distance_map': torch.randn(B, R, R).float(),
+        }
+
+
+
+
+@dataclass
+class GETRegionFinetuneExpHiCAxialModelConfig(BaseGETModelConfig):
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    header_hic: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    header_abc: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    distance_contact_map: DistanceContactHeadConfig = field(
+        default_factory=DistanceContactHeadConfig)
+
+
+class GETRegionFinetuneExpHiCAxial(BaseGETModel):
+    def __init__(self, cfg: GETRegionFinetuneExpHiCAxialModelConfig):
+        super().__init__(cfg)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformerWithContactMapAxial(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        # self.hic_header = ContactMapHead(cfg.header_hic)
+        # self.abc_header = ContactMapHead(cfg.header_abc)
+        self.distance_contact_map = DistanceContactHead(
+            cfg.distance_contact_map)
+        self.distance_contact_map.eval()
+        self.proj_distance = nn.Linear(cfg.embed_dim, 1)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        logging.info(
+            f"GETRegionFinetuneExpHiCABC can only be used with quantitative_atac=True in order to generate the ABC score.")
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+        peak_coord = batch['peak_coord']
+        peak_coord_mean = peak_coord[:, :, 0]
+        # pair-wise distance using torch
+        # Add new dimensions to create column and row vectors
+        peak_coord_mean_col = peak_coord_mean.unsqueeze(
+            2)  # Adds a new axis (column vector)
+        peak_coord_mean_row = peak_coord_mean.unsqueeze(
+            1)  # Adds a new axis (row vector)
+
+        # Compute the pairwise difference
+        distance = torch.log10(
+            (peak_coord_mean_col - peak_coord_mean_row).abs() + 1).unsqueeze(1)
+        region_model = batch['region_motif'].clone()
+        batch['distance_map'] = distance
+        # region_model[:, :, -1] = 1 # set atac to binary
+        return {
+            'region_motif': region_model,
+            'distance_map': distance,
+        }
+
+    def forward(self, region_motif, distance_map):
+        x = self.region_embed(region_motif)
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, fused_distance_map, _ = self.encoder(x, distance_map)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        fused_distance_map = self.proj_distance(
+            fused_distance_map)  # .transpose(1, 3).transpose(2, 3)
+        # hic = self.hic_header(fused_distance_map).squeeze(1)
+        # abc = self.abc_header(fused_distance_map).squeeze(1)
+        return exp, fused_distance_map.squeeze(3)
+
+    def before_loss(self, output, batch):
+        exp, hic_contact_map = output
+        atac = batch['region_motif'][:, :, -1]
+        # outer sum of atac and itself
+        atac = torch.sqrt(atac.unsqueeze(1) * atac.unsqueeze(2))
+        # test if batch['hic_matrix'] has shape and not a scalar
+        if len(batch['hic_matrix'][0].shape) >= 2:
+            hic = batch['hic_matrix'].float()
+            real_hic = True
+        else:
+            logging.info(
+                f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
+            hic = self.distance_contact_map(
+                batch['distance_map']).detach().squeeze(1)
+            real_hic = False
+        # abc = atac * hic
+        pred = {
+            'exp': exp,
+            'hic': hic_contact_map,
+            # 'abc': abc_contact_map,
+        }
+        obs = {
+            'exp': batch['exp_label'],
+            'hic': hic,
+            # 'abc': abc,
+        }
+        if real_hic:
+            mask = hic.sum(1).sum(1) == 0
+            # obs['abc'][mask] = pred['abc'][mask].detach()
+            # obs['abc'][0, :] = pred['abc'][0, :].detach()
+            # obs['abc'][-1, :] = pred['abc'][-1, :].detach()
+            # obs['abc'][:, 0] = pred['abc'][:, 0].detach()
+            # obs['abc'][:, -1] = pred['abc'][:, -1].detach()
+            obs['hic'][mask] = pred['hic'][mask].detach().float()
+            # obs['hic'][0, :] = pred['hic'][0, :].detach()
+            # obs['hic'][-1, :] = pred['hic'][-1, :].detach()
+            # obs['hic'][:, 0] = pred['hic'][:, 0].detach()
+            # obs['hic'][:, -1] = pred['hic'][:, -1].detach()
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, M = 2, 900, 283
+        return {
+            'region_motif': torch.randn(B, R, M).float().abs(),
+            'distance_map': torch.randn(B, R, R).float(),
+        }
+
+
+@dataclass
+class GETChrombpNetBiasModelConfig(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = MISSING
+    atac_attention: ConvPoolConfig = MISSING
+
+
+class GETChrombpNetBias(BaseGETModel):
+    def __init__(self, cfg: GETChrombpNetBiasModelConfig):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        self.atac_attention = ConvPool(cfg.atac_attention)
+
+        self.apply(self._init_weights)
+
+    def get_input(self, batch):
+        return {
+            'sample_peak_sequence': batch['sample_peak_sequence'],
+            'chunk_size': batch['chunk_size'],
+            'n_peaks': batch['n_peaks'],
+            'max_n_peaks': batch['max_n_peaks'],
+            'motif_mean_std': batch['motif_mean_std'],
+        }
+
+    def crop_output(self, aprofile, aprofile_target, B, R, target_length=1000):
+        # crop aprofile to center 1000bp, assume the input is (B, R, L)
+        aprofile = aprofile.reshape(B, R, -1)
+        aprofile_target = aprofile_target.reshape(B, R, -1)
+        if aprofile.shape[2] != aprofile_target.shape[2]:
+            current_length = aprofile.shape[2]
+            diff_length = current_length - target_length
+            assert diff_length % 2 == 0
+            crop_size = diff_length // 2
+            aprofile = aprofile[:, :, crop_size:crop_size+target_length]
+            aprofile_target = aprofile_target.reshape(B, R, -1)
+            diff_length = aprofile_target.shape[2] - target_length
+            assert diff_length % 2 == 0
+            crop_size = diff_length // 2
+            aprofile_target = aprofile_target[:,
+                                              :, crop_size:crop_size+target_length]
+        return aprofile, aprofile_target
+
+    def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std):
+        x = self.motif_scanner(sample_peak_sequence)
+        atpm, aprofile = self.atac_attention(
+            x, chunk_size, n_peaks, max_n_peaks)
+        return {'atpm': atpm, 'aprofile': aprofile}
+
+    def before_loss(self, output, batch):
+        pred = output
+        B, R = pred['atpm'].shape
+        obs = {'aprofile': torch.log2(batch['sample_track']+1)}
+        pred['aprofile'] = F.softplus(pred['aprofile'])
+        pred['aprofile'], obs['aprofile'] = self.crop_output(
+            pred['aprofile'], obs['aprofile'], B, R)
+        obs_atpm = batch['sample_track'].sum(dim=1).unsqueeze(-1)
+        obs_atpm = torch.log10(obs_atpm*1e5/batch['metadata'][0]['libsize']+1).detach()
+        obs['atpm'] = obs_atpm
+        pred_atpm = pred['aprofile'].sum(dim=2).unsqueeze(-1)
+        pred_atpm = torch.log10(pred_atpm*1e5/batch['metadata'][0]['libsize']+1)
+        pred = {'atpm': pred_atpm,
+                'aprofile': torch.log2(pred['aprofile']+1)}
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, L = 2, 1, 2000
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'chunk_size':  torch.Tensor(([L]*R + [0]) * B).int().tolist(),
+            'n_peaks': (torch.zeros(B,) + R).int(),
+            'max_n_peaks': R,
+            'motif_mean_std': torch.randn(B, 2, 639).abs().float(),
+        }
+
+
+
+@dataclass
+class GETChrombpNetModelConfig(GETChrombpNetBiasModelConfig):
+    motif_scanner: MotifScannerConfig = MISSING
+    atac_attention: ConvPoolConfig = MISSING
+    with_bias: bool = False
+    bias_model: GETChrombpNetBiasModelConfig = MISSING
+    bias_ckpt: str = None
+
+
+class GETChrombpNet(GETChrombpNetBias):
+    def __init__(self, cfg: GETChrombpNetModelConfig):
+        super().__init__(cfg)
+        self.with_bias = cfg.with_bias
         if self.with_bias:
-            self.bias_model = GETFinetuneChrombpNetBias(
-                num_motif=128,
-                motif_dim=128,
-                embed_dim=128,
-                motif_prior=False,
-                learnable_motif=True,
-            )
-            if bias_ckpt is not None:
-                checkpoint = torch.load(bias_ckpt, map_location="cpu")
-                self.bias_model.load_state_dict(checkpoint["model"])
-                # freeze the bias model
+            self.bias_model = cfg.bias_model
+            if cfg.bias_ckpt is not None:
+                checkpoint = torch.load(cfg.bias_ckpt, map_location="cpu")
+                if 'model' in checkpoint:
+                    checkpoint = checkpoint['model']
+                if 'state_dict' in checkpoint:
+                    checkpoint = checkpoint['state_dict']
+                if 'model.' in list(checkpoint.keys())[0]:
+                    checkpoint = {
+                        k.replace('model.', ''): v for k, v in checkpoint.items()}
+                self.bias_model.load_state_dict(checkpoint)
                 for param in self.bias_model.parameters():
                     param.requires_grad = False
 
         self.apply(self._init_weights)
 
+    def get_input(self, batch, perturb=False):
+        result = {
+            'sample_peak_sequence': batch['sample_peak_sequence'],
+            'chunk_size': batch['chunk_size'],
+            'n_peaks': batch['n_peaks'],
+            'max_n_peaks': batch['max_n_peaks'],
+            'motif_mean_std': batch['motif_mean_std'],
+        }
+        if perturb:
+            result['output_bias'] = False
+        return result
 
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-
-    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels, hic_matrix):
-        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
-        # peak_seq: [B, L, 4]
-        # [B, L, 4] --> [B, L, 1274]
-        x = self.motif_scanner(peak_seq)
-        x = x - motif_mean_std[:,0, :].unsqueeze(1)
-        x = x / motif_mean_std[:,1, :].unsqueeze(1)
-        x = F.relu(x)
-        atpm, aprofile = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+    def forward(self, sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std, output_bias=True):
+        x = self.motif_scanner(sample_peak_sequence)
+        atpm, aprofile = self.atac_attention(
+            x, chunk_size, n_peaks, max_n_peaks)
+        if not output_bias:
+            logging.info(
+                'output_bias is False, return atpm and aprofile for atac model only')
+            return {'atpm': atpm, 'aprofile': aprofile}
         if self.with_bias:
-            bias_atpm, bias_aprofile = self.bias_model(peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels, hic_matrix)
-            atpm = torch.logsumexp(torch.stack([atpm, bias_atpm], dim=0), dim=0)
-            # pad bias_aprofile to the same length as aprofile
+            bias_output = self.bias_model(
+                sample_peak_sequence, chunk_size, n_peaks, max_n_peaks, motif_mean_std)
+            bias_atpm, bias_aprofile = bias_output['atpm'], bias_output['aprofile']
+            atpm = torch.logsumexp(torch.stack(
+                [atpm, bias_atpm], dim=0), dim=0)
             diff_length = aprofile.shape[1] - bias_aprofile.shape[1]
             crop_length = diff_length // 2
-            bias_aprofile = F.pad(bias_aprofile, (crop_length, diff_length - crop_length), "constant", 0)
+            bias_aprofile = F.pad(
+                bias_aprofile, (crop_length, diff_length - crop_length), "constant", 0)
             aprofile = aprofile + bias_aprofile
-            io = {'atpm_output', atpm, 
-                'aprofile_output', aprofile,
-                'atpm_target', other_labels[:, :, 0],
-                'aprofile_target', atac}
-            return io
-    
-    def loss(self, io, config, metric):
-        atpm_loss = F.mse_loss(io['atpm_output'], io['atpm_target'])
-        aprofile_loss = F.mse_loss(io['aprofile_output'], io['aprofile_target'])
-        atpm_loss_weight = config['atpm_loss_weight'] if 'atpm_loss_weight' in config else 1
-        aprofile_loss_weight = config['aprofile_loss_weight'] if 'aprofile_loss_weight' in config else 1
-        loss = atpm_loss * atpm_loss_weight + aprofile_loss * aprofile_loss_weight
-        metric['atpm_loss'] = atpm_loss
-        metric['aprofile_loss'] = aprofile_loss
-        metric['loss'] = loss
-        return loss, metric
-        
+        return {'atpm': atpm, 'aprofile': aprofile}
 
-    
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {"pos_embed", "cls_token"}
+@dataclass
+class GETNucleotideV1MotifAdaptor(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: SplitPoolConfig = field(
+        default_factory=SplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
 
-class GETFinetuneChrombpNetBias(nn.Module):
-    """A GET model for finetuning using classification head."""
 
-    def __init__(
-        self,
-        num_motif=128,
-        motif_dim=128,
-        embed_dim=128,
-        num_regions=1,
-        motif_prior=False,
-        learnable_motif=True,
-        num_layers=4,
-        d_model=128,
-        nhead=1,
-        dropout=0.1,
-        output_dim=1,
-    ):
-        super().__init__()
-        self.num_regions = num_regions
-        self.num_motif = num_motif
-        self.motif_prior = motif_prior
-        self.embed_dim = embed_dim
-        self.num_layers = num_layers
-        self.d_model = d_model
-        self.nhead = nhead
-        self.dropout = dropout
-        self.output_dim = output_dim
-        self.motif_scanner = MotifScanner(
-            num_motif=num_motif, include_reverse_complement=False,
-            bidirectional_except_ctcf=False,
-            motif_prior=motif_prior,
-            learnable=learnable_motif,
-        )
-        self.atac_attention = ConvPool(
-            pool_method='mean',
-            n_dil_layers=self.num_layers,
-            motif_dim=motif_dim,
-            hidden_dim=embed_dim
-        )
+class GETNucleotideV1MotifAdaptor(BaseGETModel):
+    def __init__(self, cfg: GETNucleotideV1MotifAdaptor):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        conv_channel = cfg.motif_scanner.num_motif+2
+        self.conv_blocks = nn.ModuleList([
+            nn.Conv1d(conv_channel, 128, 3, padding=1),
+            ConvBlock(128,
+                      128),
+        ])
+        self.atac_attention = SplitPool(cfg.atac_attention)
+        self.proj = nn.Linear(128,  # (B,R,M ->B,R,D)
+                              cfg.region_embed.num_features)
         self.apply(self._init_weights)
 
+    def get_input(self, batch):
+        return {'sample_peak_sequence': batch['sample_peak_sequence'],
+                'sample_track': batch['sample_track'],
+                'chunk_size': batch['chunk_size'],
+                'n_peaks': batch['n_peaks'],
+                'max_n_peaks': batch['max_n_peaks']}
 
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-
-    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels, hic_matrix):
-        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
-        # peak_seq: [B, L, 4]
-        # [B, L, 4] --> [B, L, 1274]
-        x = self.motif_scanner(peak_seq)
-        atpm, aprofile = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
-        return atpm, aprofile
-
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {"pos_embed", "cls_token"}
-
-class GETFinetuneExpATACFromChrombpNet(nn.Module):
-    """A GET model for finetuning using classification head."""
-
-    def __init__(
-        self,
-        num_regions=200,
-        num_motif=637,
-        motif_dim=639,
-        num_res_block=0,
-        motif_prior=True,
-        learnable_motif=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=1,
-        pos_emb_components=["CTCF", "Rotary", "Absolute"],
-        flash_attn=False,
-        use_atac=False,
-    ):
-        super().__init__()
-        self.num_regions = num_regions
-        self.num_motif = num_motif
-        self.num_res_block = num_res_block
-        self.motif_prior = motif_prior
-        self.embed_dim = embed_dim
-        self.motif_dim = motif_dim
-        self.num_layers = num_layers
-        self.d_model = d_model
-        self.nhead = nhead
-        self.dropout = dropout
-        self.output_dim = output_dim
-        self.pos_emb_components = pos_emb_components
-        self.motif_scanner = MotifScanner(
-            num_motif=num_motif, include_reverse_complement=True,
-            bidirectional_except_ctcf=True,
-            motif_prior=motif_prior,
-            learnable=learnable_motif,
-        )
-        self.atac_attention = ConvPool(
-            pool_method='mean',
-            n_dil_layers=self.num_layers,
-            motif_dim=motif_dim,
-            hidden_dim=embed_dim//2
-        )
-        # self.split_pool = SplitPool()
-        self.region_embed = RegionEmbed(num_regions, motif_dim, embed_dim)
-        self.pos_embed = []
-        if "CTCF" in self.pos_emb_components: 
-            self.pos_embed.append(CTCFPositionalEncoding(embed_dim))
-        # if "Rotary" in self.pos_emb_components:
-            # self.pos_embed.append(RotaryEmbedding(embed_dim))
-        if "Absolute" in self.pos_emb_components:
-            self.pos_embed.append(AbsolutePositionalEncoding(embed_dim))
-        self.pos_embed = nn.ModuleList(self.pos_embed)
-        self.encoder = GETTransformer(
-            d_model,
-            nhead,
-            num_layers,
-            drop_path_rate=dropout,
-            drop_rate=dropout,
-            attn_drop_rate=dropout,
-            use_mean_pooling=False,
-            flash_attn=flash_attn,
-        )
-        self.head_atac = ATACHead(motif_dim, d_model, 1)
-        # self.head_mask = nn.Linear(d_model, output_dim)
-        self.head_exp = (
-            ExpressionHead(d_model, output_dim, use_atac)
-            if output_dim > 0
-            else nn.Identity()
-        )
-        self.head_confidence = (
-            ExpressionHead(d_model, 50, use_atac)
-            if output_dim > 0
-            else nn.Identity()
-        )
-        # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        # trunc_normal_(self.mask_token, std=0.02)
-        self.apply(self._init_weights)
-
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-
-    def forward(self, peak_seq, atac, mask, padding_mask, chunk_size, n_peaks, max_n_peaks, motif_mean_std, other_labels):
-        """labels_data is (B, R, C), C=2 for expression. R=max_n_peaks"""
-        # peak_seq: [B, L, 4]
-        # [B, L, 4] --> [B, L, 1274]
-        x = self.motif_scanner(peak_seq)
-        x = x - motif_mean_std[:,0, :].unsqueeze(1)
-        x = x / motif_mean_std[:,1, :].unsqueeze(1)
+    def forward(self, sample_peak_sequence, sample_track, chunk_size, n_peaks, max_n_peaks):
+        x = self.motif_scanner(sample_peak_sequence)
+        x = x.permute(0, 2, 1)
+        for conv in self.conv_blocks:
+            x = conv(x)
+        x = x.permute(0, 2, 1)
+        # concat atac to x
+        # x = torch.cat([x, sample_track.unsqueeze(-1)], dim=-1)
+        x = self.atac_attention(
+            x, chunk_size, n_peaks, max_n_peaks)
+        # project D to 283
+        x = self.proj(x)  # B, R, 283
         x = F.relu(x)
-        # [B, L, 1274] --> [B, R, 1274]
-        # gloabl pooling inner product with peak
-        x_original = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
-        # x = self.atac_attention(x, atac)
-        atpm = F.softplus(self.head_atac(x_original))
+        return x
 
-        # x_original = self.split_pool(x         , chunk_size, n_peaks, max_n_peaks)
-        tss_mask = other_labels[:,:, 1]
-        # x_original = torch.cat([x_original, atpm], dim=-1)
-        
-        x = self.region_embed(x_original)
+    def before_loss(self, output, batch):
+        pred = {'motif': output[:,:,:-1]}
+        obs = {'motif': batch['region_motif'][:,:,:-1]}
+        return pred, obs
 
-        B, N, C = x_original.shape
-
-
-        for pos_emb_component in self.pos_embed:
-            if isinstance(pos_emb_component, CTCFPositionalEncoding):
-                x = pos_emb_component(x, ctcf_pos)
-            else:
-                x = pos_emb_component(x)
-
-        x, _ = self.encoder(x, mask=padding_mask)
-        exp = F.softplus(self.head_exp(x, None))
-        confidence = F.softplus(self.head_confidence(x, None))
-        return atpm, exp, confidence
-
-    def reset_head(self, output_dim):
-        self.output_dim = output_dim
-        self.head_exp = (
-            nn.Linear(self.embed_dim, output_dim) if output_dim > 0 else nn.Identity()
-        )
-        self.head_atac = ATACHead(self.motif_dim, self.d_model, 1)
-        self.head_confidence = ExpressionHead(self.embed_dim, 50, False)
-
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {"pos_embed", "cls_token"}
+    def generate_dummy_data(self):
+        B, R, L = 2, 1, 2000
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+        }
 
 
-@register_model
-def get_pretrain_motif_base(pretrained=False, **kwargs):
-    model = GETPretrain(
-        num_regions=kwargs["num_region_per_sample"],
-        num_motif=kwargs["num_motif"],
-        motif_dim=kwargs["motif_dim"],
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=kwargs["output_dim"],
-        pos_emb_components=[],
-        flash_attn=kwargs["flash_attn"],
-        atac_kernel_num=161,
-        joint_kernel_num=161,
-        final_bn=kwargs["final_bn"],
-    )
-    if pretrained:
-        checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
-    return model
 
-@register_model
-def get_pretrain_motif_base_maxnorm(pretrained=False, **kwargs):
-    model = GETPretrainMaxNorm(
-        num_regions=kwargs["num_region_per_sample"],
-        num_motif=kwargs["num_motif"],
-        motif_dim=kwargs["motif_dim"],
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=kwargs["output_dim"],
-        pos_emb_components=[],
-        flash_attn=kwargs["flash_attn"],
-        atac_kernel_num=161,
-        joint_kernel_num=161,
-        final_bn=kwargs["final_bn"],
-    )
-    if pretrained:
-        checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
-    return model
+@dataclass
+class GETNucleotideMotifAdaptor(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: SplitPoolConfig = field(
+        default_factory=SplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
 
-@register_model
-def get_finetune_motif(pretrained=False, **kwargs):
-    model = GETFinetune(
-        num_regions=kwargs["num_region_per_sample"],
-        num_motif=kwargs["num_motif"],
-        motif_dim=kwargs["motif_dim"],
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=kwargs["output_dim"],
-        pos_emb_components=[],
-        flash_attn=kwargs["flash_attn"],
-        atac_kernel_num=161,
-        joint_kernel_num=161,
-        final_bn=kwargs["final_bn"],
-    )
-    if pretrained:
-        checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
-    return model
 
-@register_model
-def get_finetune_motif_with_atac(pretrained=False, **kwargs):
-    model = GETFinetuneExpATAC(
-        num_regions=kwargs["num_region_per_sample"],
-        num_motif=kwargs["num_motif"],
-        motif_dim=kwargs["motif_dim"],
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=kwargs["output_dim"],
-        pos_emb_components=[],
-        flash_attn=kwargs["flash_attn"],
-        atac_kernel_num=161,
-        joint_kernel_num=161,
-        final_bn=kwargs["final_bn"],
-    )
-    if pretrained:
-        checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
-    return model
+class GETNucleotideMotifAdaptor(BaseGETModel):
+    def __init__(self, cfg: GETNucleotideMotifAdaptor):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        conv_channel = cfg.motif_scanner.num_motif+2
+        self.conv_blocks = nn.ModuleList([
+            nn.Conv1d(conv_channel, 128, 3, padding=1),
+            ConvBlock(128,
+                      128),
+        ])
+        self.atac_attention = SplitPool(cfg.atac_attention)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.region_embed.eval()
+        self.proj = nn.Linear(128,  # (B,R,M ->B,R,D)
+                              cfg.region_embed.embed_dim)
+        self.apply(self._init_weights)
 
-@register_model
-def get_finetune_motif_with_atac_from_sequence(pretrained=False, **kwargs):
-    model = GETFinetuneExpATACFromSequence(
-        num_regions=kwargs["num_region_per_sample"],
-        num_motif=kwargs["num_motif"],
-        motif_dim=kwargs["motif_dim"],
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=kwargs["output_dim"],
-        pos_emb_components=[],
-        flash_attn=kwargs["flash_attn"],
-    )
-    if pretrained:
-        checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
-    return model
+    def get_input(self, batch):
+        return {'sample_peak_sequence': batch['sample_peak_sequence'],
+                'sample_track': batch['sample_track'],
+                'chunk_size': batch['chunk_size'],
+                'n_peaks': batch['n_peaks'],
+                'max_n_peaks': batch['max_n_peaks']}
 
-@register_model
-def get_finetune_motif_with_atac_hic(pretrained=False, **kwargs):
-    model = GETFinetuneExpATACWithHiC(
-        num_regions=kwargs["num_region_per_sample"],
-        num_motif=kwargs["num_motif"],
-        motif_dim=kwargs["motif_dim"],
-        num_res_block=0,
-        motif_prior=False,
-        embed_dim=768,
-        num_layers=12,
-        d_model=768,
-        nhead=12,
-        dropout=0.1,
-        output_dim=kwargs["output_dim"],
-        pos_emb_components=[],
-        flash_attn=kwargs["flash_attn"],
-        atac_kernel_num=161,
-        joint_kernel_num=161,
-        final_bn=kwargs["final_bn"],
-    )
-    if pretrained:
-        checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
-    return model
+    def forward(self, sample_peak_sequence, sample_track, chunk_size, n_peaks, max_n_peaks):
+        x = self.motif_scanner(sample_peak_sequence)
+        x = x.permute(0, 2, 1)
+        for conv in self.conv_blocks:
+            x = conv(x)
+        x = x.permute(0, 2, 1)
+        # concat atac to x
+        # x = torch.cat([x, sample_track.unsqueeze(-1)], dim=-1)
+        x = self.atac_attention(
+            x, chunk_size, n_peaks, max_n_peaks)
+        # project D to 283
+        x = self.proj(x)  # B, R, 283
+        return x
 
-@register_model
-def get_finetune_motif_chrombpnet(pretrained=False, **kwargs):
-    model = GETFinetuneChrombpNet(
-        num_motif=kwargs["num_motif"],
-        motif_dim=kwargs["motif_dim"],
-        embed_dim=512,
-        motif_prior=True,
-        learnable_motif=False,
-        with_bias=kwargs.get("with_bias", False),
-        bias_ckpt=kwargs.get("bias_ckpt", None),
-    )
-    if pretrained:
-        checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
-    return model
+    def before_loss(self, output, batch):
+        pred = {'motif': output}
+        obs = {'motif': self.region_embed(batch['region_motif']).detach()}
+        return pred, obs
 
-@register_model
-def get_finetune_motif_chrombpnet_bias(pretrained=False, **kwargs):
-    model = GETFinetuneChrombpNetBias(
-        num_motif=128,
-        motif_dim=128,
-        embed_dim=128,
-        motif_prior=False,
-        learnable_motif=True,
-    )
-    if pretrained:
-        checkpoint = torch.load(kwargs["init_ckpt"], map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
-    return model
+    def generate_dummy_data(self):
+        B, R, L = 2, 1, 2000
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+        }
 
+
+@dataclass
+class GETNucleotideRegionFinetuneExpHiCAxialModelConfig(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: SplitPoolConfig = field(default_factory=SplitPoolConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    header_hic: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    header_abc: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    distance_contact_map: DistanceContactHeadConfig = field(
+        default_factory=DistanceContactHeadConfig)
+
+
+class GETNucleotideRegionFinetuneExpHiCAxial(BaseGETModel):
+    def __init__(self, cfg: GETNucleotideRegionFinetuneExpHiCAxialModelConfig):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        self.conv_blocks = nn.ModuleList([
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif)
+        ])
+        self.atac_attention = SplitPool(cfg.atac_attention)
+        self.encoder = GETTransformerWithContactMapAxial(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.distance_contact_map = DistanceContactHead(
+            cfg.distance_contact_map)
+        self.distance_contact_map.eval()
+        self.proj_distance = nn.Linear(cfg.embed_dim, 1)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        self.proj = nn.Linear(cfg.motif_scanner.num_motif, cfg.embed_dim)
+        logging.info(
+            f"GETNucleotideRegionFinetuneExpHiCAxial can only be used with quantitative_atac=True in order to generate the ABC score.")
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+        peak_coord = batch['peak_coord']
+        peak_coord_mean = peak_coord[:, :, 0]
+        peak_coord_mean_col = peak_coord_mean.unsqueeze(2)
+        peak_coord_mean_row = peak_coord_mean.unsqueeze(1)
+        distance = torch.log10(
+            (peak_coord_mean_col - peak_coord_mean_row).abs() + 1).unsqueeze(1)
+
+        sample_peak_sequence = batch['sample_peak_sequence']
+        sample_track = batch['sample_track']
+        chunk_size = batch['chunk_size']
+        n_peaks = batch['n_peaks']
+        max_n_peaks = batch['max_n_peaks']
+
+        batch['distance_map'] = distance
+        return {
+            'sample_peak_sequence': sample_peak_sequence,
+            'sample_track': sample_track,
+            'chunk_size': chunk_size,
+            'n_peaks': n_peaks,
+            'max_n_peaks': max_n_peaks,
+            'distance_map': distance,
+        }
+
+    def forward(self, sample_peak_sequence, sample_track, chunk_size, n_peaks, max_n_peaks, distance_map):
+        x = self.motif_scanner(sample_peak_sequence)
+        x = x.permute(0, 2, 1)
+        for conv in self.conv_blocks:
+            x = conv(x)
+        x = x.permute(0, 2, 1)
+        x = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+        x = self.proj(x)
+
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, fused_distance_map, _ = self.encoder(x, distance_map)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        fused_distance_map = self.proj_distance(fused_distance_map)
+        return exp, fused_distance_map.squeeze(3)
+
+    def before_loss(self, output, batch):
+        exp, hic_contact_map = output
+        atac = batch['sample_track'][:, :, -1]
+        atac = torch.sqrt(atac.unsqueeze(1) * atac.unsqueeze(2))
+
+        if len(batch['hic_matrix'][0].shape) >= 2:
+            hic = batch['hic_matrix'].float()
+            real_hic = True
+        else:
+            logging.info(
+                f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
+            hic = self.distance_contact_map(
+                batch['distance_map']).detach().squeeze(1)
+            real_hic = False
+
+        pred = {
+            'exp': exp,
+            'hic': hic_contact_map,
+        }
+        obs = {
+            'exp': batch['exp_label'],
+            'hic': hic,
+        }
+        if real_hic:
+            mask = hic.sum(1).sum(1) == 0
+            obs['hic'][mask] = pred['hic'][mask].detach().float()
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, L = 2, 1, 2000
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'sample_track': torch.randn(B, R, 283).float(),
+            'chunk_size': torch.tensor([R]),
+            'n_peaks': torch.tensor([R]),
+            'max_n_peaks': torch.tensor([R]),
+            'peak_coord': torch.randn(B, R, 1).float(),
+            'distance_map': torch.randn(B, R, R).float(),
+        }
+
+
+
+@dataclass
+class GETNucleotideRegionFinetuneExpConfig(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: SplitPoolConfig = field(default_factory=SplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+
+
+class GETNucleotideRegionFinetuneExp(BaseGETModel):
+    def __init__(self, cfg: GETNucleotideRegionFinetuneExpConfig):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        conv_channel = cfg.motif_scanner.num_motif+2
+        self.conv_blocks = nn.ModuleList([
+            nn.Conv1d(conv_channel, 128, 3, padding=1),
+            ConvBlock(128,
+                      128),
+        ])
+        self.atac_attention = SplitPool(cfg.atac_attention)
+        self.proj = nn.Linear(128,  # (B,R,M ->B,R,D)
+                              cfg.region_embed.num_features)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+
+        sample_peak_sequence = batch['sample_peak_sequence']
+        sample_track = batch['sample_track']
+        chunk_size = batch['chunk_size']
+        n_peaks = batch['n_peaks']
+        max_n_peaks = batch['max_n_peaks']
+
+        return {
+            'sample_peak_sequence': sample_peak_sequence,
+            'sample_track': sample_track,
+            'chunk_size': chunk_size,
+            'n_peaks': n_peaks,
+            'max_n_peaks': max_n_peaks,
+        }
+
+    def forward(self, sample_peak_sequence, sample_track, chunk_size, n_peaks, max_n_peaks):
+        x = self.motif_scanner(sample_peak_sequence)
+        x = x.permute(0, 2, 1)
+        for conv in self.conv_blocks:
+            x = conv(x)
+        x = x.permute(0, 2, 1)
+        x = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+        x = self.proj(x)
+        x = F.relu(x).detach()
+        x[:,:,282]=1
+        x = self.region_embed(x)
+
+
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, _ = self.encoder(x)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        return exp
+
+    def before_loss(self, output, batch):
+        pred = {
+            'exp': output,
+        }
+        obs = {
+            'exp': batch['exp_label'],
+        }
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, L = 2, 1, 2000
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'sample_track': torch.randn(B, R, 283).float(),
+            'chunk_size': torch.tensor([R]),
+            'n_peaks': torch.tensor([R]),
+            'max_n_peaks': torch.tensor([R]),
+            'peak_coord': torch.randn(B, R, 1).float(),
+            'distance_map': torch.randn(B, R, R).float(),
+        }
+
+
+
+@dataclass
+class GETNucleotideRegionFinetuneATACConfig(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: SplitPoolConfig = field(default_factory=SplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+
+
+class GETNucleotideRegionFinetuneATAC(BaseGETModel):
+    def __init__(self, cfg: GETNucleotideRegionFinetuneATACConfig):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        conv_channel = cfg.motif_scanner.num_motif+2
+        self.conv_blocks = nn.ModuleList([
+            nn.Conv1d(conv_channel, 128, 3, padding=1),
+            ConvBlock(128,
+                      128),
+        ])
+        self.atac_attention = SplitPool(cfg.atac_attention)
+        self.proj = nn.Linear(128,  # (B,R,M ->B,R,D)
+                              cfg.region_embed.embed_dim)
+        self.encoder = GETTransformer(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+
+        sample_peak_sequence = batch['sample_peak_sequence']
+        sample_track = batch['sample_track']
+        chunk_size = batch['chunk_size']
+        n_peaks = batch['n_peaks']
+        max_n_peaks = batch['max_n_peaks']
+
+        return {
+            'sample_peak_sequence': sample_peak_sequence,
+            'sample_track': sample_track,
+            'chunk_size': chunk_size,
+            'n_peaks': n_peaks,
+            'max_n_peaks': max_n_peaks,
+        }
+
+    def forward(self, sample_peak_sequence, sample_track, chunk_size, n_peaks, max_n_peaks):
+        x = self.motif_scanner(sample_peak_sequence)
+        x = x.permute(0, 2, 1)
+        for conv in self.conv_blocks:
+            x = conv(x)
+        x = x.permute(0, 2, 1)
+        x = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+        x = self.proj(x)
+
+
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, _ = self.encoder(x)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        return exp
+
+    def before_loss(self, output, batch):
+        pred = {
+            'atpm': output.squeeze(2),
+        }
+        if 'region_motif' in batch:
+            obs = {
+                    'atpm': batch['region_motif'][:, :, -1],
+                }
+        else:
+            obs = {
+                'atpm': batch['atpm'],
+            }
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, L = 2, 1, 2000
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'sample_track': torch.randn(B, R, 283).float(),
+            'chunk_size': torch.tensor([R]),
+            'n_peaks': torch.tensor([R]),
+            'max_n_peaks': torch.tensor([R]),
+            'peak_coord': torch.randn(B, R, 1).float(),
+            'distance_map': torch.randn(B, R, R).float(),
+        }
+
+
+
+@dataclass
+class GETNucleotideRegionFinetuneExpHiCABCConfig(BaseGETModelConfig):
+    motif_scanner: MotifScannerConfig = field(
+        default_factory=MotifScannerConfig)
+    atac_attention: SplitPoolConfig = field(default_factory=SplitPoolConfig)
+    region_embed: RegionEmbedConfig = field(default_factory=RegionEmbedConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    head_exp: ExpressionHeadConfig = field(
+        default_factory=ExpressionHeadConfig)
+    header_hic: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    header_abc: ContactMapHeadConfig = field(
+        default_factory=ContactMapHeadConfig)
+    distance_contact_map: DistanceContactHeadConfig = field(
+        default_factory=DistanceContactHeadConfig)
+
+
+class GETNucleotideRegionFinetuneExpHiCABC(BaseGETModel):
+    def __init__(self, cfg: GETNucleotideRegionFinetuneExpHiCABCConfig):
+        super().__init__(cfg)
+        self.motif_scanner = MotifScanner(cfg.motif_scanner)
+        self.conv_blocks = nn.ModuleList([
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif,
+                      cfg.motif_scanner.num_motif),
+            ConvBlock(cfg.motif_scanner.num_motif, cfg.motif_scanner.num_motif)
+        ])
+        self.atac_attention = SplitPool(cfg.atac_attention)
+        self.proj = nn.Linear(cfg.motif_scanner.num_motif, cfg.embed_dim)
+        self.region_embed = RegionEmbed(cfg.region_embed)
+        self.region_embed.eval()
+        self.encoder = GETTransformerWithContactMap(**cfg.encoder)
+        self.head_exp = ExpressionHead(cfg.head_exp)
+        self.hic_header = ContactMapHead(cfg.header_hic)
+        self.abc_header = ContactMapHead(cfg.header_abc)
+        self.distance_contact_map = DistanceContactHead(
+            cfg.distance_contact_map)
+        self.distance_contact_map.eval()
+        self.proj_distance = nn.Linear(cfg.embed_dim, 128)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, cfg.embed_dim))
+        logging.info(
+            f"GETNucleotideRegionFinetuneExpHiCABC can only be used with quantitative_atac=True in order to generate the ABC score.")
+        self.apply(self._init_weights)
+
+    def get_input(self, batch, perturb=False):
+        peak_coord = batch['peak_coord']
+        peak_coord_mean = peak_coord[:, :, 0]
+        peak_coord_mean_col = peak_coord_mean.unsqueeze(2)
+        peak_coord_mean_row = peak_coord_mean.unsqueeze(1)
+        distance = torch.log10(
+            (peak_coord_mean_col - peak_coord_mean_row).abs() + 1).unsqueeze(1)
+
+        sample_peak_sequence = batch['sample_peak_sequence']
+        sample_track = batch['sample_track']
+        chunk_size = batch['chunk_size']
+        n_peaks = batch['n_peaks']
+        max_n_peaks = batch['max_n_peaks']
+
+        batch['distance_map'] = distance
+        return {
+            'sample_peak_sequence': sample_peak_sequence,
+            'sample_track': sample_track,
+            'chunk_size': chunk_size,
+            'n_peaks': n_peaks,
+            'max_n_peaks': max_n_peaks,
+            'distance_map': distance,
+        }
+
+    def forward(self, sample_peak_sequence, sample_track, chunk_size, n_peaks, max_n_peaks, distance_map):
+        x = self.motif_scanner(sample_peak_sequence)
+        x = x.permute(0, 2, 1)
+        for conv in self.conv_blocks:
+            x = conv(x)
+        x = x.permute(0, 2, 1)
+        x = self.atac_attention(x, chunk_size, n_peaks, max_n_peaks)
+        x = self.proj(x)
+        motif = x.clone()
+
+
+        B, N, C = x.shape
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x, fused_distance_map, _ = self.encoder(x, distance_map)
+        x = x[:, 1:]
+        exp = nn.Softplus()(self.head_exp(x))
+        fused_distance_map = self.proj_distance(
+            fused_distance_map).transpose(1, 3).transpose(2, 3)
+        hic = self.hic_header(fused_distance_map).squeeze(1)
+        abc = self.abc_header(fused_distance_map).squeeze(1)
+        return exp, hic, abc, motif
+
+    def before_loss(self, output, batch):
+        exp, hic_contact_map, abc_contact_map, motif = output
+        # atac = batch['sample_track'][:, :, -1]
+        # atac = torch.sqrt(atac.unsqueeze(1) * atac.unsqueeze(2))
+
+        if len(batch['hic_matrix'][0].shape) >= 2:
+            hic = batch['hic_matrix'].float()
+            real_hic = True
+        else:
+            logging.info(
+                f"batch['hic_matrix'] is not a matrix, using the distance contact map instead.")
+            hic = self.distance_contact_map(
+                batch['distance_map']).detach().squeeze(1)
+            real_hic = False
+        # abc = atac * hic
+        pred = {
+            'exp': exp,
+            'hic': hic_contact_map,
+            'motif': motif,
+            # 'abc': abc_contact_map,
+        }
+        obs = {
+            'exp': batch['exp_label'],
+            'hic': hic,
+            'motif': self.region_embed(batch['region_motif']).detach()
+            # 'abc': abc,
+        }
+        if real_hic:
+            mask = hic.sum(1).sum(1) == 0
+            obs['hic'][mask] = pred['hic'][mask].detach()
+        return pred, obs
+
+    def generate_dummy_data(self):
+        B, R, L = 2, 1, 2000
+        return {
+            'sample_peak_sequence': torch.randint(0, 4, (B, R * L, 4)).float(),
+            'sample_track': torch.randn(B, R, 283).float(),
+            'chunk_size': torch.tensor([R]),
+            'n_peaks': torch.tensor([R]),
+            'max_n_peaks': torch.tensor([R]),
+            'peak_coord': torch.randn(B, R, 1).float(),
+            'distance_map': torch.randn(B, R, R).float(),
+        }

@@ -1,7 +1,7 @@
 from hydra import initialize, compose
 from hydra.utils import instantiate
 from hydra.core.global_hydra import GlobalHydra
-from get_model.model.model_refactored import *
+from get_model.model.model import *
 
 
 def clear_hydra():

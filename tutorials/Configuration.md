@@ -95,7 +95,7 @@ These are YAML files in the `get_model/config/model/` directory, such as `GETReg
    a. **Model Target**: Specifies the Python class to be instantiated for the model.
       ```yaml
       model:
-        _target_: get_model.model.model_refactored.GETRegionFinetune
+        _target_: get_model.model.model.GETRegionFinetune
       ```
 
    b. **Model Configuration**: A nested structure under `cfg` that defines various model parameters:
@@ -160,7 +160,7 @@ These are YAML files in the `get_model/config/model/` directory, such as `GETReg
 
    Different model variants (e.g., GETRegionFinetune, GETNucleotideRegionFinetuneExpHiCABC) will have different configurations reflecting their specific architectures and capabilities. For instance, a model that includes Hi-C and ABC predictions will have additional heads and loss components for these tasks.
 
-   When creating or modifying a model, you'll need to ensure that the YAML configuration aligns with the corresponding Python dataclass in `get_model/model/model_refactored.py`, such as `GETRegionFinetuneModelConfig` or `GETPretrainModelConfig`.
+   When creating or modifying a model, you'll need to ensure that the YAML configuration aligns with the corresponding Python dataclass in `get_model/model/model.py`, such as `GETRegionFinetuneModelConfig` or `GETPretrainModelConfig`.
 
 ### Machine Configurations
 

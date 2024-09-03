@@ -29,7 +29,7 @@ from get_model.dataset.zarr_dataset import (
     InferenceReferenceRegionDataset,
     PerturbationInferenceReferenceRegionDataset, ReferenceRegionDataset,
     ReferenceRegionMotif, ReferenceRegionMotifConfig)
-from get_model.model.model_refactored import *
+from get_model.model.model import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
 from get_model.run import GETDataModule, LitModel, get_insulation_overlap

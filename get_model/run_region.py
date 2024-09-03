@@ -22,7 +22,7 @@ from get_model.dataset.zarr_dataset import (InferenceRegionDataset,
                                             InferenceRegionMotifDataset,
                                             RegionDataset, RegionMotifDataset,
                                             get_gencode_obj)
-from get_model.model.model_refactored import *
+from get_model.model.model import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
 from get_model.run import LitModel, get_insulation_overlap, run_shared

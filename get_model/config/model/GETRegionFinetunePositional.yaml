@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETRegionFinetunePositional
+  _target_: get_model.model.model.GETRegionFinetunePositional
   cfg:
     num_regions: 900
     num_motif: 283

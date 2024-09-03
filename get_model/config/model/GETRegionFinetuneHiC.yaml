@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETRegionFinetuneHiC
+  _target_: get_model.model.model.GETRegionFinetuneHiC
   cfg:
     num_regions: 900
     num_motif: 283

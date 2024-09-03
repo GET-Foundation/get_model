@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETRegionFinetuneExpHiCAxial
+  _target_: get_model.model.model.GETRegionFinetuneExpHiCAxial
   cfg:
     num_regions: 200
     num_motif: 283

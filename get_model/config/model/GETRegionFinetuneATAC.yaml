@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETRegionFinetuneATAC
+  _target_: get_model.model.model.GETRegionFinetuneATAC
   cfg:
     num_regions: 200
     num_motif: 283

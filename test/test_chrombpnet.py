@@ -11,7 +11,7 @@ from get_model.dataset.zarr_dataset import get_padding_pos
 from get_model.engine import train_chrombpnet, train_class_batch
 from get_model.dataset.collate import get_rev_collate_fn
 from get_model.dataset.zarr_dataset import PretrainDataset, ZarrDataPool, PreloadDataPack, CelltypeDenseZarrIO, worker_init_fn_get
-from get_model.model.model import GETFinetune, GETFinetuneExpATAC, GETFinetuneExpATACFromSequence, GETFinetuneChrombpNet
+from get_model.model.model_old import GETFinetune, GETFinetuneExpATAC, GETFinetuneExpATACFromSequence, GETFinetuneChrombpNet
 #%%
 # # %%
 # cdz = CelltypeDenseZarrIO('/pmglocal/xf2217/get_data/shendure_fetal_dense.zarr')

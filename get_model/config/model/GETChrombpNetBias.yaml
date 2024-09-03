@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETChrombpNetBias
+  _target_: get_model.model.model.GETChrombpNetBias
   cfg:
     motif_scanner:
       num_motif: 128
