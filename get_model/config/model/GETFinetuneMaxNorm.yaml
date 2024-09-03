@@ -3,4 +3,4 @@ defaults:
   - _self_
 
 model:
-  _target_: get_model.model.model_refactored.GETFinetuneMaxNorm
+  _target_: get_model.model.model.GETFinetuneMaxNorm

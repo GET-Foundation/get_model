@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETNucleotideRegionFinetuneExpHiCABC
+  _target_: get_model.model.model.GETNucleotideRegionFinetuneExpHiCABC
   cfg:
     num_regions: 200
     num_motif: 283

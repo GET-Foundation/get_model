@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETRegionPretrain
+  _target_: get_model.model.model.GETRegionPretrain
   cfg:
     num_regions: 900
     num_motif: 283

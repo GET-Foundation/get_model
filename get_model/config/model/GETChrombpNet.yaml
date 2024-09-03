@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETChrombpNet
+  _target_: get_model.model.model.GETChrombpNet
   cfg:
     motif_scanner:
       num_motif: 512
@@ -29,7 +29,7 @@ model:
         aprofile: ["mse"]
     with_bias: false
     bias_model:
-      _target_: get_model.model.model_refactored.GETChrombpNetBias
+      _target_: get_model.model.model.GETChrombpNetBias
       cfg:
         motif_scanner:
           num_motif: 128

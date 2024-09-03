@@ -34,7 +34,7 @@ data_loader_train = torch.utils.data.DataLoader(
 )
 
 # %%
-from get_model.model.model import GETPretrain, GETPretrainMaxNorm  
+from get_model.model.model_old import GETPretrain, GETPretrainMaxNorm  
 from get_model.utils import load_state_dict
 import torch.nn as nn
 loss_masked = nn.MSELoss()

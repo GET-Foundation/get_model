@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.MLPRegionFinetune
+  _target_: get_model.model.model.MLPRegionFinetune
   cfg:
     input_dim: 283
     use_atac: false

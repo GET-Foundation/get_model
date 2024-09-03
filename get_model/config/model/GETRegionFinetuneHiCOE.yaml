@@ -1,5 +1,5 @@
 model:
-  _target_: get_model.model.model_refactored.GETRegionFinetuneHiCOE
+  _target_: get_model.model.model.GETRegionFinetuneHiCOE
   cfg:
     num_regions: 200
     num_motif: 284

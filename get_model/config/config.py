@@ -17,7 +17,7 @@ def default_cfg():
 
 def get_target_from_class_name(class_name: str) -> str:
     # TODO change this to the correct path
-    return f"get_model.model.model_refactored.{class_name}"
+    return f"get_model.model.model.{class_name}"
 
 
 def load_config(config_name, config_path="./"):

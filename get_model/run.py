@@ -22,7 +22,7 @@ from get_model.dataset.zarr_dataset import (InferenceDataset,
                                             PerturbationInferenceDataset,
                                             PretrainDataset, get_gencode_obj,
                                             get_sequence_obj)
-from get_model.model.model_refactored import *
+from get_model.model.model import *
 from get_model.model.modules import *
 from get_model.utils import (extract_state_dict, load_checkpoint,
                              load_state_dict, recursive_concat_numpy, recursive_detach,

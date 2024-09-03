@@ -3,5 +3,5 @@ defaults:
   - _self_
 
 model:
-  _target_: get_model.model.model_refactored.GETPretrainMaxNorm
+  _target_: get_model.model.model.GETPretrainMaxNorm
 
