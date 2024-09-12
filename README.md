@@ -42,7 +42,7 @@ GET uses a transformer-based architecture with several key components:
 - Transformer Encoder
 - Task-specific heads (Expression, Hi-C, etc.)
 
-For more details, see [Model Architecture](tutorials/Model%20Customization.md).
+For more details, check out this [Schematic](https://fuxialexander.github.io/get_model/model.html) or [Model Architecture](tutorials/Model%20Customization.md).
 
 ## Training
 
