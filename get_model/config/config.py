@@ -176,6 +176,8 @@ class RegionDatasetConfig:
     num_region_per_sample: int = 900
     transform: Optional[Any] = None
     data_type: str = "fetal"
+    keep_celltypes: str | None = ""
+    is_pretrain: bool = False
     leave_out_celltypes: str | None = "Astrocytes"
     leave_out_chromosomes: str | None = "chr4,chr14"
     quantitative_atac: bool = False
@@ -230,6 +232,8 @@ class TrainingConfig:
         accumulate_grad_batches: Number of batches to accumulate gradients.
         clip_grad: Gradient clipping value.
         use_fp16: Whether to use FP16.
+        log_every_n_steps: Number of steps to log.
+        val_check_interval: Validation check interval.
     """
     save_ckpt_freq: int = 10
     epochs: int = 100
@@ -237,6 +241,9 @@ class TrainingConfig:
     accumulate_grad_batches: int = 1
     clip_grad: float | None = None
     use_fp16: bool = True
+    log_every_n_steps: int = 25
+    val_check_interval: float = 0.5
+    add_lr_monitor: bool = False
 
 
 @dataclass
@@ -250,6 +257,21 @@ class RunConfig:
     """
     project_name: str = MISSING
     run_name: str = MISSING
+    use_wandb: bool = True
+
+@dataclass
+class WandbConfig:
+    """
+    Obsolete, just for compatibility.
+    Configuration for the run.
+
+    Attributes:
+        project_name: Name of the project.
+        run_name: Name of the run.
+    """
+    project_name: str = MISSING
+    run_name: str = MISSING
+    use_wandb: bool = True
 
 
 @dataclass
@@ -474,3 +496,4 @@ csr.store(name="base_region_config", node=RegionConfig)
 
 csz = ConfigStore.instance()
 csz.store(name="base_region_zarr_config", node=RegionZarrConfig)
+

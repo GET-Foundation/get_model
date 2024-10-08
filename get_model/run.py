@@ -16,20 +16,32 @@ from tqdm import tqdm
 
 import wandb
 from get_model.config.config import *
-from get_model.dataset.collate import (get_perturb_collate_fn,
-                                       get_rev_collate_fn)
-from get_model.dataset.zarr_dataset import (InferenceDataset,
-                                            PerturbationInferenceDataset,
-                                            PretrainDataset, get_gencode_obj,
-                                            get_sequence_obj)
+from get_model.dataset.collate import get_perturb_collate_fn, get_rev_collate_fn
+from get_model.dataset.zarr_dataset import (
+    InferenceDataset,
+    PerturbationInferenceDataset,
+    PretrainDataset,
+    get_gencode_obj,
+    get_sequence_obj,
+)
 from get_model.model.model import *
 from get_model.model.modules import *
-from get_model.utils import (extract_state_dict, load_checkpoint,
-                             load_state_dict, recursive_concat_numpy, recursive_detach,
-                             recursive_numpy, recursive_save_to_zarr,
-                             rename_state_dict, setup_trainer)
+from get_model.optim import LayerDecayValueAssigner, create_optimizer
+from get_model.utils import (
+    extract_state_dict,
+    load_checkpoint,
+    load_state_dict,
+    recursive_concat_numpy,
+    recursive_detach,
+    recursive_numpy,
+    recursive_save_to_zarr,
+    rename_state_dict,
+    setup_trainer,
+    cosine_scheduler,
+)
 
 logging.disable(logging.WARN)
+
 
 # Wrapper model for Captum
 class WrapperModel(torch.nn.Module):
@@ -46,23 +58,36 @@ class WrapperModel(torch.nn.Module):
             return output[self.output_key][:, self.focus, strand]
         return output[:, self.focus, strand]
 
+
 def extract_peak_df(batch):
     print(list(batch.keys()))
-    peak_coord = batch['peak_coord'][0].cpu().numpy()
-    chr_name = batch['chromosome'][0]
-    df = pd.DataFrame(peak_coord, columns=['Start', 'End'])
-    df['Chromosome'] = chr_name
-    return df[['Chromosome', 'Start', 'End']]
+    peak_coord = batch["peak_coord"][0].cpu().numpy()
+    chr_name = batch["chromosome"][0]
+    df = pd.DataFrame(peak_coord, columns=["Start", "End"])
+    df["Chromosome"] = chr_name
+    return df[["Chromosome", "Start", "End"]]
+
 
 def get_insulation_overlap(batch, insulation):
     from pyranges import PyRanges as pr
+
     peak_df = extract_peak_df(batch)
-    tss_peak = int(batch['tss_peak'][0].cpu())
-    insulation = insulation[insulation['Chromosome'] == peak_df['Chromosome'].values[0]]
-    print(pr(peak_df.iloc[tss_peak:tss_peak+1]))
-    overlap = pr(peak_df.iloc[tss_peak:tss_peak+1]).join(pr(insulation), suffix='_insulation').df
-    final_insulation = overlap.sort_values('mean_num_celltype').iloc[-1][['Chromosome', 'Start_insulation', 'End_insulation']].rename({'Start_insulation': 'Start', 'End_insulation': 'End'})
-    subset_peak_df = peak_df.loc[(peak_df.Start>final_insulation.Start) & (peak_df.End<final_insulation.End)]
+    tss_peak = int(batch["tss_peak"][0].cpu())
+    insulation = insulation[insulation["Chromosome"] == peak_df["Chromosome"].values[0]]
+    print(pr(peak_df.iloc[tss_peak : tss_peak + 1]))
+    overlap = (
+        pr(peak_df.iloc[tss_peak : tss_peak + 1])
+        .join(pr(insulation), suffix="_insulation")
+        .df
+    )
+    final_insulation = (
+        overlap.sort_values("mean_num_celltype")
+        .iloc[-1][["Chromosome", "Start_insulation", "End_insulation"]]
+        .rename({"Start_insulation": "Start", "End_insulation": "End"})
+    )
+    subset_peak_df = peak_df.loc[
+        (peak_df.Start > final_insulation.Start) & (peak_df.End < final_insulation.End)
+    ]
     new_peak_start_idx = subset_peak_df.index.min()
     new_peak_end_idx = subset_peak_df.index.max()
     new_tss_peak = tss_peak - new_peak_start_idx
@@ -87,10 +112,12 @@ class LitModel(L.LightningModule):
         # Load main model checkpoint
         if self.cfg.finetune.checkpoint is not None:
             checkpoint_model = load_checkpoint(
-                self.cfg.finetune.checkpoint, model_key=self.cfg.finetune.model_key)
+                self.cfg.finetune.checkpoint, model_key=self.cfg.finetune.model_key
+            )
             checkpoint_model = extract_state_dict(checkpoint_model)
             checkpoint_model = rename_state_dict(
-                checkpoint_model, self.cfg.finetune.rename_config)
+                checkpoint_model, self.cfg.finetune.rename_config
+            )
             lora_config = {  # specify which layers to add lora to, by default only add to linear layers
                 nn.Linear: {
                     "weight": partial(LoRAParametrization.from_linear, rank=8),
@@ -99,134 +126,178 @@ class LitModel(L.LightningModule):
                     "weight": partial(LoRAParametrization.from_conv2d, rank=4),
                 },
             }
-            if any("lora" in k for k in checkpoint_model.keys()) and self.cfg.finetune.use_lora:
-                add_lora_by_name(
-                    model, self.cfg.finetune.layers_with_lora, lora_config)
-                load_state_dict(model, checkpoint_model,
-                                strict=self.cfg.finetune.strict)
-            elif any("lora" in k for k in checkpoint_model.keys()) and not self.cfg.finetune.use_lora:
+            if (
+                any("lora" in k for k in checkpoint_model.keys())
+                and self.cfg.finetune.use_lora
+            ):
+                add_lora_by_name(model, self.cfg.finetune.layers_with_lora, lora_config)
+                load_state_dict(
+                    model, checkpoint_model, strict=self.cfg.finetune.strict
+                )
+            elif (
+                any("lora" in k for k in checkpoint_model.keys())
+                and not self.cfg.finetune.use_lora
+            ):
                 raise ValueError(
-                    "Model checkpoint contains LoRA parameters but use_lora is set to False")
-            elif not any("lora" in k for k in checkpoint_model.keys()) and self.cfg.finetune.use_lora:
+                    "Model checkpoint contains LoRA parameters but use_lora is set to False"
+                )
+            elif (
+                not any("lora" in k for k in checkpoint_model.keys())
+                and self.cfg.finetune.use_lora
+            ):
                 logging.info(
-                    "Model checkpoint does not contain LoRA parameters but use_lora is set to True, using the checkpoint as base model")
-                load_state_dict(model, checkpoint_model,
-                                strict=self.cfg.finetune.strict)
-                add_lora_by_name(
-                    model, self.cfg.finetune.layers_with_lora, lora_config)
+                    "Model checkpoint does not contain LoRA parameters but use_lora is set to True, using the checkpoint as base model"
+                )
+                load_state_dict(
+                    model, checkpoint_model, strict=self.cfg.finetune.strict
+                )
+                add_lora_by_name(model, self.cfg.finetune.layers_with_lora, lora_config)
             else:
-                load_state_dict(model, checkpoint_model,
-                                strict=self.cfg.finetune.strict)
+                load_state_dict(
+                    model, checkpoint_model, strict=self.cfg.finetune.strict
+                )
 
         # Load additional checkpoints
         if len(self.cfg.finetune.additional_checkpoints) > 0:
             for checkpoint_config in self.cfg.finetune.additional_checkpoints:
                 checkpoint_model = load_checkpoint(
-                    checkpoint_config.checkpoint, model_key=checkpoint_config.model_key)
+                    checkpoint_config.checkpoint, model_key=checkpoint_config.model_key
+                )
                 checkpoint_model = extract_state_dict(checkpoint_model)
                 checkpoint_model = rename_state_dict(
-                    checkpoint_model, checkpoint_config.rename_config)
-                load_state_dict(model, checkpoint_model,
-                                strict=checkpoint_config.strict)
+                    checkpoint_model, checkpoint_config.rename_config
+                )
+                load_state_dict(
+                    model, checkpoint_model, strict=checkpoint_config.strict
+                )
 
         if self.cfg.finetune.use_lora:
             # Load LoRA parameters based on the stage
-            if self.cfg.stage == 'fit':
+            if self.cfg.stage == "fit":
                 # Load LoRA parameters for training
                 if self.cfg.finetune.lora_checkpoint is not None:
-                    lora_state_dict = load_checkpoint(
-                        self.cfg.finetune.lora_checkpoint)
+                    lora_state_dict = load_checkpoint(self.cfg.finetune.lora_checkpoint)
                     lora_state_dict = extract_state_dict(lora_state_dict)
                     lora_state_dict = rename_state_dict(
-                        lora_state_dict, self.cfg.finetune.lora_rename_config)
+                        lora_state_dict, self.cfg.finetune.lora_rename_config
+                    )
                     load_state_dict(model, lora_state_dict, strict=True)
-            elif self.cfg.stage in ['validate', 'predict']:
+            elif self.cfg.stage in ["validate", "predict"]:
                 # Load LoRA parameters for validation and prediction
                 if self.cfg.finetune.lora_checkpoint is not None:
-                    lora_state_dict = load_checkpoint(
-                        self.cfg.finetune.lora_checkpoint)
+                    lora_state_dict = load_checkpoint(self.cfg.finetune.lora_checkpoint)
                     lora_state_dict = extract_state_dict(lora_state_dict)
                     lora_state_dict = rename_state_dict(
-                        lora_state_dict, self.cfg.finetune.lora_rename_config)
+                        lora_state_dict, self.cfg.finetune.lora_rename_config
+                    )
                     load_state_dict(model, lora_state_dict, strict=True)
 
         model.freeze_layers(
-            patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
+            patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False
+        )
         print("Model = %s" % str(model))
         return model
 
     def forward(self, batch):
         return self.model(**batch)
 
-    def _shared_step(self, batch, batch_idx, stage='train'):
+    def _shared_step(self, batch, batch_idx, stage="train"):
         input = self.model.get_input(batch)
         output = self(input)
         pred, obs = self.model.before_loss(output, batch)
         loss = self.loss(pred, obs)
         # if loss is a dict, rename the keys with the stage prefix
         distributed = self.cfg.machine.num_devices > 1
-        if stage != 'predict':
+        if stage != "predict":
             if isinstance(loss, dict):
-                loss = {f"{stage}_{key}": value for key,
-                        value in loss.items()}
+                loss = {f"{stage}_{key}": value for key, value in loss.items()}
                 self.log_dict(
-                    loss, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
+                    loss, batch_size=self.cfg.machine.batch_size, sync_dist=distributed
+                )
             loss = self.model.after_loss(loss)
         return loss, pred, obs
 
     def training_step(self, batch, batch_idx):
-        loss, pred, obs = self._shared_step(batch, batch_idx, stage='train')
-        self.log("train_loss", loss, batch_size=self.cfg.machine.batch_size,
-                 sync_dist=self.cfg.machine.num_devices > 1)
+        loss, pred, obs = self._shared_step(batch, batch_idx, stage="train")
+        self.log(
+            "train_loss",
+            loss,
+            batch_size=self.cfg.machine.batch_size,
+            sync_dist=self.cfg.machine.num_devices > 1,
+        )
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, pred, obs = self._shared_step(batch, batch_idx, stage='val')
+        loss, pred, obs = self._shared_step(batch, batch_idx, stage="val")
         metrics = self.metrics(pred, obs)
-        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size,
-                      sync_dist=self.cfg.machine.num_devices > 1)
-        self.log("val_loss", loss, batch_size=self.cfg.machine.batch_size,
-                 sync_dist=self.cfg.machine.num_devices > 1)
+        self.log_dict(
+            metrics,
+            batch_size=self.cfg.machine.batch_size,
+            sync_dist=self.cfg.machine.num_devices > 1,
+        )
+        self.log(
+            "val_loss",
+            loss,
+            batch_size=self.cfg.machine.batch_size,
+            sync_dist=self.cfg.machine.num_devices > 1,
+        )
         # log the best metric across epoch
-        
 
         if batch_idx == 0 and self.cfg.log_image:
             # log one example as scatter plot
             for key in pred:
                 plt.clf()
-                self.logger.experiment.log({
-                    f"scatter_{key}": wandb.Image(sns.scatterplot(y=pred[key].detach().cpu().numpy().flatten(), x=obs[key].detach().cpu().numpy().flatten()))
-                })
+                if self.cfg.run.use_wandb:
+                    self.logger.experiment.log(
+                        {
+                            f"scatter_{key}": wandb.Image(
+                                sns.scatterplot(
+                                    y=pred[key].detach().cpu().numpy().flatten(),
+                                    x=obs[key].detach().cpu().numpy().flatten(),
+                                )
+                            )
+                        }
+                    )
 
     def test_step(self, batch, batch_idx):
-        loss, pred, obs = self._shared_step(batch, batch_idx, stage='test')
+        loss, pred, obs = self._shared_step(batch, batch_idx, stage="test")
         metrics = self.metrics(pred, obs)
-        self.log_dict(metrics, batch_size=self.cfg.machine.batch_size,
-                      sync_dist=self.cfg.machine.num_devices > 1)
-        self.log("test_loss", loss, batch_size=self.cfg.machine.batch_size,
-                 sync_dist=self.cfg.machine.num_devices > 1)
+        self.log_dict(
+            metrics,
+            batch_size=self.cfg.machine.batch_size,
+            sync_dist=self.cfg.machine.num_devices > 1,
+        )
+        self.log(
+            "test_loss",
+            loss,
+            batch_size=self.cfg.machine.batch_size,
+            sync_dist=self.cfg.machine.num_devices > 1,
+        )
         return pred, obs
 
     def predict_step(self, batch, batch_idx, *args, **kwargs):
-        if self.cfg.task.test_mode == 'perturb':
+        if self.cfg.task.test_mode == "perturb":
             return self.perturb_step(batch, batch_idx)
-        elif self.cfg.task.test_mode == 'predict':
-            loss, pred, obs = self._shared_step(
-                batch, batch_idx, stage='predict')
+        elif self.cfg.task.test_mode == "predict":
+            loss, pred, obs = self._shared_step(batch, batch_idx, stage="predict")
             return pred, obs
-        elif self.cfg.task.test_mode == 'interpret':
+        elif self.cfg.task.test_mode == "interpret":
             # assume focus is the center peaks in the input sample
             with torch.enable_grad():
-                return self.interpret_step(batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=self.cfg.dataset.n_peaks_upper_bound//2)
-        elif self.cfg.task.test_mode == 'perturb_interpret':
+                return self.interpret_step(
+                    batch,
+                    batch_idx,
+                    layer_names=self.cfg.task.layer_names,
+                    focus=self.cfg.dataset.n_peaks_upper_bound // 2,
+                )
+        elif self.cfg.task.test_mode == "perturb_interpret":
             with torch.enable_grad():
                 return self.perturb_interpret_step(batch, batch_idx)
 
     def perturb_step(self, batch, batch_idx):
-        """Perturb the input sequence and do inference on both.
-        """
-        batch_wt = batch['WT']
-        batch_mut = batch['MUT']
+        """Perturb the input sequence and do inference on both."""
+        batch_wt = batch["WT"]
+        batch_mut = batch["MUT"]
 
         input_wt = self.model.get_input(batch_wt, perturb=True)
         output_wt = self(input_wt)
@@ -234,39 +305,59 @@ class LitModel(L.LightningModule):
         output_mut = self(input_mut)
         pred_wt, obs_wt = self.model.before_loss(output_wt, batch_wt)
         pred_mut, obs_mut = self.model.before_loss(output_mut, batch_mut)
-        return {'pred_wt': pred_wt,
-                'obs_wt': obs_wt,
-                'pred_mut': pred_mut,
-                'obs_mut': obs_mut}
+        return {
+            "pred_wt": pred_wt,
+            "obs_wt": obs_wt,
+            "pred_mut": pred_mut,
+            "obs_mut": obs_mut,
+        }
 
     def perturb_interpret_step(self, batch, batch_idx):
         """Perturb the input sequence and do interpretation on both."""
-        batch_wt = batch['WT']
-        batch_mut = batch['MUT']
+        batch_wt = batch["WT"]
+        batch_mut = batch["MUT"]
 
         pred_wt, obs_wt, jacobians_wt, embeddings_wt = self.interpret_step(
-            batch_wt, batch_idx, layer_names=self.cfg.task.layer_names, focus=self.cfg.dataset.n_peaks_upper_bound//2)
+            batch_wt,
+            batch_idx,
+            layer_names=self.cfg.task.layer_names,
+            focus=self.cfg.dataset.n_peaks_upper_bound // 2,
+        )
         pred_mut, obs_mut, jacobians_mut, embeddings_mut = self.interpret_step(
-            batch_mut, batch_idx, layer_names=self.cfg.task.layer_names, focus=self.cfg.dataset.n_peaks_upper_bound//2)
-        return {'pred_wt': pred_wt,
-                'obs_wt': obs_wt,
-                'pred_mut': pred_mut,
-                'obs_mut': obs_mut,
-                'jacobians_wt': jacobians_wt,
-                'embeddings_wt': embeddings_wt,
-                'jacobians_mut': jacobians_mut,
-                'embeddings_mut': embeddings_mut,
-                }
+            batch_mut,
+            batch_idx,
+            layer_names=self.cfg.task.layer_names,
+            focus=self.cfg.dataset.n_peaks_upper_bound // 2,
+        )
+        return {
+            "pred_wt": pred_wt,
+            "obs_wt": obs_wt,
+            "pred_mut": pred_mut,
+            "obs_mut": obs_mut,
+            "jacobians_wt": jacobians_wt,
+            "embeddings_wt": embeddings_wt,
+            "jacobians_mut": jacobians_mut,
+            "embeddings_mut": embeddings_mut,
+        }
 
-    def interpret_step(self, batch, batch_idx, layer_names: List[str] = None, focus: int|np.ndarray = None):
-        
+    def interpret_step(
+        self,
+        batch,
+        batch_idx,
+        layer_names: List[str] = None,
+        focus: int | np.ndarray = None,
+    ):
+
         target_tensors = {}
         hooks = []
         input = self.model.get_input(batch)
         assert focus is not None, "Please provide a focus position for interpretation"
-        assert layer_names is not None, "Please provide a list of layer names for interpretation"
+        assert (
+            layer_names is not None
+        ), "Please provide a list of layer names for interpretation"
         for layer_input_name in layer_names:
-            assert layer_input_name in self.model.get_layer_names(
+            assert (
+                layer_input_name in self.model.get_layer_names()
             ), f"{layer_input_name} is not valid, valid layers are: {self.model.get_layer_names()}"
 
         # Register hooks to capture the target tensors
@@ -275,14 +366,15 @@ class LitModel(L.LightningModule):
                 # Retain the gradient of the target tensor
                 output.retain_grad()
                 target_tensors[name] = output
+
             return hook
 
         if layer_names is None or len(layer_names) == 0:
-            target_tensors['input'] = input
+            target_tensors["input"] = input
             for key, tensor in input.items():
                 tensor.requires_grad = True
         else:
-            target_tensors['input'] = input
+            target_tensors["input"] = input
             for key, tensor in input.items():
                 tensor.requires_grad = True
             for layer_name in layer_names:
@@ -308,7 +400,9 @@ class LitModel(L.LightningModule):
                 if isinstance(focus, int):
                     mask[:, focus, i] = 1
                 else:
-                    assert len(focus) == mask.shape[0], "The length of focus should match the number of samples in batch"
+                    assert (
+                        len(focus) == mask.shape[0]
+                    ), "The length of focus should match the number of samples in batch"
                     for j in range(mask.shape[0]):
                         mask[j, focus[j], i] = 1
                 pred[target_name].backward(mask)
@@ -316,15 +410,17 @@ class LitModel(L.LightningModule):
                     if isinstance(layer, torch.Tensor):
                         if layer.grad is None:
                             continue
-                        jacobians[target_name][str(
-                            i)][layer_name] = layer.grad.detach().cpu().numpy()
+                        jacobians[target_name][str(i)][layer_name] = (
+                            layer.grad.detach().cpu().numpy()
+                        )
                         layer.grad.zero_()
                     elif isinstance(layer, dict):
                         for layer_input_name, layer_input in layer.items():
                             if layer_input.grad is None:
                                 continue
-                            jacobians[target_name][str(
-                                i)][layer_name] = layer_input.grad.detach().cpu().numpy()
+                            jacobians[target_name][str(i)][layer_name] = (
+                                layer_input.grad.detach().cpu().numpy()
+                            )
                             layer_input.grad.zero_()
         pred = recursive_numpy(recursive_detach(pred))
         obs = recursive_numpy(recursive_detach(obs))
@@ -334,120 +430,176 @@ class LitModel(L.LightningModule):
 
     def interpret_captum_step(self, batch, batch_idx, focus, start, end, shift=0):
         import torch
-        from captum.attr import (DeepLift, InputXGradient, IntegratedGradients,
-                                 Saliency)
-        if len(batch['gene_name']) > 1:
+        from captum.attr import DeepLift, InputXGradient, IntegratedGradients, Saliency
+
+        if len(batch["gene_name"]) > 1:
             raise ValueError("Only one sample is supported for interpretation")
-        gene_name = batch['gene_name'][0]
-        input_data = batch['region_motif'][0][start+shift:end+shift+1].unsqueeze(0).cuda()
-        strand = batch['strand'][0]
+        gene_name = batch["gene_name"][0]
+        input_data = (
+            batch["region_motif"][0][start + shift : end + shift + 1]
+            .unsqueeze(0)
+            .cuda()
+        )
+        strand = batch["strand"][0]
         focus = focus - shift
 
-        attribution_method = 'DLI'
+        attribution_method = "DLI"
         # random_background_path = self.cfg.task.random_background_path
-        random_background = np.load('/home/xf2217/Projects/get_model/test/random_input_for_k562.npy')
-        if self.cfg.dataset.quantitative_atac==False:
+        random_background = np.load(
+            "/home/xf2217/Projects/get_model/test/random_input_for_k562.npy"
+        )
+        if self.cfg.dataset.quantitative_atac == False:
             random_background[:, 282] = 1
         random_background = torch.FloatTensor(random_background).unsqueeze(0).cuda()
-        print('random_background shape', random_background.shape)
-        print('input_data shape', input_data.shape)
+        print("random_background shape", random_background.shape)
+        print("input_data shape", input_data.shape)
         if input_data.shape != random_background.shape:
             # pad the input data to match the random background on second dimension
             n_region_input = input_data.shape[1]
             n_region_random = random_background.shape[1]
             if n_region_input < n_region_random:
-                input_data = torch.cat([input_data, torch.zeros(input_data.shape[0], n_region_random - n_region_input, input_data.shape[2]).cuda()], dim=1)
+                input_data = torch.cat(
+                    [
+                        input_data,
+                        torch.zeros(
+                            input_data.shape[0],
+                            n_region_random - n_region_input,
+                            input_data.shape[2],
+                        ).cuda(),
+                    ],
+                    dim=1,
+                )
             elif n_region_input > n_region_random:
-                random_background = torch.cat([random_background, torch.zeros(random_background.shape[0], n_region_input - n_region_random, random_background.shape[2]).cuda()], dim=1)
-        print('input_data shape', input_data.shape)
-        print('random_background shape', random_background.shape)
+                random_background = torch.cat(
+                    [
+                        random_background,
+                        torch.zeros(
+                            random_background.shape[0],
+                            n_region_input - n_region_random,
+                            random_background.shape[2],
+                        ).cuda(),
+                    ],
+                    dim=1,
+                )
+        print("input_data shape", input_data.shape)
+        print("random_background shape", random_background.shape)
         wrapped_model = WrapperModel(self.model, focus)
-        
-        if attribution_method == 'DLI':
+
+        if attribution_method == "DLI":
             attrib_method = DeepLift(wrapped_model, multiply_by_inputs=True)
-        elif attribution_method == 'IGI':
+        elif attribution_method == "IGI":
             attrib_method = IntegratedGradients(wrapped_model, multiply_by_inputs=True)
-        elif attribution_method == 'GI':
+        elif attribution_method == "GI":
             attrib_method = InputXGradient(wrapped_model)
-        elif attribution_method == 'SA':
+        elif attribution_method == "SA":
             attrib_method = Saliency(wrapped_model)
         else:
             raise ValueError(f"Unsupported attribution method: {attribution_method}")
-        
-        attributions = attrib_method.attribute(inputs=input_data, additional_forward_args=strand).squeeze().detach().cpu().numpy()
+
+        attributions = (
+            attrib_method.attribute(inputs=input_data, additional_forward_args=strand)
+            .squeeze()
+            .detach()
+            .cpu()
+            .numpy()
+        )
         attributions = np.absolute(attributions).sum(1)
-        chromosomes = recursive_numpy(recursive_detach(batch['chromosome']))
+        chromosomes = recursive_numpy(recursive_detach(batch["chromosome"]))
         for i, chromosome in enumerate(chromosomes):
             if len(chromosome) < 10:
-                chromosomes[i] = chromosome + ' '*(10-len(chromosome))
-        gene_names = recursive_numpy(recursive_detach(batch['gene_name']))
+                chromosomes[i] = chromosome + " " * (10 - len(chromosome))
+        gene_names = recursive_numpy(recursive_detach(batch["gene_name"]))
         for i, gene_name in enumerate(gene_names):
-            if len(gene_name)< 20:
-                gene_names[i] = gene_name + ' '*(15-len(gene_name))
+            if len(gene_name) < 20:
+                gene_names[i] = gene_name + " " * (15 - len(gene_name))
         # Process and save attributions as needed
         result_df = {
-            'gene_name': gene_names,
-            'input': recursive_numpy(recursive_detach(batch['region_motif'])),
-            'attribution': attributions,
-            'peaks': recursive_numpy(recursive_detach(batch['peak_coord'])),
-            'chromosome': chromosomes,
-            'strand': recursive_numpy(recursive_detach(batch['strand'])),
-            'shift': shift,
+            "gene_name": gene_names,
+            "input": recursive_numpy(recursive_detach(batch["region_motif"])),
+            "attribution": attributions,
+            "peaks": recursive_numpy(recursive_detach(batch["peak_coord"])),
+            "chromosome": chromosomes,
+            "strand": recursive_numpy(recursive_detach(batch["strand"])),
+            "shift": shift,
         }
-        zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.run.run_name}/interpret.zarr" 
+        zarr_path = (
+            f"{self.cfg.machine.output_dir}/{self.cfg.run.run_name}/interpret.zarr"
+        )
         from numcodecs import VLenUTF8
+
         object_codec = VLenUTF8()
-        z = zarr.open(zarr_path, mode='a')
-        recursive_save_to_zarr(z, result_df,  object_codec=object_codec, overwrite=True)
-    
+        z = zarr.open(zarr_path, mode="a")
+        recursive_save_to_zarr(z, result_df, object_codec=object_codec, overwrite=True)
+
     def on_predict_epoch_end(self):
-        if self.cfg.task.test_mode == 'interpret':
+        if self.cfg.task.test_mode == "interpret":
             # Save accumulated results to zarr
             zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.run.project_name}/{self.cfg.run.run_name}/interpret.zarr"
             print(f"Saving to {zarr_path}")
             from numcodecs import VLenUTF8
-            object_codec = VLenUTF8()
-            z = zarr.open(zarr_path, mode='w')
 
-            accumulated_results = recursive_concat_numpy(
-                self.accumulated_results)
+            object_codec = VLenUTF8()
+            z = zarr.open(zarr_path, mode="w")
+
+            accumulated_results = recursive_concat_numpy(self.accumulated_results)
             recursive_save_to_zarr(
-                z, accumulated_results, object_codec=object_codec, overwrite=True)
+                z, accumulated_results, object_codec=object_codec, overwrite=True
+            )
 
             # Clear accumulated results
             self.accumulated_results = []
-            
+
     def configure_optimizers(self):
-        # a adam optimizer with a scheduler using lightning function
-        optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.lr)
-        return optimizer
-    
+        if hasattr(self.model.cfg, "encoder"):
+            num_layers = self.model.cfg.encoder.num_layers
+        else:
+            num_layers = 0
+        assigner = LayerDecayValueAssigner(
+            list(0.75 ** (num_layers + 1 - i) for i in range(num_layers + 2))
+        )
+
+        if assigner is not None:
+            print("Assigned values = %s" % str(assigner.values))
+        skip_weight_decay_list = self.model.no_weight_decay()
+        print("Skip weight decay list: ", skip_weight_decay_list)
+
+        optimizer = create_optimizer(
+            self.cfg.optimizer,
+            self.model,
+            skip_list=skip_weight_decay_list,
+            get_num_layer=assigner.get_layer_id if assigner is not None else None,
+            get_layer_scale=assigner.get_scale if assigner is not None else None,
+        )
+
+        data_size = len(self.dm.dataset_train)
+        num_gpu_or_cpu_devices = (
+            self.cfg.machine.num_devices if self.cfg.machine.num_devices > 0 else 1
+        )
+        num_training_steps_per_epoch = (
+            data_size // self.cfg.machine.batch_size // num_gpu_or_cpu_devices
+        )
+        self.schedule = cosine_scheduler(
+            base_value=self.cfg.optimizer.lr,
+            final_value=self.cfg.optimizer.min_lr,
+            epochs=self.cfg.training.epochs,
+            niter_per_ep=num_training_steps_per_epoch,
+            warmup_epochs=self.cfg.training.warmup_epochs,
+            start_warmup_value=self.cfg.optimizer.min_lr,
+            warmup_steps=-1,
+        )
+
+        # set lr scheduler to schedule
+        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer,
+            lr_lambda=lambda step: self.schedule[step - 1] / self.cfg.optimizer.lr,
+        )
+        return [optimizer], [lr_scheduler]
+
     # def on_before_optimizer_step(self, optimizer):
     #     # Compute the 2-norm for each layer
     #     # If using mixed precision, the gradients are already unscaled here
     #     # norms = grad_norm(self.model, norm_type=2)
     #     # self.log_dict(norms)
-
-    # def configure_optimizers(self):
-    #     optimizer = create_optimizer(self.cfg.optimizer, self.model)
-    #     num_training_steps_per_epoch = (
-    #         self.cfg.dataset.dataset_size // self.cfg.machine.batch_size // self.cfg.machine.num_devices
-    #     )
-    #     schedule = cosine_scheduler(
-    #         base_value=self.cfg.optimizer.lr,
-    #         final_value=self.cfg.optimizer.min_lr,
-    #         epochs=self.cfg.training.epochs,
-    #         niter_per_ep=num_training_steps_per_epoch,
-    #         warmup_epochs=self.cfg.training.warmup_epochs,
-    #         start_warmup_value=0,
-    #         warmup_steps=-1
-    #     )
-    #     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
-    #         optimizer,
-    #         lr_lambda=lambda step: schedule[step],
-    #     )
-    #     return [optimizer], [lr_scheduler]
 
     # def on_validation_epoch_end(self):
     #     if self.cfg.dataset_name != 'bias_thp1':
@@ -482,45 +634,50 @@ class GETDataModule(L.LightningDataModule):
         root = self.cfg.machine.data_path
         codebase = self.cfg.machine.codebase
         assembly = self.cfg.assembly
-        config.dataset_size = config.dataset_size if is_train else config.eval_dataset_size
-        config.zarr_dirs = [
-            f'{root}/{zarr_dir}' for zarr_dir in config.zarr_dirs]
-        config.genome_seq_zarr = f'{root}/{assembly}.zarr'
-        config.genome_motif_zarr = f'{root}/{assembly}_motif_result.zarr'
+        config.dataset_size = (
+            config.dataset_size if is_train else config.eval_dataset_size
+        )
+        config.zarr_dirs = [f"{root}/{zarr_dir}" for zarr_dir in config.zarr_dirs]
+        config.genome_seq_zarr = f"{root}/{assembly}.zarr"
+        config.genome_motif_zarr = f"{root}/{assembly}_motif_result.zarr"
         config.insulation_paths = [
-            f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.adjecent.feather',
-            f'{codebase}/data/{assembly}_4DN_average_insulation.ctcf.longrange.feather']
+            f"{codebase}/data/{assembly}_4DN_average_insulation.ctcf.adjecent.feather",
+            f"{codebase}/data/{assembly}_4DN_average_insulation.ctcf.longrange.feather",
+        ]
         self.dataset_config = config
-        sequence_obj = sequence_obj if sequence_obj is not None else get_sequence_obj(
-            config.genome_seq_zarr)
+        sequence_obj = (
+            sequence_obj
+            if sequence_obj is not None
+            else get_sequence_obj(config.genome_seq_zarr)
+        )
         gencode_obj = get_gencode_obj(config.genome_seq_zarr, root)
 
         return config, sequence_obj, gencode_obj
 
     def build_training_dataset(self, sequence_obj, is_train=True) -> None:
         config, sequence_obj, gencode_obj = self._shared_build_dataset(
-            is_train, sequence_obj=sequence_obj)
+            is_train, sequence_obj=sequence_obj
+        )
 
         # Create dataset with configuration parameters
         dataset = PretrainDataset(
-            is_train=is_train,
-            sequence_obj=sequence_obj,
-            **config
+            is_train=is_train, sequence_obj=sequence_obj, **config
         )
 
         return dataset
 
     def build_inference_dataset(self, sequence_obj, gene_list=None):
         config, sequence_obj, gencode_obj = self._shared_build_dataset(
-            is_train=False, sequence_obj=sequence_obj)
-        if hasattr(self, 'mutations') and self.mutations is not None:
+            is_train=False, sequence_obj=sequence_obj
+        )
+        if hasattr(self, "mutations") and self.mutations is not None:
             mutations = self.mutations
         else:
-            mutations = config['mutations']
-        config.pop('mutations', None)
+            mutations = config["mutations"]
+        config.pop("mutations", None)
         # no need to leave out chromosomes or celltypes in inference
         # config['leave_out_chromosomes'] = ""
-        config['random_shift_peak'] = None
+        config["random_shift_peak"] = None
         dataset = InferenceDataset(
             is_train=False,
             assembly=self.cfg.assembly,
@@ -528,50 +685,66 @@ class GETDataModule(L.LightningDataModule):
             gene_list=self.cfg.task.gene_list if gene_list is None else gene_list,
             mutations=mutations,
             sequence_obj=sequence_obj,
-            **config
+            **config,
         )
         return dataset
 
-    def build_perturb_dataset(self, perturbations, perturb_mode, sequence_obj, gene_list=None):
+    def build_perturb_dataset(
+        self, perturbations, perturb_mode, sequence_obj, gene_list=None
+    ):
         inference_dataset = self.build_inference_dataset(
-            sequence_obj, gene_list=gene_list)
+            sequence_obj, gene_list=gene_list
+        )
         dataset = PerturbationInferenceDataset(
-            inference_dataset, perturbations, perturb_mode)
+            inference_dataset, perturbations, perturb_mode
+        )
         return dataset
 
     def prepare_data(self):
         pass
 
     def setup(self, stage=None):
-        genome_seq_zarr = f'{self.cfg.machine.data_path}/{self.cfg.assembly}.zarr'
+        genome_seq_zarr = f"{self.cfg.machine.data_path}/{self.cfg.assembly}.zarr"
         sequence_obj = get_sequence_obj(genome_seq_zarr)
 
-        if stage == 'fit' or stage is None:
+        if stage == "fit" or stage is None:
             self.dataset_train = self.build_training_dataset(
-                sequence_obj=sequence_obj, is_train=True)
+                sequence_obj=sequence_obj, is_train=True
+            )
             self.dataset_val = self.build_training_dataset(
-                sequence_obj=sequence_obj, is_train=False)
-        if stage == 'predict':
-            if self.cfg.task.test_mode == 'predict':
+                sequence_obj=sequence_obj, is_train=False
+            )
+        if stage == "predict":
+            if self.cfg.task.test_mode == "predict":
                 self.dataset_predict = self.build_training_dataset(
-                    sequence_obj=sequence_obj, is_train=False)
-            elif self.cfg.task.test_mode == 'interpret' or self.cfg.task.test_mode == 'inference' or self.cfg.task.test_mode == 'interpret_captum':
+                    sequence_obj=sequence_obj, is_train=False
+                )
+            elif (
+                self.cfg.task.test_mode == "interpret"
+                or self.cfg.task.test_mode == "inference"
+                or self.cfg.task.test_mode == "interpret_captum"
+            ):
                 self.mutations = None
                 self.dataset_predict = self.build_inference_dataset(
-                    sequence_obj=sequence_obj)
-            elif 'perturb' in self.cfg.task.test_mode:
-                self.mutations = pd.read_csv(self.cfg.task.mutations, sep='\t')
+                    sequence_obj=sequence_obj
+                )
+            elif "perturb" in self.cfg.task.test_mode:
+                self.mutations = pd.read_csv(self.cfg.task.mutations, sep="\t")
                 if self.mutations is not None:
-                    self.perturbation_mode = 'mutation'
+                    self.perturbation_mode = "mutation"
                 elif self.cfg.dataset.peak_inactivation is not None:
-                    self.perturbation_mode = 'peak_inactivation'
+                    self.perturbation_mode = "peak_inactivation"
                 self.dataset_predict = self.build_perturb_dataset(
-                    perturbations=self.mutations, perturb_mode=self.perturbation_mode,
-                    sequence_obj=sequence_obj, gene_list=self.cfg.task.gene_list)
+                    perturbations=self.mutations,
+                    perturb_mode=self.perturbation_mode,
+                    sequence_obj=sequence_obj,
+                    gene_list=self.cfg.task.gene_list,
+                )
 
-        if stage == 'validate':
+        if stage == "validate":
             self.dataset_val = self.build_training_dataset(
-                sequence_obj=sequence_obj, is_train=False)
+                sequence_obj=sequence_obj, is_train=False
+            )
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
@@ -597,7 +770,11 @@ class GETDataModule(L.LightningDataModule):
             batch_size=self.cfg.machine.batch_size,
             num_workers=self.cfg.machine.num_workers,
             drop_last=True,
-            collate_fn=get_rev_collate_fn if 'perturb' not in self.cfg.task.test_mode else get_perturb_collate_fn,
+            collate_fn=(
+                get_rev_collate_fn
+                if "perturb" not in self.cfg.task.test_mode
+                else get_perturb_collate_fn
+            ),
         )
 
     def predict_dataloader(self):
@@ -606,75 +783,92 @@ class GETDataModule(L.LightningDataModule):
             batch_size=self.cfg.machine.batch_size,
             num_workers=self.cfg.machine.num_workers,
             drop_last=False,
-            collate_fn=get_rev_collate_fn if 'perturb' not in self.cfg.task.test_mode else get_perturb_collate_fn,
+            collate_fn=(
+                get_rev_collate_fn
+                if "perturb" not in self.cfg.task.test_mode
+                else get_perturb_collate_fn
+            ),
         )
 
+
 def run_shared(cfg, model, dm):
-    trainer, _ = setup_trainer(cfg)
-    
-    if cfg.stage == 'fit':
+    trainer = setup_trainer(cfg)
+
+    if cfg.stage == "fit":
         trainer.fit(model, dm, ckpt_path=cfg.finetune.resume_ckpt)
-    if cfg.stage == 'validate':
+    if cfg.stage == "validate":
         trainer.validate(model, datamodule=dm, ckpt_path=cfg.finetune.resume_ckpt)
-    if cfg.stage == 'predict':
+    if cfg.stage == "predict":
         trainer.predict(model, datamodule=dm, ckpt_path=cfg.finetune.resume_ckpt)
     return trainer
 
+
 def run(cfg: DictConfig):
-    torch.set_float32_matmul_precision('medium')
+    torch.set_float32_matmul_precision("medium")
     model = LitModel(cfg)
     dm = GETDataModule(cfg)
     model.dm = dm
-    
+
     return run_shared(cfg, model, dm)
 
 
 def run_downstream(cfg: DictConfig):
-    torch.set_float32_matmul_precision('medium')
+    torch.set_float32_matmul_precision("medium")
     # if cfg.finetune.checkpoint is not None:
     # model = LitModel.load_from_checkpoint(cfg.finetune.checkpoint)
     # else:
     model = LitModel(cfg)
     # move the model to the gpu
-    model.to('cuda')
+    model.to("cuda")
     dm = GETDataModule(cfg)
     model.dm = dm
-    trainer, _ = setup_trainer(cfg)
+    trainer = setup_trainer(cfg)
     print(run_ppif_task(trainer, model))
 
 
-def run_ppif_task(trainer: L.Trainer, lm: LitModel, output_key='atpm'):
+def run_ppif_task(trainer: L.Trainer, lm: LitModel, output_key="atpm"):
     import numpy as np
     from scipy.stats import pearsonr, spearmanr
     from sklearn.linear_model import LinearRegression
     from sklearn.metrics import r2_score
-    mutation = pd.read_csv(
-        lm.cfg.task.mutations, sep='\t')
+
+    mutation = pd.read_csv(lm.cfg.task.mutations, sep="\t")
     n_mutation = mutation.shape[0]
     n_peaks_upper_bound = lm.cfg.dataset.n_peaks_upper_bound
     result = []
     # setup dataset_predict
-    lm.dm.setup(stage='predict')
+    lm.dm.setup(stage="predict")
     with torch.no_grad():
         lm.to("cuda")
-        for i, batch in tqdm(enumerate(lm.dm.predict_dataloader()), total=len(lm.dm.predict_dataloader())):
-            batch = lm.transfer_batch_to_device(
-                batch, lm.device, dataloader_idx=0)
+        for i, batch in tqdm(
+            enumerate(lm.dm.predict_dataloader()), total=len(lm.dm.predict_dataloader())
+        ):
+            batch = lm.transfer_batch_to_device(batch, lm.device, dataloader_idx=0)
             out = lm.predict_step(batch, i)
             result.append(out)
-    pred_wt = [r['pred_wt'][output_key] for r in result]
-    pred_mut = [r['pred_mut'][output_key] for r in result]
+    pred_wt = [r["pred_wt"][output_key] for r in result]
+    pred_mut = [r["pred_mut"][output_key] for r in result]
     n_celltypes = lm.dm.dataset_predict.inference_dataset.datapool.n_celltypes
     pred_wt = torch.cat(pred_wt, dim=0).reshape(
-        n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]
+        n_celltypes, n_mutation, n_peaks_upper_bound
+    )[0, :, n_peaks_upper_bound // 2]
     pred_mut = torch.cat(pred_mut, dim=0).reshape(
-        n_celltypes, n_mutation, n_peaks_upper_bound)[0, :, n_peaks_upper_bound//2]
+        n_celltypes, n_mutation, n_peaks_upper_bound
+    )[0, :, n_peaks_upper_bound // 2]
     pred_change = (10**pred_mut - 10**pred_wt) / (10**pred_wt - 1) * 100
-    mutation['pred_change'] = pred_change.detach().cpu().numpy()
-    y = mutation.query('`corrected p value`<=0.05').query('Screen.str.contains("Pro")').query('Screen.str.contains("Tiling")')[
-        '% change to PPIF expression'].values
-    x = mutation.query('`corrected p value`<=0.05').query('Screen.str.contains("Pro")').query(
-        'Screen.str.contains("Tiling")')['pred_change'].values
+    mutation["pred_change"] = pred_change.detach().cpu().numpy()
+    y = (
+        mutation.query("`corrected p value`<=0.05")
+        .query('Screen.str.contains("Pro")')
+        .query('Screen.str.contains("Tiling")')["% change to PPIF expression"]
+        .values
+    )
+    x = (
+        mutation.query("`corrected p value`<=0.05")
+        .query('Screen.str.contains("Pro")')
+        .query('Screen.str.contains("Tiling")')["pred_change"]
+        .values
+    )
     pearson = np.corrcoef(x, y)[0, 1]
     r2 = r2_score(y, x)
     spearman = spearmanr(x, y)[0]
@@ -682,14 +876,14 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel, output_key='atpm'):
     # save a scatterplot
     import matplotlib.pyplot as plt
     import seaborn as sns
+
     sns.scatterplot(x=x, y=y)
-    plt.xlabel('Predicted change in PPIF expression')
-    plt.ylabel('Observed change in PPIF expression')
-    plt.savefig(
-        f'{lm.cfg.machine.output_dir}/ppif_scatterplot.png')
+    plt.xlabel("Predicted change in PPIF expression")
+    plt.ylabel("Observed change in PPIF expression")
+    plt.savefig(f"{lm.cfg.machine.output_dir}/ppif_scatterplot.png")
     return {
-        'ppif_pearson': pearson,
-        'ppif_spearman': spearman,
-        'ppif_r2': r2,
-        'ppif_slope': slope
+        "ppif_pearson": pearson,
+        "ppif_spearman": spearman,
+        "ppif_r2": r2,
+        "ppif_slope": slope,
     }
