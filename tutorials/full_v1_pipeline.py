@@ -113,6 +113,8 @@ cfg = load_config('finetune_tutorial')
 pretty_print_config(cfg)
 cfg.run.run_name='training'
 cfg.dataset.zarr_path = "./output.zarr"
+cfg.run.use_wandb=False
+cfg.machine.num_devices=0
 #%%
 # run model training
 cfg.training.epochs=5 # use as demo there

@@ -1,6 +1,5 @@
 import logging
 from functools import partial
-from typing import Callable
 
 import lightning as L
 import pandas as pd
@@ -10,27 +9,30 @@ import torch.utils.data
 import wandb
 import zarr
 from hydra.utils import instantiate
-from lightning.pytorch.core.optimizer import LightningOptimizer
 from matplotlib import pyplot as plt
 from minlora import LoRAParametrization
 from minlora.model import add_lora_by_name
 from omegaconf import MISSING, DictConfig, OmegaConf
-from torch.optim.optimizer import Optimizer
 
 from get_model.config.config import *
-from get_model.dataset.zarr_dataset import (InferenceRegionDataset,
-                                            InferenceRegionMotifDataset,
-                                            RegionDataset, RegionMotifDataset,
-                                            get_gencode_obj)
+from get_model.dataset.zarr_dataset import (
+    InferenceRegionDataset,
+    InferenceRegionMotifDataset,
+    RegionDataset,
+    RegionMotifDataset,
+    get_gencode_obj,
+)
 from get_model.model.model import *
 from get_model.model.modules import *
-from get_model.optim import LayerDecayValueAssigner, create_optimizer
 from get_model.run import LitModel, get_insulation_overlap, run_shared
-from get_model.utils import (cosine_scheduler, extract_state_dict,
-                             load_checkpoint, load_state_dict,
-                             recursive_concat_numpy, recursive_detach,
-                             recursive_numpy, recursive_save_to_zarr,
-                             rename_state_dict, setup_trainer, setup_wandb)
+from get_model.utils import (
+    extract_state_dict,
+    load_checkpoint,
+    load_state_dict,
+    recursive_detach,
+    recursive_numpy,
+    rename_state_dict,
+)
 
 
 class RegionDataModule(L.LightningDataModule):
@@ -44,27 +46,33 @@ class RegionDataModule(L.LightningDataModule):
 
     def build_inference_dataset(self, is_train=False, gene_list=None, gencode_obj=None):
         if gencode_obj is None:
-            gencode_obj = get_gencode_obj(
-                self.cfg.assembly, self.cfg.machine.data_path)
+            gencode_obj = get_gencode_obj(self.cfg.assembly, self.cfg.machine.data_path)
 
-        return InferenceRegionDataset(**self.cfg.dataset, is_train=is_train, gene_list=self.cfg.task.gene_list if gene_list is None else gene_list, gencode_obj=gencode_obj)
+        return InferenceRegionDataset(
+            **self.cfg.dataset,
+            is_train=is_train,
+            gene_list=self.cfg.task.gene_list if gene_list is None else gene_list,
+            gencode_obj=gencode_obj,
+        )
 
     def prepare_data(self):
         pass
 
     def setup(self, stage=None):
-        if stage == 'fit' or stage is None:
+        if stage == "fit" or stage is None:
             self.dataset_train = self.build_training_dataset(is_train=True)
             self.dataset_val = self.build_training_dataset(is_train=False)
-        if stage == 'predict':
-            if self.cfg.task.test_mode == 'predict':
-                self.dataset_predict = self.build_training_dataset(
-                    is_train=False)
-            elif self.cfg.task.test_mode == 'interpret' or self.cfg.task.test_mode == 'inference':
+        if stage == "predict":
+            if self.cfg.task.test_mode == "predict":
+                self.dataset_predict = self.build_training_dataset(is_train=False)
+            elif (
+                self.cfg.task.test_mode == "interpret"
+                or self.cfg.task.test_mode == "inference"
+            ):
                 self.mutations = None
                 self.dataset_predict = self.build_inference_dataset()
 
-        if stage == 'validate':
+        if stage == "validate":
             self.dataset_val = self.build_training_dataset(is_train=False)
 
     def train_dataloader(self):
@@ -105,151 +113,213 @@ class RegionLitModel(LitModel):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
 
-    def optimizer_step(self, epoch: int, batch_idx: int, optimizer: Optimizer | LightningOptimizer, optimizer_closure: Callable[[], Any] | None = None) -> None:
-        self.lr_schedulers().step()
-        return super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
-
     def validation_step(self, batch, batch_idx):
-        loss, pred, obs = self._shared_step(batch, batch_idx, stage='val')
+        loss, pred, obs = self._shared_step(batch, batch_idx, stage="val")
         # print(pred['exp'].detach().cpu().numpy().flatten().max(),
         #       obs['exp'].detach().cpu().numpy().flatten().max())
 
-        if self.cfg.eval_tss and 'exp' in pred:
-            tss_idx = batch['mask']
+        if self.cfg.eval_tss and "exp" in pred:
+            tss_idx = batch["mask"]
             for key in pred:
                 # pred[key] = (pred[key] * tss_idx)
                 # obs[key] = (obs[key] * tss_idx)
                 pred[key] = pred[key][tss_idx > 0].flatten()
                 obs[key] = obs[key][tss_idx > 0].flatten()
             # error handling in metric when there is no TSS, or all TSS is not expressed in batch.
-            if pred['exp'].shape[0] == 0:
+            if pred["exp"].shape[0] == 0:
                 return
-            if obs['exp'].sum() == 0:
+            if obs["exp"].sum() == 0:
                 return
             # check for nan
-            if torch.isnan(pred['exp']).any() or torch.isnan(obs['exp']).any():
+            if torch.isnan(pred["exp"]).any() or torch.isnan(obs["exp"]).any():
                 return
 
+        if "hic" in obs:
+            if obs["hic"].flatten().shape[0] > 1000:
+                try:
+                    idx = np.random.choice(
+                    obs["hic"].flatten().shape[0], 1000, replace=False
+                    )
+                    obs["hic"] = obs["hic"].flatten()[idx]
+                    pred["hic"] = pred["hic"].flatten()[idx]
+                except Exception as e:
+                    print(obs["hic"].shape)
+                    print(pred["hic"].shape)
+            else:
+                obs['hic'] = torch.randn(1000).to(obs['hic'].device)
+                pred['hic'] = torch.randn(1000).to(pred['hic'].device)
         metrics = self.metrics(pred, obs)
         if batch_idx == 0 and self.cfg.log_image:
             # log one example as scatter plot
             for key in pred:
                 plt.clf()
-                self.logger.experiment.log({
-                    f"scatter_{key}": wandb.Image(sns.scatterplot(y=pred[key].detach().cpu().numpy().flatten(), x=obs[key].detach().cpu().numpy().flatten()))
-                })
+                if self.cfg.run.use_wandb:
+                    self.logger.experiment.log(
+                        {
+                            f"scatter_{key}": wandb.Image(
+                                sns.scatterplot(
+                                    y=pred[key].detach().cpu().numpy().flatten(),
+                                    x=obs[key].detach().cpu().numpy().flatten(),
+                                )
+                            )
+                        }
+                    )
         distributed = self.cfg.machine.num_devices > 1
         self.log_dict(
-            metrics, batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
-        self.log("val_loss", loss,
-                 batch_size=self.cfg.machine.batch_size, sync_dist=distributed)
+            metrics, batch_size=self.cfg.machine.batch_size, sync_dist=distributed
+        )
+        self.log(
+            "val_loss",
+            loss,
+            batch_size=self.cfg.machine.batch_size,
+            sync_dist=distributed,
+        )
 
     def predict_step(self, batch, batch_idx, *args, **kwargs):
-        if self.cfg.task.test_mode == 'inference':
-            loss, preds, obs = self._shared_step(
-                batch, batch_idx, stage='predict')
+        if self.cfg.task.test_mode == "inference":
+            loss, preds, obs = self._shared_step(batch, batch_idx, stage="predict")
             result_df = []
-            for batch_element in range(len(batch['gene_name'])):
-                goi_idx = batch['all_tss_peak'][batch_element]
+            for batch_element in range(len(batch["gene_name"])):
+                goi_idx = batch["all_tss_peak"][batch_element]
                 goi_idx = goi_idx[goi_idx > 0]  # filter out pad (tss_peak = 0)
-                strand = batch['strand'][batch_element]
-                atpm = batch['region_motif'][batch_element][goi_idx, -
-                                                            1].max().cpu().item()
-                gene_name = batch['gene_name'][batch_element]
+                strand = batch["strand"][batch_element]
+                atpm = (
+                    batch["region_motif"][batch_element][goi_idx, -1].max().cpu().item()
+                )
+                gene_name = batch["gene_name"][batch_element]
                 for key in preds:
                     result_df.append(
-                        {'gene_name': gene_name, 'key': key, 'pred': preds[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'obs': obs[key][batch_element][:, strand][goi_idx].max().cpu().item(), 'atpm': atpm})
+                        {
+                            "gene_name": gene_name,
+                            "key": key,
+                            "pred": preds[key][batch_element][:, strand][goi_idx]
+                            .max()
+                            .cpu()
+                            .item(),
+                            "obs": obs[key][batch_element][:, strand][goi_idx]
+                            .max()
+                            .cpu()
+                            .item(),
+                            "atpm": atpm,
+                        }
+                    )
             result_df = pd.DataFrame(result_df)
             # mkdir if not exist
             os.makedirs(
-                f"{self.cfg.machine.output_dir}/{self.cfg.run.project_name}", exist_ok=True)
-            result_df.to_csv(
-                f"{self.cfg.machine.output_dir}/{self.cfg.run.project_name}/{self.cfg.run.run_name}.csv", index=False, mode='a', header=False
+                f"{self.cfg.machine.output_dir}/{self.cfg.run.project_name}",
+                exist_ok=True,
             )
-        elif self.cfg.task.test_mode == 'perturb':
+            result_df.to_csv(
+                f"{self.cfg.machine.output_dir}/{self.cfg.run.project_name}/{self.cfg.run.run_name}.csv",
+                index=False,
+                mode="a",
+                header=False,
+            )
+        elif self.cfg.task.test_mode == "perturb":
             # TODO: need to figure out if batching is working
             preds = self.perturb_step(batch, batch_idx)
-            batch_size = len(batch['WT']['strand'])
+            batch_size = len(batch["WT"]["strand"])
             results = []
 
             for i in range(batch_size):
-                strand = batch['WT']['strand'][i].cpu().numpy()
-                gene_name = batch['WT']['gene_name'][i]
-                tss_peak = batch['WT']['tss_peak'][i].cpu().numpy()
-                goi_idx = batch['WT']['all_tss_peak'][i].cpu().numpy()
+                strand = batch["WT"]["strand"][i].cpu().numpy()
+                gene_name = batch["WT"]["gene_name"][i]
+                tss_peak = batch["WT"]["tss_peak"][i].cpu().numpy()
+                goi_idx = batch["WT"]["all_tss_peak"][i].cpu().numpy()
                 goi_idx = goi_idx[goi_idx > 0]
-                goi_idx = goi_idx[goi_idx <
-                                  preds['pred_wt']['exp'][i].shape[0]]
+                goi_idx = goi_idx[goi_idx < preds["pred_wt"]["exp"][i].shape[0]]
 
                 result = {
-                    'gene_name': gene_name,
-                    'strand': strand,
-                    'tss_peak': tss_peak,
-                    'perturb_chrom': batch['MUT']['perturb_chrom'][i],
-                    'perturb_start': batch['MUT']['perturb_start'][i].cpu().item(),
-                    'perturb_end': batch['MUT']['perturb_end'][i].cpu().item(),
-                    'pred_wt': preds['pred_wt']['exp'][i][:, strand][goi_idx].mean().cpu().item(),
-                    'pred_mut': preds['pred_mut']['exp'][i][:, strand][goi_idx].mean().cpu().item(),
-                    'obs': preds['obs_wt']['exp'][i][:, strand][goi_idx].mean().cpu().item()
+                    "gene_name": gene_name,
+                    "strand": strand,
+                    "tss_peak": tss_peak,
+                    "perturb_chrom": batch["MUT"]["perturb_chrom"][i],
+                    "perturb_start": batch["MUT"]["perturb_start"][i].cpu().item(),
+                    "perturb_end": batch["MUT"]["perturb_end"][i].cpu().item(),
+                    "pred_wt": preds["pred_wt"]["exp"][i][:, strand][goi_idx]
+                    .mean()
+                    .cpu()
+                    .item(),
+                    "pred_mut": preds["pred_mut"]["exp"][i][:, strand][goi_idx]
+                    .mean()
+                    .cpu()
+                    .item(),
+                    "obs": preds["obs_wt"]["exp"][i][:, strand][goi_idx]
+                    .mean()
+                    .cpu()
+                    .item(),
                 }
                 results.append(result)
 
             # Save results to a csv as multiple rows
             results_df = pd.DataFrame(results)
             results_df.to_csv(
-                f"{self.cfg.machine.output_dir}/{self.cfg.run.run_name}.csv", index=False, mode='a', header=False
+                f"{self.cfg.machine.output_dir}/{self.cfg.run.run_name}.csv",
+                index=False,
+                mode="a",
+                header=False,
             )
             # except Exception as    e:
             # print(e)
 
-        elif self.cfg.task.test_mode == 'interpret':
+        elif self.cfg.task.test_mode == "interpret":
             focus = []
-            for i in range(len(batch['gene_name'])):
-                goi_idx = batch['all_tss_peak'][i].cpu().numpy()
+            for i in range(len(batch["gene_name"])):
+                goi_idx = batch["all_tss_peak"][i].cpu().numpy()
                 goi_idx = goi_idx[goi_idx > 0]
                 focus.append(goi_idx)
             torch.set_grad_enabled(True)
             preds, obs, jacobians, embeddings = self.interpret_step(
-                batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=focus)
+                batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=focus
+            )
             # pred = np.array([pred['exp'][i][:, batch['strand'][i].cpu().numpy(
             # )][batch['all_tss_peak'][i].cpu().numpy()].mean() for i in range(len(batch['gene_name']))])
             # obs = np.array([obs['exp'][i][:, batch['strand'][i].cpu().numpy(
             # )][batch['all_tss_peak'][i].cpu().numpy()].mean() for i in range(len(batch['gene_name']))])
-            gene_names = recursive_numpy(recursive_detach(batch['gene_name']))
+            gene_names = recursive_numpy(recursive_detach(batch["gene_name"]))
             for i, gene_name in enumerate(gene_names):
                 if len(gene_name) < 100:
-                    gene_names[i] = gene_name + ' '*(100-len(gene_name))
-            chromosomes = recursive_numpy(
-                recursive_detach(batch['chromosome']))
+                    gene_names[i] = gene_name + " " * (100 - len(gene_name))
+            chromosomes = recursive_numpy(recursive_detach(batch["chromosome"]))
             for i, chromosome in enumerate(chromosomes):
                 if len(chromosome) < 30:
-                    chromosomes[i] = chromosome + ' '*(30-len(chromosome))
+                    chromosomes[i] = chromosome + " " * (30 - len(chromosome))
 
             result = {
-                'preds': preds,
-                'obs': obs,
-                'jacobians': jacobians,
-                'input': embeddings['input']['region_motif'],
-                'chromosome': chromosomes,
-                'peak_coord': recursive_numpy(recursive_detach(batch['peak_coord'])),
-                'strand': recursive_numpy(recursive_detach(batch['strand'])),
-                'focus': recursive_numpy(recursive_detach(batch['all_tss_peak'])),
-                'avaliable_genes': gene_names,
+                "preds": preds,
+                "obs": obs,
+                "jacobians": jacobians,
+                "input": embeddings["input"]["region_motif"],
+                "chromosome": chromosomes,
+                "peak_coord": recursive_numpy(recursive_detach(batch["peak_coord"])),
+                "strand": recursive_numpy(recursive_detach(batch["strand"])),
+                "focus": recursive_numpy(recursive_detach(batch["all_tss_peak"])),
+                "avaliable_genes": gene_names,
             }
             self.accumulated_results.append(result)
 
-        elif self.cfg.task.test_mode == 'interpret_captum':
-            tss_peak = batch['tss_peak'][0].cpu().numpy()
+        elif self.cfg.task.test_mode == "interpret_captum":
+            tss_peak = batch["tss_peak"][0].cpu().numpy()
 
             new_peak_start_idx, new_peak_end_idx, new_tss_peak = get_insulation_overlap(
-                batch, self.dm.dataset_predict.zarr_dataset.datapool.insulation)
+                batch, self.dm.dataset_predict.zarr_dataset.datapool.insulation
+            )
             for shift in np.random.randint(-10, 10, 5):
-                if new_peak_start_idx+shift < 0 or new_peak_end_idx+shift >= batch['region_motif'][0].shape[0]:
+                if (
+                    new_peak_start_idx + shift < 0
+                    or new_peak_end_idx + shift >= batch["region_motif"][0].shape[0]
+                ):
                     continue
                 # assume focus is the center peaks in the input sample
                 torch.set_grad_enabled(True)
                 self.interpret_captum_step(
-                    batch, batch_idx, focus=new_tss_peak, start=new_peak_start_idx, end=new_peak_end_idx, shift=shift)
+                    batch,
+                    batch_idx,
+                    focus=new_tss_peak,
+                    start=new_peak_start_idx,
+                    end=new_peak_end_idx,
+                    shift=shift,
+                )
 
     def get_model(self):
         model = instantiate(self.cfg.model)
@@ -257,10 +327,12 @@ class RegionLitModel(LitModel):
         # Load main model checkpoint
         if self.cfg.finetune.checkpoint is not None:
             checkpoint_model = load_checkpoint(
-                self.cfg.finetune.checkpoint, model_key=self.cfg.finetune.model_key)
+                self.cfg.finetune.checkpoint, model_key=self.cfg.finetune.model_key
+            )
             checkpoint_model = extract_state_dict(checkpoint_model)
             checkpoint_model = rename_state_dict(
-                checkpoint_model, self.cfg.finetune.rename_config)
+                checkpoint_model, self.cfg.finetune.rename_config
+            )
             lora_config = {  # specify which layers to add lora to, by default only add to linear layers
                 nn.Linear: {
                     "weight": partial(LoRAParametrization.from_linear, rank=8),
@@ -269,105 +341,80 @@ class RegionLitModel(LitModel):
                     "weight": partial(LoRAParametrization.from_conv2d, rank=4),
                 },
             }
-            if any("lora" in k for k in checkpoint_model.keys()) and self.cfg.finetune.use_lora:
-                add_lora_by_name(
-                    model, self.cfg.finetune.layers_with_lora, lora_config)
-                load_state_dict(model, checkpoint_model,
-                                strict=self.cfg.finetune.strict)
-            elif any("lora" in k for k in checkpoint_model.keys()) and not self.cfg.finetune.use_lora:
+            if (
+                any("lora" in k for k in checkpoint_model.keys())
+                and self.cfg.finetune.use_lora
+            ):
+                add_lora_by_name(model, self.cfg.finetune.layers_with_lora, lora_config)
+                load_state_dict(
+                    model, checkpoint_model, strict=self.cfg.finetune.strict
+                )
+            elif (
+                any("lora" in k for k in checkpoint_model.keys())
+                and not self.cfg.finetune.use_lora
+            ):
                 raise ValueError(
-                    "Model checkpoint contains LoRA parameters but use_lora is set to False")
-            elif not any("lora" in k for k in checkpoint_model.keys()) and self.cfg.finetune.use_lora:
+                    "Model checkpoint contains LoRA parameters but use_lora is set to False"
+                )
+            elif (
+                not any("lora" in k for k in checkpoint_model.keys())
+                and self.cfg.finetune.use_lora
+            ):
                 logging.info(
-                    "Model checkpoint does not contain LoRA parameters but use_lora is set to True, using the checkpoint as base model")
-                load_state_dict(model, checkpoint_model,
-                                strict=self.cfg.finetune.strict)
-                add_lora_by_name(
-                    model, self.cfg.finetune.layers_with_lora, lora_config)
+                    "Model checkpoint does not contain LoRA parameters but use_lora is set to True, using the checkpoint as base model"
+                )
+                load_state_dict(
+                    model, checkpoint_model, strict=self.cfg.finetune.strict
+                )
+                add_lora_by_name(model, self.cfg.finetune.layers_with_lora, lora_config)
             else:
-                load_state_dict(model, checkpoint_model,
-                                strict=self.cfg.finetune.strict)
+                load_state_dict(
+                    model, checkpoint_model, strict=self.cfg.finetune.strict
+                )
 
         # Load additional checkpoints
         if len(self.cfg.finetune.additional_checkpoints) > 0:
             for checkpoint_config in self.cfg.finetune.additional_checkpoints:
                 checkpoint_model = load_checkpoint(
-                    checkpoint_config.checkpoint, model_key=checkpoint_config.model_key)
+                    checkpoint_config.checkpoint, model_key=checkpoint_config.model_key
+                )
                 checkpoint_model = extract_state_dict(checkpoint_model)
                 checkpoint_model = rename_state_dict(
-                    checkpoint_model, checkpoint_config.rename_config)
-                load_state_dict(model, checkpoint_model,
-                                strict=checkpoint_config.strict)
+                    checkpoint_model, checkpoint_config.rename_config
+                )
+                load_state_dict(
+                    model, checkpoint_model, strict=checkpoint_config.strict
+                )
 
         if self.cfg.finetune.use_lora:
             # Load LoRA parameters based on the stage
-            if self.cfg.stage == 'fit':
+            if self.cfg.stage == "fit":
                 # Load LoRA parameters for training
                 if self.cfg.finetune.lora_checkpoint is not None:
-                    lora_state_dict = load_checkpoint(
-                        self.cfg.finetune.lora_checkpoint)
+                    lora_state_dict = load_checkpoint(self.cfg.finetune.lora_checkpoint)
                     lora_state_dict = extract_state_dict(lora_state_dict)
                     lora_state_dict = rename_state_dict(
-                        lora_state_dict, self.cfg.finetune.lora_rename_config)
+                        lora_state_dict, self.cfg.finetune.lora_rename_config
+                    )
                     load_state_dict(model, lora_state_dict, strict=True)
-            elif self.cfg.stage in ['validate', 'predict']:
+            elif self.cfg.stage in ["validate", "predict"]:
                 # Load LoRA parameters for validation and prediction
                 if self.cfg.finetune.lora_checkpoint is not None:
-                    lora_state_dict = load_checkpoint(
-                        self.cfg.finetune.lora_checkpoint)
+                    lora_state_dict = load_checkpoint(self.cfg.finetune.lora_checkpoint)
                     lora_state_dict = extract_state_dict(lora_state_dict)
                     lora_state_dict = rename_state_dict(
-                        lora_state_dict, self.cfg.finetune.lora_rename_config)
+                        lora_state_dict, self.cfg.finetune.lora_rename_config
+                    )
                     load_state_dict(model, lora_state_dict, strict=True)
 
         model.freeze_layers(
-            patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False)
+            patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False
+        )
         print("Model = %s" % str(model))
         return model
 
     def on_validation_epoch_end(self):
         pass
-
-
-
-    def configure_optimizers(self):
-        if hasattr(self.model.cfg, 'encoder'):
-            num_layers = self.model.cfg.encoder.num_layers
-        else:
-            num_layers = 0
-        assigner = LayerDecayValueAssigner(
-            list(0.75 ** (num_layers + 1 - i) for i in range(num_layers + 2)))
-
-        if assigner is not None:
-            print("Assigned values = %s" % str(assigner.values))
-        skip_weight_decay_list = self.model.no_weight_decay()
-        print("Skip weight decay list: ", skip_weight_decay_list)
-
-        optimizer = create_optimizer(self.cfg.optimizer, self.model,
-                                     skip_list=skip_weight_decay_list,
-                                     get_num_layer=assigner.get_layer_id if assigner is not None else None,
-                                     get_layer_scale=assigner.get_scale if assigner is not None else None
-                                     )
-
-        data_size = len(self.dm.dataset_train)
-        num_training_steps_per_epoch = (
-            data_size // self.cfg.machine.batch_size // self.cfg.machine.num_devices
-        )
-        schedule = cosine_scheduler(
-            base_value=self.cfg.optimizer.lr,
-            final_value=self.cfg.optimizer.min_lr,
-            epochs=self.cfg.training.epochs+1,
-            niter_per_ep=num_training_steps_per_epoch,
-            warmup_epochs=self.cfg.training.warmup_epochs,
-            start_warmup_value=self.cfg.optimizer.min_lr,
-            warmup_steps=-1
-        )
-        # step based lr scheduler
-        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer,
-            lr_lambda=lambda step: schedule[step]/self.cfg.optimizer.lr,
-        )
-        return [optimizer], [lr_scheduler]
 
 
 class RegionZarrDataModule(RegionDataModule):
@@ -379,11 +426,15 @@ class RegionZarrDataModule(RegionDataModule):
 
     def build_inference_dataset(self, is_train=False, gene_list=None, gencode_obj=None):
         if gencode_obj is None:
-            gencode_obj = get_gencode_obj(
-                self.cfg.assembly, self.cfg.machine.data_path)
+            gencode_obj = get_gencode_obj(self.cfg.assembly, self.cfg.machine.data_path)
 
-        return InferenceRegionMotifDataset(**self.cfg.dataset, assembly=self.cfg.assembly, is_train=is_train, gene_list=self.cfg.task.gene_list if gene_list is None else gene_list, gencode_obj=gencode_obj)
-
+        return InferenceRegionMotifDataset(
+            **self.cfg.dataset,
+            assembly=self.cfg.assembly,
+            is_train=is_train,
+            gene_list=self.cfg.task.gene_list if gene_list is None else gene_list,
+            gencode_obj=gencode_obj,
+        )
 
 
 def run(cfg: DictConfig):
@@ -391,13 +442,14 @@ def run(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     dm = RegionDataModule(cfg)
     model.dm = dm
-    
+
     return run_shared(cfg, model, dm)
+
 
 def run_zarr(cfg: DictConfig):
     model = RegionLitModel(cfg)
     print(OmegaConf.to_yaml(cfg))
     dm = RegionZarrDataModule(cfg)
     model.dm = dm
-    
+
     return run_shared(cfg, model, dm)

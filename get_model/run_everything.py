@@ -443,4 +443,3 @@ def run(cfg: DictConfig):
     
     return run_shared(cfg, model, dm)
 
-
