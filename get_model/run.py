@@ -539,7 +539,7 @@ class LitModel(L.LightningModule):
             from numcodecs import VLenUTF8
 
             object_codec = VLenUTF8()
-            z = zarr.open(zarr_path, mode="w")
+            z = zarr.open(zarr_path, mode="a")
 
             accumulated_results = recursive_concat_numpy(self.accumulated_results)
             recursive_save_to_zarr(
