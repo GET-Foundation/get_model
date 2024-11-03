@@ -3845,7 +3845,7 @@ class RegionMotifDataset(Dataset):
         self.sampling_step = sampling_step
         self.num_region_per_sample = num_region_per_sample
         self.leave_out_chromosomes = leave_out_chromosomes if leave_out_chromosomes else []
-        self.leave_out_celltypes = leave_out_celltypes if leave_out_celltypes else []
+        self.leave_out_celltypes = leave_out_celltypes.split(",") if leave_out_celltypes else []
         self.is_train = is_train
         self.mask_ratio = mask_ratio
 
