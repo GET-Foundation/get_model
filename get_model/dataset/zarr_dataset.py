@@ -29,16 +29,18 @@ EXPRESSION_ATAC_CUTOFF = (
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
+
 def _chromosome_splitter(
-    all_chromosomes: list, leave_out_chromosomes: str | None, is_train=True
+    all_chromosomes: list, leave_out_chromosomes: str | list |None, is_train=True
 ):
     input_chromosomes = all_chromosomes.copy()
     if leave_out_chromosomes is None:
         leave_out_chromosomes = []
-    elif "," in leave_out_chromosomes:
-        leave_out_chromosomes = leave_out_chromosomes.split(",")
-    else:
-        leave_out_chromosomes = [leave_out_chromosomes]
+    elif isinstance(leave_out_chromosomes, str):
+        if "," in leave_out_chromosomes:
+            leave_out_chromosomes = leave_out_chromosomes.split(",")
+        else:
+            leave_out_chromosomes = [leave_out_chromosomes]
 
     if is_train or leave_out_chromosomes == [""] or leave_out_chromosomes == []:
         input_chromosomes = [
@@ -51,7 +53,8 @@ def _chromosome_splitter(
 
     if isinstance(input_chromosomes, str):
         input_chromosomes = [input_chromosomes]
-
+    print("Leave out chromosomes:", leave_out_chromosomes)
+    print("Input chromosomes:", input_chromosomes)
     return input_chromosomes
 
 
@@ -3841,8 +3844,8 @@ class RegionMotifDataset(Dataset):
         self.quantitative_atac = quantitative_atac
         self.sampling_step = sampling_step
         self.num_region_per_sample = num_region_per_sample
-        self.leave_out_chromosomes = leave_out_chromosomes.split(",") if leave_out_chromosomes else []
-        self.leave_out_celltypes = leave_out_celltypes.split(",") if leave_out_celltypes else []
+        self.leave_out_chromosomes = leave_out_chromosomes if leave_out_chromosomes else []
+        self.leave_out_celltypes = leave_out_celltypes if leave_out_celltypes else []
         self.is_train = is_train
         self.mask_ratio = mask_ratio
 
