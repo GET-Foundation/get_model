@@ -21,6 +21,7 @@ GET: a foundation model of transcription across human cell types
 Checkout scripts/setup_env.sh to setup the environment.
 
 ```bash
+# Note that if you have problem installing the conda/mamba environment, edit (temporarily) your CONDARC to remove `channel_priority: strict` 
 bash scripts/setup_env.sh /path/to/project/root
 ```
 
