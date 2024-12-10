@@ -17,7 +17,7 @@ from get_model.run_region import run_zarr as run
 from get_model.utils import print_shape
 
 # %%
-# # Preprocess the data
+# Preprocess the data
 # %%
 motif_bed_url = "https://resources.altius.org/~jvierstra/projects/motif-clustering/releases/v1.0/hg38.archetype_motifs.v1.0.bed.gz"
 motif_bed_index_url = "https://resources.altius.org/~jvierstra/projects/motif-clustering/releases/v1.0/hg38.archetype_motifs.v1.0.bed.gz.tbi"
@@ -28,14 +28,14 @@ if (
     motif_bed_url
     and motif_bed_index_url
     and not (
-        os.path.exists("hg38.archetype_motifs.v1.0.bed.gz")
-        or os.path.exists("hg38.archetype_motifs.v1.0.bed.gz.tbi")
+        os.path.exists("data/hg38.archetype_motifs.v1.0.bed.gz")
+        or os.path.exists("data/hg38.archetype_motifs.v1.0.bed.gz.tbi")
     )
 ):
-    download_motif(motif_bed_url, motif_bed_index_url)
-    motif_bed = "hg38.archetype_motifs.v1.0.bed.gz"
+    download_motif(motif_bed_url, motif_bed_index_url, motif_dir="data")
+    motif_bed = "data/hg38.archetype_motifs.v1.0.bed.gz"
 else:
-    motif_bed = "/home/xf2217/Projects/get_data/hg38.archetype_motifs.v1.0.bed.gz"
+    motif_bed = "data/hg38.archetype_motifs.v1.0.bed.gz"
 # %%
 # join peaks with reference peaks if provided. Ideally, after doing this step, you should get
 # the corresponding aTPM values again for the joint peaks using the scATAC data. For simplicity,
@@ -46,7 +46,7 @@ joint_peaks = join_peaks(peak_bed, reference_peaks)
 peaks_motif = query_motif(joint_peaks, motif_bed)
 get_motif_output = get_motif(joint_peaks, peaks_motif)
 
-# %%
+# %%2
 # create peak motif zarr file
 create_peak_motif(get_motif_output, "output.zarr", peak_bed)
 # %%
@@ -108,11 +108,16 @@ print_shape(inference_region_motif_dataset[1])
 #%%
 # # Finetune the model
 #%%
+# Download checkpoint from s3 
+s3_checkpoint_url = "s3://2023-get-xf2217/get_demo/checkpoints/fetal_pretrain_fetal_finetune/Astrocytes/checkpoint-best.pth"
+! aws s3 cp $s3_checkpoint_url ./checkpoint-best.pth --no-sign-request
+#%%
 # load config
 cfg = load_config('finetune_tutorial')
 pretty_print_config(cfg)
 cfg.run.run_name='training'
 cfg.dataset.zarr_path = "./output.zarr"
+cfg.finetune.checkpoint = "./checkpoint-best.pth"
 cfg.run.use_wandb=False
 cfg.machine.num_devices=0
 #%%
