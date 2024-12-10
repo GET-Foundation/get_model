@@ -4,7 +4,7 @@ This tutorial walks you through the process of fine-tuning a model using single-
 
 ## Step 1: Pre-process the Data
 
-You need ATAC-seq data in the form of a fragment file (for single-cell data) or a `BAM` file (for bulk data). For RNA-seq, you will need a list of `CSV` files denoting gene expression or a single `CSV` file, or data in `h5ad` format.
+You need ATAC-seq data in the form of a fragment file (for single-cell data) or a `BAM` file (for bulk data). For Region-based model in the original GET paper, you can run MACS peak calling on the fragment file to acquire a peak file. For RNA-seq, you will need a list of `CSV` files denoting gene expression or a single `CSV` file. Checkout the `astrocyte.atac.bed` and `astrocyte.rna.csv` for the file required in `full_v1_pipeline.py`.
 
 The output will be a `zarr` file containing both ATAC-seq pseudoblock data and RNA-seq expression values.
 
