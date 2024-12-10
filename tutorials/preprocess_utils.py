@@ -16,7 +16,7 @@ class Gencode(object):
     returns a pandas dataframe"""
 
     def __init__(
-        self, assembly="hg38", version=40, gtf_dir="../data", exclude_chrs=["chrM", "chrY"]
+        self, assembly="hg38", version=40, gtf_dir="data", exclude_chrs=["chrM", "chrY"]
     ):
         super(Gencode, self).__init__()
 
@@ -157,7 +157,7 @@ class Gencode(object):
         return
 
 
-def download_motif(motif_url, index_url):
+def download_motif(motif_url, index_url, motif_dir="data"):
     """
     Download motif data from a URL and its index.
 
@@ -168,10 +168,10 @@ def download_motif(motif_url, index_url):
         index_url (str): URL to the index file.
     """
     subprocess.run(
-        ["wget", "-O", "hg38.archetype_motifs.v1.0.bed.gz", motif_url], check=True
+        ["wget", "-O", os.path.join(motif_dir, "hg38.archetype_motifs.v1.0.bed.gz"), motif_url], check=True
     )
     subprocess.run(
-        ["wget", "-O", "hg38.archetype_motifs.v1.0.bed.gz.tbi", index_url], check=True
+        ["wget", "-O", os.path.join(motif_dir, "hg38.archetype_motifs.v1.0.bed.gz.tbi"), index_url], check=True
     )
 
 
@@ -419,20 +419,38 @@ def add_atpm(zarr_file, bed_file, celltype):
 
 
 def add_exp(
-    zarr_file, rna_file, atac_file, celltype, assembly="hg38", version=40, extend_bp=100
+    zarr_file, rna_file, atac_file, celltype, assembly="hg38", version=40, extend_bp=300, id_or_name="gene_id",
 ):
     """
     Add expression and TSS data for a specific cell type to the zarr file.
+
+    Args:
+        zarr_file (str): Path to the zarr file.
+        rna_file (str): Path to the RNA file.
+        atac_file (str): Path to the ATAC file.
+        celltype (str): Name of the cell type for which the expression data is being added.
+        assembly (str): Genome assembly (e.g., 'hg38', 'mm10').
+        version (int): Version of the genome assembly.
+        extend_bp (int): Number of base pairs to extend the promoter region.
+        id_or_name (str): Whether to use 'gene_id' or 'gene_name' for the gene identifier.
     """
     # Initialize Gencode
     gencode = Gencode(assembly=assembly, version=version)
 
     # Read RNA data
     gene_exp = pd.read_csv(rna_file)
-    gene_exp["gene_id"] = gene_exp["gene_id"].apply(lambda x: x.split(".")[0])
-    promoter_exp = pd.merge(
-        gencode.gtf, gene_exp, left_on="gene_id", right_on="gene_id"
-    )
+    if id_or_name == "gene_id":
+        gene_exp["gene_id"] = gene_exp["gene_id"].apply(lambda x: x.split(".")[0])
+        promoter_exp = pd.merge(
+            gencode.gtf, gene_exp, left_on="gene_id", right_on="gene_id"
+        )
+    elif id_or_name == "gene_name":
+        promoter_exp = pd.merge(
+            gencode.gtf, gene_exp, left_on="gene_name", right_on="gene_name"
+        )
+    else:
+        raise ValueError(f"Invalid value for id_or_name: {id_or_name}")
+
 
     # Read ATAC data
     if atac_file.endswith(".bed"):
