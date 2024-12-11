@@ -2,6 +2,10 @@
 # NOTE: tabix has to be >= 1.17
 ! tabix --version
 #%%
+# Before you start, make sure you have the conda environment installed or use the docker image at https://hub.docker.com/r/fuxialexander/get_model
+# The required data is a peak bed file with log10(aCPM+1) values for each peak and a CSV file with gene expression in log10(TPM+1) values. 
+# checkout the `astrocyte.atac.bed` and `astrocyte.rna.csv` for the file format.
+#%%
 import os
 
 from atac_rna_data_processing.io.celltype import GETHydraCellType
@@ -117,6 +121,7 @@ cfg = load_config('finetune_tutorial')
 pretty_print_config(cfg)
 cfg.run.run_name='training'
 cfg.dataset.zarr_path = "./output.zarr"
+cfg.dataset.celltypes = 'astrocyte' # the celltypes you want to finetune
 cfg.finetune.checkpoint = "./checkpoint-best.pth"
 cfg.run.use_wandb=False
 cfg.machine.num_devices=0
