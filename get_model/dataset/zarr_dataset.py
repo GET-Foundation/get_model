@@ -1291,11 +1291,13 @@ class PreloadDataPack(object):
         peak_inactivation_ = pr(peak_inactivation)
         celltype_peaks_ = celltype_peaks_.join(
             peak_inactivation_, how="left", suffix="_peak"
-        )
+        ).df
         # get numeric index of the peaks that are in peak_inactivation
-        inactivated_peak_idx = celltype_peaks_.loc[celltype_peaks_["Start_peak"] != -1][
-            "index"
-        ].drop_duplicates()
+        inactivated_peak_idx = (
+            celltype_peaks_.loc[celltype_peaks_["Start_peak"] != -1]["index"]
+            .drop_duplicates()
+            .values
+        )
         return inactivated_peak_idx
 
     def _generate_sample(
@@ -3972,6 +3974,7 @@ class RegionMotifDataset(Dataset):
 
 class InferenceRegionMotifDataset(RegionMotifDataset):
     def __init__(self, assembly, gencode_obj, gene_list=None, **kwargs):
+        self.gencode_obj = gencode_obj[assembly]
         if isinstance(gene_list, str):
             if "," in gene_list:
                 gene_list = gene_list.split(",")
@@ -3983,10 +3986,9 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
             else self.gencode_obj.gtf["gene_name"].unique()
         )
         super().__init__(**kwargs)
-        self.gencode_obj = gencode_obj[assembly]
 
     def setup(self):
-        """Setup focus on gene list"""
+        """Setup focus on gene list and TSS sites"""
         for celltype, region_motif in tqdm(self.region_motifs.items()):
             if (
                 self.is_train
@@ -4006,51 +4008,52 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
             input_chromosomes = _chromosome_splitter(
                 all_chromosomes, self.leave_out_chromosomes, self.is_train
             )
-            # instead of loop over chromosome, loop over gene
-            for gene, gene_df in region_motif.gene_idx_info.query("gene_name.isin(@self.gene_list)").groupby("gene_name"):
+            print(region_motif.gene_idx_info.drop_duplicates(ignore_index=True))
+            # Loop over genes and their TSS sites
+            for gene, gene_df in region_motif.gene_idx_info.drop_duplicates(ignore_index=True).query("gene_name.isin(@self.gene_list)").groupby("gene_name"):
                 gene_name = gene_df["gene_name"].values[0]
                 strand = gene_df["strand"].values[0]
                 strand = 0 if strand == "+" else 1
-                tss_peak = gene_df["index"].values
-                chrom = region_motif.peaks.iloc[tss_peak]["Chromosome"].values[0]
-                idx = (
-                    gene_df["index"].values[0]
-                    if strand == 0
-                    else gene_df["index"].values[-1]
-                )
-                start_idx = idx - self.num_region_per_sample // 2
-                end_idx = idx + self.num_region_per_sample // 2
-                if start_idx < 0 or end_idx >= region_motif.peaks.shape[0]:
-                    continue
-                peak_coord = region_motif.peaks.iloc[start_idx:end_idx][
-                    ["Start", "End"]
-                ].values
-                tss_peak = tss_peak - start_idx
-                self.sample_indices.append(
-                    (
-                        celltype,
-                        start_idx,
-                        end_idx,
-                        gene_name,
-                        strand,
-                        tss_peak,
-                        peak_coord,
-                        chrom,
-                    )
-                )
+                tss_peaks = gene_df["index"].values
+                chrom = region_motif.peaks.iloc[tss_peaks[0]]["Chromosome"]
+                # Process each TSS for the gene
+                for tss_idx in tss_peaks:
+                    start_idx = tss_idx - self.num_region_per_sample // 2
+                    end_idx = tss_idx + self.num_region_per_sample // 2
+                    
+                    if start_idx < 0 or end_idx >= region_motif.peaks.shape[0]:
+                        continue
+
+                    peak_coord = region_motif.peaks.iloc[start_idx:end_idx][["Start", "End"]].values
+                    
+                    # Store all necessary information for each TSS
+                    self.sample_indices.append({
+                        "celltype": celltype,
+                        "start_idx": start_idx,
+                        "end_idx": end_idx,
+                        "gene_name": gene_name,
+                        "strand": strand,
+                        "tss_idx": tss_idx,
+                        "tss_peaks": tss_peaks - start_idx,  # Convert to relative positions
+                        "chromosome": chrom,
+                        "peak_coord": peak_coord
+                    })
 
     def __getitem__(self, index):
-        celltype, start_idx, end_idx, gene_name, strand, tss_peak, peak_coord, chrom = (
-            self.sample_indices[index]
-        )
+        sample_info = self.sample_indices[index]
+        celltype = sample_info["celltype"]
+        start_idx = sample_info["start_idx"]
+        end_idx = sample_info["end_idx"]
         region_motif = self.region_motifs[celltype]
+
+        # Get the data for this region
         region_motif_i = region_motif.normalize_data()[start_idx:end_idx]
-        peaks_i = region_motif.peaks.iloc[start_idx:end_idx]
         expression_positive = region_motif.expression_positive[start_idx:end_idx]
         expression_negative = region_motif.expression_negative[start_idx:end_idx]
         tss = region_motif.tss[start_idx:end_idx]
         atpm = region_motif.atpm[start_idx:end_idx]
 
+        # Handle ATAC signal
         if not self.quantitative_atac:
             region_motif_i = np.concatenate(
                 [region_motif_i, np.ones((region_motif_i.shape[0], 1))], axis=1
@@ -4059,9 +4062,11 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
             normalized_atpm = atpm.reshape(-1, 1) / atpm.max()
             region_motif_i = np.concatenate([region_motif_i, normalized_atpm], axis=1)
 
+        # Prepare target data
         target_data = np.column_stack((expression_positive, expression_negative))
         target_i = coo_matrix(target_data)
 
+        # Handle masking
         if self.mask_ratio > 0:
             mask = np.random.choice(
                 [0, 1], size=len(tss), p=[1 - self.mask_ratio, self.mask_ratio]
@@ -4070,29 +4075,32 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
             mask = tss
 
         if self.transform:
-            region_motif_i, mask, target_i = self.transform(
-                region_motif_i, mask, target_i
-            )
+            region_motif_i, mask, target_i = self.transform(region_motif_i, mask, target_i)
 
-        data = {
+        # Filter and pad TSS peaks
+        valid_tss_peaks = sample_info["tss_peaks"]
+        valid_tss_peaks = valid_tss_peaks[
+            (valid_tss_peaks >= 0) & (valid_tss_peaks < self.num_region_per_sample)
+        ]
+        padded_tss_peaks = np.pad(
+            valid_tss_peaks,
+            (0, self.num_region_per_sample - len(valid_tss_peaks)),
+            mode="constant",
+            constant_values=-1
+        )
+
+        return {
             "region_motif": region_motif_i.astype(np.float32),
             "mask": mask,
-            "gene_name": gene_name,
-            "tss_peak": tss.sum(axis=1),
-            "chromosome": chrom,
-            "peak_coord": peak_coord,
-            "all_tss_peak": np.pad(
-                np.unique(tss_peak),
-                (0, self.num_region_per_sample - len(np.unique(tss_peak))),
-                mode="constant",
-                constant_values=-1,
-            ),
-            "strand": strand,
+            "gene_name": sample_info["gene_name"],
+            "tss_peak": sample_info["tss_idx"] - start_idx,  # Current TSS position
+            "chromosome": sample_info["chromosome"],
+            "peak_coord": sample_info["peak_coord"],
+            "all_tss_peak": padded_tss_peaks,  # All TSS positions for this gene
+            "strand": sample_info["strand"],
             "exp_label": target_i.toarray().astype(np.float32),
             "celltype": celltype,
         }
-
-        return data
 
 
 class EverythingDataset(ReferenceRegionDataset):
