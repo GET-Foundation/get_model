@@ -264,10 +264,11 @@ class RegionLitModel(LitModel):
 
         elif self.cfg.task.test_mode == "interpret":
             focus = []
-            for i in range(len(batch["gene_name"])):
-                goi_idx = batch["all_tss_peak"][i].cpu().numpy()
-                goi_idx = goi_idx[goi_idx > 0]
-                focus.append(goi_idx)
+            # for i in range(len(batch["gene_name"])):
+            #     goi_idx = batch["all_tss_peak"][i].cpu().numpy()
+            #     goi_idx = goi_idx[goi_idx > 0]
+            #     focus.append(goi_idx)
+            focus = 100
             torch.set_grad_enabled(True)
             preds, obs, jacobians, embeddings = self.interpret_step(
                 batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=focus
@@ -427,7 +428,7 @@ class RegionZarrDataModule(RegionDataModule):
     def build_inference_dataset(self, is_train=False, gene_list=None, gencode_obj=None):
         if gencode_obj is None:
             gencode_obj = get_gencode_obj(self.cfg.assembly, self.cfg.machine.data_path)
-
+        print(gencode_obj)
         return InferenceRegionMotifDataset(
             **self.cfg.dataset,
             assembly=self.cfg.assembly,
