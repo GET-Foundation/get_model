@@ -443,8 +443,7 @@ dependencies:
   - tqdm=4.65.0=pyhd8ed1ab_1
   - traitlets=5.8.1=pyhd8ed1ab_0
   - tree=2.1.1=hd590300_0
-  - typing-extensions=4.9.0=hd8ed1ab_0
-  - typing_extensions=4.9.0=pyha770c72_0
+  - typing_extensions==4.11.0
   - tzdata=2024a=h0c530f3_0
   - ucsc-liftover=357=0
   - umap-learn=0.5.3=py310hff52083_1
