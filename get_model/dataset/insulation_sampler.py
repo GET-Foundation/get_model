@@ -5,7 +5,7 @@ import os
 import os.path
 import numpy as np
 import pandas as pd
-from caesar.io.genome import ChromSize
+from caesar.io.chromsize import ChromSize
 class InsulationSampler:
     """
     A class for processing BigWig files to analyze chromosomal data.
@@ -324,7 +324,7 @@ class CTCFBoundary(object):
 # from tqdm import tqdm
 # import numpy as np
 # import pandas as pd
-# from caesar.io.genome import ChromSize
+# from caesar.io.chromsize import ChromSize
 # c = CTCFBoundary('/manitou/pmg/users/xf2217/get_model/data/', 'hg38')
 # # %%
 # c.get_boundary_list()
