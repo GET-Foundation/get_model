@@ -55,6 +55,13 @@ singularity exec --nv get.sif env JUPYTER_CONFIG_DIR=/tmp/.jupyter /opt/conda/bi
 # or directly access python
 singularity exec --nv get.sif /opt/conda/bin/python
 ```
+then test if cuda is avaliable and whether package is installed correctly:
+```python
+import torch
+torch.cuda.is_available()
+import get_model
+import atac_rna_data_processing
+```
 
 ## Quick Start
 
