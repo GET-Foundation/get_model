@@ -33,7 +33,7 @@ Repository = "https://github.com/fuxialexander/get_model"
 
 [tool.setuptools]
 include-package-data = true
-packages = ["get_model"]
+packages = ["get_model", "get_model.config", "get_model.dataset", "get_model.debug", "get_model.model", "get_model.test]
 
 [tool.setuptools.package-data]
 "get_model" = ["config/**/*.yaml", "**/*.yaml", "**/*.json", "config/*.yaml"]
