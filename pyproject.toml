@@ -33,7 +33,11 @@ Repository = "https://github.com/fuxialexander/get_model"
 
 [tool.setuptools]
 include-package-data = true
-packages = ["get_model", "get_model.config", "get_model.dataset", "get_model.debug", "get_model.model", "get_model.test]
+
+[tool.setuptools.packages.find]
+where = ["."]  # Start looking for packages inside the root folder
+exclude = ["test*"]  # Exclude test packages
+include = ["get_model*"]  # Only include packages starting with "get_model"
 
 [tool.setuptools.package-data]
 "get_model" = ["config/**/*.yaml", "**/*.yaml", "**/*.json", "config/*.yaml"]
