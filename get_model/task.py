@@ -1,38 +1,18 @@
-import logging
-
-import lightning as L
-from matplotlib import pyplot as plt
 import pandas as pd
 import torch
 import torch.utils.data
-from caesar.io.zarr_io import DenseZarrIO
-from caesar.io.gencode import Gencode
-from hydra.utils import instantiate
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.plugins import MixedPrecision
-from lightning.pytorch.utilities import grad_norm
-from omegaconf import MISSING, DictConfig
+from get_model.dataset.gencode import Gencode
 
-from get_model.config.config import *
 from get_model.dataset.collate import get_rev_collate_fn
-from get_model.dataset.zarr_dataset import DenseZarrIO, InferenceDataset, PretrainDataset
-from get_model.model.model import *
-from get_model.model.modules import *
-from get_model.optim import create_optimizer
-from get_model.utils import cosine_scheduler, load_checkpoint, remove_keys
-import seaborn as sns
+from get_model.dataset.zarr_dataset import InferenceDataset
 
 
 from dataclasses import dataclass
 
-import lightning as L
 import pandas as pd
 import torch
 from omegaconf import MISSING
-from tqdm import tqdm
 
-from get_model.run import LitModel
 
 
 @dataclass

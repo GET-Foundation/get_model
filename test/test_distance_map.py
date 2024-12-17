@@ -1,5 +1,4 @@
 #%%
-from calendar import c
 from caesar.io.gencode import Gencode
 from caesar.io.zarr_io import DenseZarrIO
 import numpy as np

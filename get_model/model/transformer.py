@@ -1,4 +1,3 @@
-import dis
 from functools import partial
 
 import torch
@@ -10,7 +9,6 @@ try:
     from flash_attn import flash_attn_qkvpacked_func
 except ImportError:
     flash_attn_qkvpacked_func = None
-from axial_attention import AxialAttention
 
 class Attention(nn.Module):
     def __init__(
@@ -254,39 +252,45 @@ class Block(nn.Module):
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
         return x, attn
 
-class PairedBlock(nn.Module):
-    """A block that will perform the axial attention and mlp on the paired embedding."""
-    def __init__(
-        self,
-        dim,
-        num_heads,
-        mlp_ratio=4.0,
-        drop=0,
-        act_layer=nn.GELU,
-        norm_layer=nn.LayerNorm,
-    ):
-        super().__init__()
-        self.norm1 = norm_layer(dim)
-        self.axial_attn = AxialAttention(
+try:
+    from axial_attention import AxialAttention
+    class PairedBlock(nn.Module):
+        """A block that will perform the axial attention and mlp on the paired embedding."""
+        def __init__(
+            self,
             dim,
-            num_dimensions=2,
-            heads=num_heads,
-        )
-        self.norm2 = norm_layer(dim)
-        mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(
-            in_features=dim,
-            hidden_features=mlp_hidden_dim,
-            act_layer=act_layer,
-            drop=drop,
-        )
+            num_heads,
+            mlp_ratio=4.0,
+            drop=0,
+            act_layer=nn.GELU,
+            norm_layer=nn.LayerNorm,
+        ):
+            super().__init__()
+            self.norm1 = norm_layer(dim)
+            self.axial_attn = AxialAttention(
+                dim,
+                num_dimensions=2,
+                heads=num_heads,
+            )
+            self.norm2 = norm_layer(dim)
+            mlp_hidden_dim = int(dim * mlp_ratio)
+            self.mlp = Mlp(
+                in_features=dim,
+                hidden_features=mlp_hidden_dim,
+                act_layer=act_layer,
+                drop=drop,
+            )
 
-    def forward(self, x, attention_mask=None, attention_bias=None):
-        x_attn = self.axial_attn(self.norm1(
-            x))
-        x = x + x_attn
-        x = x + self.mlp(self.norm2(x))
-        return x
+        def forward(self, x, attention_mask=None, attention_bias=None):
+            x_attn = self.axial_attn(self.norm1(
+                x))
+            x = x + x_attn
+            x = x + self.mlp(self.norm2(x))
+            return x
+
+except ImportError:
+    PairedBlock = None
+
 
 
 class GETTransformer(nn.Module):

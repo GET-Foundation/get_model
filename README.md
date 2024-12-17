@@ -2,6 +2,8 @@
 
 GET: a foundation model of transcription across human cell types
 
+We are still in the process to polish the codebase... so expect rough edges when you use it and it's adviced that you are familiar with Python, Bash, and Torch as well as ChatGPT Prompting before getting started. We are sorry for the inconvenience and are working day-and-night to update it.
+
 ## Table of Contents
 
 - [GET: Gene Expression Transformer](#get-gene-expression-transformer)
@@ -55,6 +57,7 @@ singularity exec --nv get.sif env JUPYTER_CONFIG_DIR=/tmp/.jupyter /opt/conda/bi
 # or directly access python
 singularity exec --nv get.sif /opt/conda/bin/python
 ```
+
 then test if cuda is avaliable and whether package is installed correctly:
 ```python
 import torch
@@ -62,6 +65,16 @@ torch.cuda.is_available()
 import get_model
 import atac_rna_data_processing
 ```
+
+If you are using vscode or cursor as code editor, you can open a tunnel from inside the singularity / docker
+```bash
+singularity exec --nv get.sif /bin/bash
+# then 
+code tunnel
+# or 
+cursor tunnel
+```
+This enable you to use your local Cursor.app or VSCode.app and all the Copilot/Jupyter/Debugger stuff to access the environment inside the container. You can even access it from your browser.
 
 ## Quick Start
 

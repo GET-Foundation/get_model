@@ -11,7 +11,7 @@ authors = [
     { name = "Xi Fu", email = "fuxialexander@gmail.com" }
 ]
 license = { text = "CC BY-NC 4.0" }
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -21,11 +21,35 @@ classifiers = [
 ]
 
 dependencies = [
-    "torch",
+    "einops",
     "hydra-core",
+    "lightning",
+    "matplotlib",
     "numpy",
+    "omegaconf",
     "pandas",
+    "pyranges @ git+https://github.com/pyranges/pyranges@master",
+    "minlora @ git+https://github.com/cccntu/minLoRA.git@main",
+    "scipy",
+    "seaborn",
+    "timm",
+    "torch",
+    "torchmetrics",
+    "tqdm",
+    "wandb",
+    "zarr",
 ]
+
+
+[project.optional-dependencies]
+hic = [
+    "hic-straw",
+    "cooler",
+]
+nuc = [
+    "caesar @ git+https://github.com/fuxialexander/caesar@master",
+]
+
 
 [project.urls]
 Documentation = "https://fuxialexander.github.io/get_model/"

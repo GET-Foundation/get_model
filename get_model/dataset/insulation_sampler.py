@@ -5,7 +5,7 @@ import os
 import os.path
 import numpy as np
 import pandas as pd
-from caesar.io.chromsize import ChromSize
+from get_model.dataset.chromsize import ChromSize
 class InsulationSampler:
     """
     A class for processing BigWig files to analyze chromosomal data.
