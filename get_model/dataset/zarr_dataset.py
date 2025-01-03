@@ -10,12 +10,11 @@ import numpy as np
 import pandas as pd
 import torch
 import zarr
+from gcell.rna.gencode import Gencode
 from pyranges import PyRanges as pr
 from scipy.sparse import coo_matrix, csr_matrix, load_npz, vstack
 from torch.utils.data import Dataset
 from tqdm import tqdm
-
-from .gencode import Gencode
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -118,12 +117,23 @@ def get_hic_from_idx(hic, csv, start=None, end=None, resolution=5000, method="oe
         dst = np.log10(numpy_matrix[hic_idx, :][:, hic_idx] + 1)
         return dst
 
-
-try:
-    from .zarr_nuc_dataset import *
-except:
-    logging.warning("caesar is not installed, only region-based model is supported")
-
+def get_gencode_obj(genome_seq_zarr: dict | str):
+    """
+    Get Gencode object for genome sequence.
+    """
+    # TODO: make this more flexible
+    version_mapping = {
+        'hg38': 44,
+        'mm10': 'm36',
+    }
+    if isinstance(genome_seq_zarr, dict):
+        gencode_obj = {}
+        for assembly, _ in genome_seq_zarr.items():
+            gencode_obj[assembly] = Gencode(assembly, version=version_mapping[assembly])
+    elif isinstance(genome_seq_zarr, str):
+        assembly = basename(genome_seq_zarr).split(".")[0]
+        gencode_obj = {assembly: Gencode(assembly, version=version_mapping[assembly])}
+    return gencode_obj
 
 class RegionDataset(Dataset):
     """
@@ -737,7 +747,7 @@ class InferenceRegionDataset(RegionDataset):
                 peak_data[:, 282] = 1
 
             all_chromosomes = celltype_peak_annot["Chromosome"].unique().tolist()
-            input_chromosomes = _chromosome_splitter(
+            c = _chromosome_splitter(
                 all_chromosomes, leave_out_chromosomes, is_train=is_train
             )
 

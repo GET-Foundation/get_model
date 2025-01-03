@@ -24,7 +24,7 @@ from get_model.dataset.zarr_dataset import (
 )
 from get_model.model.model import *
 from get_model.model.modules import *
-from get_model.run import LitModel, get_insulation_overlap, run_shared
+from get_model.run import LitModel, run_shared
 from get_model.utils import (
     extract_state_dict,
     load_checkpoint,
@@ -298,29 +298,6 @@ class RegionLitModel(LitModel):
                 "avaliable_genes": gene_names,
             }
             self.accumulated_results.append(result)
-
-        elif self.cfg.task.test_mode == "interpret_captum":
-            tss_peak = batch["tss_peak"][0].cpu().numpy()
-
-            new_peak_start_idx, new_peak_end_idx, new_tss_peak = get_insulation_overlap(
-                batch, self.dm.dataset_predict.zarr_dataset.datapool.insulation
-            )
-            for shift in np.random.randint(-10, 10, 5):
-                if (
-                    new_peak_start_idx + shift < 0
-                    or new_peak_end_idx + shift >= batch["region_motif"][0].shape[0]
-                ):
-                    continue
-                # assume focus is the center peaks in the input sample
-                torch.set_grad_enabled(True)
-                self.interpret_captum_step(
-                    batch,
-                    batch_idx,
-                    focus=new_tss_peak,
-                    start=new_peak_start_idx,
-                    end=new_peak_end_idx,
-                    shift=shift,
-                )
 
     def get_model(self):
         model = instantiate(self.cfg.model)

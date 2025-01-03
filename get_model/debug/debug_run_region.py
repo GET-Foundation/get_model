@@ -1,7 +1,7 @@
 import hydra
-from get_model.run_region import run
 
-from get_model.config.config import *
+from get_model.config.config import Config
+from get_model.run_region import run
 
 
 @hydra.main(config_path="../config", config_name="fetal_region", version_base="1.3")

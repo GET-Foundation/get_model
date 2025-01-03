@@ -36,20 +36,10 @@ dependencies = [
     "torch",
     "torchmetrics",
     "tqdm",
+    "gcell @ git+https://github.com/fuxialexander/gcell.git@main",
     "wandb",
     "zarr",
 ]
-
-
-[project.optional-dependencies]
-hic = [
-    "hic-straw",
-    "cooler",
-]
-nuc = [
-    "caesar @ git+https://github.com/fuxialexander/caesar@master",
-]
-
 
 [project.urls]
 Documentation = "https://fuxialexander.github.io/get_model/"

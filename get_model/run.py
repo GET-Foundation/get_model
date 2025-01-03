@@ -17,13 +17,16 @@ from tqdm import tqdm
 import wandb
 from get_model.config.config import *
 from get_model.dataset.collate import get_perturb_collate_fn, get_rev_collate_fn
-from get_model.dataset.zarr_dataset import (
-    InferenceDataset,
-    PerturbationInferenceDataset,
-    PretrainDataset,
-    get_gencode_obj,
-    get_sequence_obj,
-)
+try:
+    from get_model.dataset.zarr_dataset import (
+        InferenceDataset,
+        PerturbationInferenceDataset,
+        PretrainDataset,
+        get_gencode_obj,
+        get_sequence_obj,
+    )
+except:
+    pass
 from get_model.model.model import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
@@ -800,6 +803,8 @@ def run_shared(cfg, model, dm):
         trainer.validate(model, datamodule=dm, ckpt_path=cfg.finetune.resume_ckpt)
     if cfg.stage == "predict":
         trainer.predict(model, datamodule=dm, ckpt_path=cfg.finetune.resume_ckpt)
+    # close wandb
+    wandb.finish()
     return trainer
 
 

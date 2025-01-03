@@ -1,6 +1,0 @@
-data_path: "/home/ubuntu/alb2281/get/get_data"
-codebase: "/home/ubuntu/alb2281/repos/get_model"
-output_dir: "/home/ubuntu/alb2281/get/output/watac_zeroshot"
-num_devices: 1
-num_workers: 4
-batch_size: 128

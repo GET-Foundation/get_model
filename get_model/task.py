@@ -1,18 +1,13 @@
-import pandas as pd
-import torch
-import torch.utils.data
-from get_model.dataset.gencode import Gencode
-
-from get_model.dataset.collate import get_rev_collate_fn
-from get_model.dataset.zarr_dataset import InferenceDataset
-
-
 from dataclasses import dataclass
 
 import pandas as pd
 import torch
+import torch.utils.data
+from gcell.rna.gencode import Gencode
 from omegaconf import MISSING
 
+from get_model.dataset.collate import get_rev_collate_fn
+from get_model.dataset.zarr_dataset import InferenceDataset
 
 
 @dataclass
@@ -60,14 +55,17 @@ class MutationTask(BaseTask):
     def wt_dataloader(self, lm):
         dataset = InferenceDataset(**lm.dataset_config)
         dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=1, collate_fn=get_rev_collate_fn)
+            dataset, batch_size=1, collate_fn=get_rev_collate_fn
+        )
         return dataloader
 
     def mut_dataloader(self, lm):
         dataset = InferenceDataset(
-            **lm.dataset_config, gencode_obj=lm.gencode, mut=self.mutations)
+            **lm.dataset_config, gencode_obj=lm.gencode, mut=self.mutations
+        )
         dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=1, collate_fn=get_rev_collate_fn)
+            dataset, batch_size=1, collate_fn=get_rev_collate_fn
+        )
         return dataloader
 
     def predict(self, lm):
@@ -88,4 +86,3 @@ class MutationTask(BaseTask):
 
     def plot(self):
         pass
-

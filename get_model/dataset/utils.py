@@ -1,44 +1,90 @@
-import torch
-from torch.utils.data import Dataset
+import os
+import os.path
 
-def create_random_subset(dataset: Dataset, subset_size: int):
+import numpy as np
+import pandas as pd
+from pyranges import PyRanges as pr
+
+
+def generate_paths(file_id: int, data_path: str, data_type: str, quantitative_atac: bool = False) -> dict:
     """
-    Create a random subset of a dataset.
+    Generate a dictionary of paths based on the given parameters.
 
     Args:
-        dataset (torch.utils.data.Dataset): The input dataset.
-        subset_size (int): The desired size of the random subset.
+        file_id (int): File ID.
+        data_path (str): Path to the data directory.
+        data_type (str): Data type.
+        quantitative_atac (bool, optional): Specify if natac files should be used. Defaults to False.
 
     Returns:
-        torch.utils.data.Dataset: The random subset of the dataset.
+        dict: Dictionary of paths with file IDs as keys and corresponding paths as values.
+
+    Raises:
+        FileNotFoundError: If the peak file is not found.
 
     """
-    # Get the total size of the dataset
-    dataset_size = len(dataset)
+    paths_dict = {}
+    if quantitative_atac:
+        peak_npz_path = os.path.join(
+            data_path, data_type, str(file_id) + ".watac.npz")
+    else:
+        peak_npz_path = os.path.join(
+            data_path, data_type, str(file_id) + ".natac.npz")
 
-    # Create a random subset using torch.utils.data.random_split
-    random_indices = torch.randperm(dataset_size)[:subset_size]
-    random_subset = torch.utils.data.Subset(dataset, random_indices)
+    if not os.path.exists(peak_npz_path):
+        raise FileNotFoundError(
+            "Peak file not found: {}".format(peak_npz_path))
 
-    return random_subset
+    target_npy_path = os.path.join(
+        data_path, data_type, str(file_id) + ".exp.npy")
+    tssidx_npy_path = os.path.join(
+        data_path, data_type, str(file_id) + ".tss.npy")
+    seq_path = os.path.join(data_path, data_type,
+                            str(file_id) + ".seq.zarr.zip")
+    celltype_annot = os.path.join(data_path, data_type, str(file_id) + ".csv")
+
+    paths_dict = {
+        "file_id": file_id,
+        "peak_npz": peak_npz_path,
+        "target_npy": target_npy_path,
+        "tssidx_npy": tssidx_npy_path,
+        "seq_npz": seq_path,
+        "celltype_annot_csv": celltype_annot
+    }
+    return paths_dict
 
 
-def add_spike_in_dataset(main_dataset: Dataset, spike_dataset: Dataset, spike_ratio: float):
+def get_ctcf_pos(celltype_annot: pd.DataFrame, ctcf: pd.DataFrame) -> np.ndarray:
     """
-    Add spike-in samples to the main dataset and produce a new dataset.
-
-    Args:
-        main_dataset (torch.utils.data.Dataset): The main dataset.
-        spike_dataset (torch.utils.data.Dataset): The spike-in dataset.
-        spike_ratio (float): The ratio of spike-in samples to add.
-
-    Returns:
-        torch.utils.data.Dataset: The new dataset after adding the spike-in samples.
-
+    Segment the regions by CTCF binding sites
     """
-    spike_num = int(len(main_dataset) * spike_ratio)
-    # randomly select spike-in samples
-    spike_dataset = create_random_subset(spike_dataset, spike_num)
-    # add spike-in samples to the main dataset
-    main_dataset.extend(spike_dataset)
-    return main_dataset
+    celltype_annot_w_ctcf = pr(celltype_annot).join(
+        pr(pd.concat((celltype_annot, ctcf)))
+    )
+    ctcf_pos = []
+    x = 0
+    for j in celltype_annot_w_ctcf.df["Unnamed: 0_b"].values:
+        if np.isnan(j):
+            x += 1
+        else:
+            ctcf_pos.append(x)
+    try:
+        assert len(ctcf_pos) == celltype_annot.shape[0]
+    except AssertionError:
+        print(
+            f"ctcf_pos length {len(ctcf_pos)} not equal to celltype_annot length {celltype_annot.shape[0]}")
+    return np.array(ctcf_pos)
+
+
+def get_hierachical_ctcf_pos(
+    celltype_annot: pd.DataFrame, ctcf: pd.DataFrame, cut=[50, 100, 200]
+) -> np.ndarray:
+    """
+    Segment the regions by multi-level CTCF binding sites, filter ctcf by num_celltype with cut
+    """
+    multilevel_ctcf_pos = []
+    for c in cut:
+        ctcf_filtered = ctcf.query("num_celltype>=" + str(c))
+        multilevel_ctcf_pos.append(get_ctcf_pos(celltype_annot, ctcf_filtered))
+    multilevel_ctcf_pos = np.vstack(multilevel_ctcf_pos).T
+    return multilevel_ctcf_pos

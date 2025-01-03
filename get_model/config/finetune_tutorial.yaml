@@ -2,7 +2,7 @@ defaults:
   - base_region_zarr_config
   - model/GETRegionFinetune@_here_
   - finetune/v1_finetune@finetune
-  - machine/pc_region_v1
+  - machine/pc
   - _self_
 
 assembly: "hg38"

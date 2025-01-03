@@ -8,8 +8,8 @@
 #%%
 import os
 
-from atac_rna_data_processing.io.celltype import GETHydraCellType
-from atac_rna_data_processing.io.mutation import GETHydraCellMutCollection
+from gcell.cell.celltype import GETHydraCellType
+from gcell.cell.mutincell import GETHydraCellMutCollection
 from preprocess_utils import (Gencode, add_atpm, add_exp, create_peak_motif,
                               download_motif, get_motif, join_peaks,
                               query_motif, unzip_zarr, zip_zarr)

@@ -1,6 +1,0 @@
-data_path: "/pmglocal/xf2217/pretrain_human_bingren_shendure_apr2023"
-codebase: "/pmglocal/xf2217/GET_STARTED/get_model/"
-output_dir: "/pmglocal/xf2217/output"
-num_devices: 6
-num_workers: 0
-batch_size: 16

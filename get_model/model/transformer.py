@@ -5,10 +5,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
 from timm.models.layers import DropPath, trunc_normal_
+
 try:
     from flash_attn import flash_attn_qkvpacked_func
 except ImportError:
     flash_attn_qkvpacked_func = None
+
 
 class Attention(nn.Module):
     def __init__(
@@ -70,8 +72,7 @@ class Attention(nn.Module):
 
         if attention_mask is not None:
             if attention_mask.dim() == 1:
-                attention_mask = attention_mask.unsqueeze(
-                    0).unsqueeze(0).unsqueeze(0)
+                attention_mask = attention_mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
             elif attention_mask.dim() == 2:
                 attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)
             assert (
@@ -83,8 +84,7 @@ class Attention(nn.Module):
             attn = attn.masked_fill(attention_mask, attn_mask_value)
         if attention_bias is not None:
             if attention_bias.dim() == 1:
-                attention_bias = attention_bias.unsqueeze(
-                    0).unsqueeze(0).unsqueeze(0)
+                attention_bias = attention_bias.unsqueeze(0).unsqueeze(0).unsqueeze(0)
             elif attention_bias.dim() == 2:
                 attention_bias = attention_bias.unsqueeze(1).unsqueeze(1)
             elif attention_bias.dim() == 3:
@@ -144,8 +144,7 @@ class Attention_Flash(nn.Module):
             )
         qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
         qkv = qkv.reshape(B, N, 3, self.num_heads, -1)
-        x = flash_attn_qkvpacked_func(
-            qkv, softmax_scale=self.scale).reshape(B, N, C)
+        x = flash_attn_qkvpacked_func(qkv, softmax_scale=self.scale).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x, None
@@ -158,7 +157,7 @@ class Mlp(nn.Module):
         hidden_features=None,
         out_features=None,
         act_layer=nn.GELU,
-        drop=0.,
+        drop=0.0,
     ):
         super().__init__()
         out_features = out_features or in_features
@@ -218,8 +217,7 @@ class Block(nn.Module):
                 attn_head_dim=attn_head_dim,
             )
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
-        self.drop_path = DropPath(
-            drop_path) if drop_path > 0.0 else nn.Identity()
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(
@@ -241,21 +239,30 @@ class Block(nn.Module):
 
     def forward(self, x, attention_mask=None, attention_bias=None):
         if self.gamma_1 is None:
-            x_attn, attn = self.attn(self.norm1(
-                x), attention_mask=attention_mask, attention_bias=attention_bias)
+            x_attn, attn = self.attn(
+                self.norm1(x),
+                attention_mask=attention_mask,
+                attention_bias=attention_bias,
+            )
             x = x + self.drop_path(x_attn)
             x = x + self.drop_path(self.mlp(self.norm2(x)))
         else:
-            x_attn, attn = self.attn(self.norm1(
-                x), attention_mask=attention_mask, attention_bias=attention_bias)
+            x_attn, attn = self.attn(
+                self.norm1(x),
+                attention_mask=attention_mask,
+                attention_bias=attention_bias,
+            )
             x = x + self.drop_path(self.gamma_1 * x_attn)
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
         return x, attn
 
+
 try:
     from axial_attention import AxialAttention
+
     class PairedBlock(nn.Module):
         """A block that will perform the axial attention and mlp on the paired embedding."""
+
         def __init__(
             self,
             dim,
@@ -282,15 +289,13 @@ try:
             )
 
         def forward(self, x, attention_mask=None, attention_bias=None):
-            x_attn = self.axial_attn(self.norm1(
-                x))
+            x_attn = self.axial_attn(self.norm1(x))
             x = x + x_attn
             x = x + self.mlp(self.norm2(x))
             return x
 
 except ImportError:
     PairedBlock = None
-
 
 
 class GETTransformer(nn.Module):
@@ -343,7 +348,7 @@ class GETTransformer(nn.Module):
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
+            trunc_normal_(m.weight, std=0.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.LayerNorm):
@@ -364,6 +369,7 @@ class GETTransformer(nn.Module):
 
 class GETTransformerWithContactMap(GETTransformer):
     """A transformer module for GET model that takes a distance map as an additional input and it will fuse every layer of GET base model pairwise embedding to the distance map."""
+
     def __init__(
         self,
         embed_dim,
@@ -409,10 +415,9 @@ class GETTransformerWithContactMap(GETTransformer):
                 attn_output.append(attn)
 
             # Perform outer sum of x
-            outer_sum = x[:, 1:].unsqueeze(
-                2).detach() + x[:, :-1].unsqueeze(1).detach()
+            outer_sum = x[:, 1:].unsqueeze(2).detach() + x[:, :-1].unsqueeze(1).detach()
             # Sum the outer_sum with distance_map with stop_grad to prevent backpropagation from distance map to embedding
-            distance_map = distance_map + outer_sum/len(self.blocks)
+            distance_map = distance_map + outer_sum / len(self.blocks)
 
         x = self.norm(x)
         if self.fc_norm is not None:
@@ -420,8 +425,10 @@ class GETTransformerWithContactMap(GETTransformer):
 
         return x, distance_map, attn_output
 
+
 class GETTransformerWithContactMapOE(GETTransformer):
     """A transformer module for GET model that takes a distance map as an additional input and it will fuse every layer of GET base model pairwise embedding to the distance map."""
+
     def __init__(
         self,
         embed_dim,
@@ -464,20 +471,18 @@ class GETTransformerWithContactMapOE(GETTransformer):
         # concat 1 to first row and column of distance map (B, R, R, 1) to (B, R+1, R+1, 1)
         # bias = F.pad(distance_map, (0, 1, 0, 1), "constant", 0)
         # bias = bias.unsqueeze(1)
-        
+
         for blk in self.blocks:
             x, attn = blk(x, mask)
             if return_attns:
                 attn_output.append(attn)
 
-            
         x = self.norm(x)
         # Perform outer sum of x
         if self.fc_norm is not None:
             x = self.fc_norm(x.mean(1))
 
-        outer_sum = x[:, 1:].unsqueeze(
-            2) + x[:, :-1].unsqueeze(1)
+        outer_sum = x[:, 1:].unsqueeze(2) + x[:, :-1].unsqueeze(1)
         # concat distance map to outer sum
         outer_sum = torch.cat([distance_map.unsqueeze(3), outer_sum], dim=3)
 
@@ -486,6 +491,7 @@ class GETTransformerWithContactMapOE(GETTransformer):
 
 class GETTransformerWithContactMapAxial(GETTransformer):
     """A transformer module for GET model that takes a distance map as an additional input and it will fuse every layer of GET base model pairwise embedding to the distance map."""
+
     def __init__(
         self,
         embed_dim,
@@ -531,9 +537,10 @@ class GETTransformerWithContactMapAxial(GETTransformer):
                     act_layer=nn.GELU,
                     norm_layer=norm_layer,
                 )
-                for i in range(num_layers//3)
+                for i in range(num_layers // 3)
             ]
         )
+
     def forward(self, x, distance_map, mask=None, return_attns=False, bias=None):
         attn_output = [] if return_attns else None
         distance_map = distance_map.squeeze(1).unsqueeze(3)
@@ -544,13 +551,13 @@ class GETTransformerWithContactMapAxial(GETTransformer):
 
             # Perform outer sum of x
             if i % 2 == 0 and i < len(self.paired_blocks):
-                outer_sum = x[:, 1:].unsqueeze(
-                    2).detach() + x[:, :-1].unsqueeze(1).detach()
+                outer_sum = (
+                    x[:, 1:].unsqueeze(2).detach() + x[:, :-1].unsqueeze(1).detach()
+                )
                 # Sum the outer_sum with distance_map with stop_grad to prevent backpropagation from distance map to embedding
-                distance_map = distance_map + outer_sum 
+                distance_map = distance_map + outer_sum
                 # add axial attention
-                distance_map = self.paired_blocks[i//2](distance_map)
-
+                distance_map = self.paired_blocks[i // 2](distance_map)
 
         x = self.norm(x)
         distance_map = F.gelu(distance_map)

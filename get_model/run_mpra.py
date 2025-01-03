@@ -97,7 +97,7 @@ def save_mpra_data(predictions, cfg: DictConfig, dm: MPRADataModule):
 
 def load_get_data(path, data_type='peak', promoter_only=False, repeats=600):
     """
-    Load GET (Gene Expression Toolkit) data from Zarr format.
+    Load data from Zarr format.
     
     Args:
     path (str): Path to the directory containing Zarr files.

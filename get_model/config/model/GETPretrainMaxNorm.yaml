@@ -1,7 +1,0 @@
-defaults:
-  - GETPretrain
-  - _self_
-
-model:
-  _target_: get_model.model.model.GETPretrainMaxNorm
-

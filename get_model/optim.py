@@ -5,9 +5,9 @@
 # https://github.com/facebookresearch/deit
 # https://github.com/facebookresearch/dino
 # --------------------------------------------------------'
-import torch
-from torch import optim as optim
+import json
 
+import torch
 from timm.optim.adafactor import Adafactor
 from timm.optim.adahessian import Adahessian
 from timm.optim.adamp import AdamP
@@ -19,11 +19,10 @@ from timm.optim.nvnovograd import NvNovoGrad
 from timm.optim.radam import RAdam
 from timm.optim.rmsprop_tf import RMSpropTF
 from timm.optim.sgdp import SGDP
-
-import json
+from torch import optim as optim
 
 try:
-    from apex.optimizers import FusedNovoGrad, FusedAdam, FusedLAMB, FusedSGD
+    from apex.optimizers import FusedAdam, FusedLAMB, FusedNovoGrad, FusedSGD
 
     has_apex = True
 except ImportError:

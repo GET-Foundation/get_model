@@ -6,7 +6,6 @@ from hydra.core.config_store import ConfigStore
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import MISSING, OmegaConf
 
-from get_model.dataset.zarr_dataset import ReferenceRegionMotifConfig
 
 T = TypeVar("T")
 
@@ -131,27 +130,6 @@ class DatasetConfig:
     # Dataset size
     dataset_size: int = 40960
     eval_dataset_size: int = 4096
-
-
-@dataclass
-class ReferenceRegionDatasetConfig(DatasetConfig):
-    """
-    Configuration for the reference region dataset.
-
-    Attributes:
-        reference_region_motif: Configuration for reference region motif.
-        quantitative_atac: Whether to use quantitative ATAC.
-        sampling_step: Step size for sampling.
-        mask_ratio: Ratio for masking.
-        leave_out_motifs: Motifs to leave out.
-    """
-    reference_region_motif: ReferenceRegionMotifConfig = field(
-        default_factory=ReferenceRegionMotifConfig
-    )
-    quantitative_atac: bool = False
-    sampling_step: int = 100
-    mask_ratio: float = 0
-    leave_out_motifs: str | None = None
 
 
 @dataclass
@@ -382,35 +360,6 @@ class Config:
     task: TaskConfig = field(default_factory=TaskConfig)
 
 
-@dataclass
-class ReferenceRegionConfig(Config):
-    """
-    Configuration for reference region.
-
-    Attributes:
-        type: Type of configuration.
-        eval_tss: Whether to evaluate TSS.
-        log_image: Whether to log images.
-        dataset: Dataset configuration for reference region.
-    """
-    type: str = "reference_region"
-    eval_tss: bool = False
-    log_image: bool = False
-    dataset: ReferenceRegionDatasetConfig = field(
-        default_factory=ReferenceRegionDatasetConfig
-    )
-
-
-@dataclass
-class EverythingConfig(ReferenceRegionConfig):
-    """
-    Configuration for everything.
-
-    Attributes:
-        type: Type of configuration.
-    """
-    type: str = "everything"
-
 
 @dataclass
 class RegionConfig:
@@ -484,12 +433,6 @@ class RegionZarrConfig:
 
 cs = ConfigStore.instance()
 cs.store(name="base_config", node=Config)
-
-csrr = ConfigStore.instance()
-csrr.store(name="base_ref_region_config", node=ReferenceRegionConfig)
-
-cse = ConfigStore.instance()
-cse.store(name="base_everything_config", node=EverythingConfig)
 
 csr = ConfigStore.instance()
 csr.store(name="base_region_config", node=RegionConfig)

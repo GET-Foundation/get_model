@@ -3,9 +3,20 @@ from ast import List
 import numpy as np
 import torch
 
-from get_model.dataset.transforms import rev_comp
 from get_model.dataset.zarr_dataset import get_mask_pos, get_padding_pos
 from torch.utils.data.dataloader import default_collate
+
+def rev_comp(seq, signal, prob=0.5):
+    """
+    Reverse complement the sequence and signal.
+    Assume the sequence is one-hot encoded as 2D numpy array with shape (L, 4)
+    And the signal is 1D numpy array with shape (L,)
+    """
+    if np.random.rand() < prob:
+        return seq, signal
+    seq = seq[::-1, ::-1]
+    signal = signal[::-1]
+    return seq, signal
 
 
 def sparse_coo_to_tensor(coo):

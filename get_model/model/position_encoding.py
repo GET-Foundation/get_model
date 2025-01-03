@@ -1,10 +1,8 @@
 import math
+
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
-
-from pyranges import PyRanges as pr
 
 
 class CTCFPositionalEncoding(nn.Module):
