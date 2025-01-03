@@ -36,7 +36,7 @@ dependencies = [
     "torch",
     "torchmetrics",
     "tqdm",
-    "gcell @ git+https://github.com/fuxialexander/gcell.git@main",
+    "gcell @ git://github.com/fuxialexander/gcell.git@main",
     "wandb",
     "zarr",
 ]
