@@ -270,7 +270,7 @@ class BaseGETModel(BaseModule):
 
             if should_freeze:
                 param.requires_grad = False
-                print(f"Freezed weights of {name}")
+                logging.debug(f"Freezed weights of {name}")
 
     def generate_dummy_data(self):
         """Return a dummy input for the model"""

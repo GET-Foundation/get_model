@@ -6,6 +6,7 @@
 # https://github.com/facebookresearch/deit
 # https://github.com/facebookresearch/dino
 # --------------------------------------------------------'
+import logging
 import math
 import os
 
@@ -41,7 +42,7 @@ def setup_wandb(cfg):
 def setup_trainer(cfg):
     if cfg.machine.num_devices > 0:
         strategy = "auto"
-        accelerator = "gpu"
+        accelerator = "gpu" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
         device = cfg.machine.num_devices
         if cfg.machine.num_devices > 1:
             strategy = "ddp_find_unused_parameters_true"
@@ -131,14 +132,14 @@ def print_shape(x):
     """a recursive function to print the shape of values in a nested dictionary"""
     if isinstance(x, dict):
         for k, v in x.items():
-            print(k, end=": ")
+            logging.debug(k, end=": ")
             print_shape(v)
     elif isinstance(x, np.ndarray) or isinstance(x, torch.Tensor):
-        print(x.shape)
+        logging.debug(x.shape)
     elif isinstance(x, list):
-        print(len(x))
+        logging.debug(len(x))
     else:
-        print(x)
+        logging.debug(x)
 
 
 def load_checkpoint(checkpoint_path, model_key=None):
@@ -207,7 +208,7 @@ def freeze_layers(model, freeze_last_layer=False, freeze_atac_attention=False):
                 or name.startswith("fc_norm")
                 or name.startswith("norm")
             ):
-                print(name)
+                logging.debug(name)
                 param.requires_grad = False
 
     if freeze_atac_attention:
@@ -230,7 +231,7 @@ def recursive_detach(tensors):
     elif isinstance(tensors, list):
         return [recursive_detach(v) for v in tensors]
     elif isinstance(tensors, torch.Tensor):
-        if tensors.is_cuda:
+        if tensors.is_cuda or tensors.device.type == "mps":
             return tensors.detach().cpu()
     else:
         return tensors
@@ -302,7 +303,7 @@ def cosine_scheduler(
     warmup_iters = warmup_epochs * niter_per_ep
     if warmup_steps > 0:
         warmup_iters = warmup_steps
-    print("Set warmup steps = %d" % warmup_iters)
+    logging.debug("Set warmup steps = %d" % warmup_iters)
     if warmup_epochs > 0:
         warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
 

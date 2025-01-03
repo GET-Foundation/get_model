@@ -71,7 +71,7 @@ def get_ctcf_pos(celltype_annot: pd.DataFrame, ctcf: pd.DataFrame) -> np.ndarray
     try:
         assert len(ctcf_pos) == celltype_annot.shape[0]
     except AssertionError:
-        print(
+        logging.debug(
             f"ctcf_pos length {len(ctcf_pos)} not equal to celltype_annot length {celltype_annot.shape[0]}")
     return np.array(ctcf_pos)
 

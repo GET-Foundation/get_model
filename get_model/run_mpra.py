@@ -93,7 +93,7 @@ def save_mpra_data(predictions, cfg: DictConfig, dm: MPRADataModule):
         chunk['prediction'] = reshaped_preds[chunk_start:chunk_end, cfg.mpra.focus, 0]
         chunk.to_feather(os.path.join(base_output_dir, f'mpra_with_predictions_chunk{i}.feather'))
 
-    print(f"Predictions saved in {base_output_dir}")
+    logging.debug(f"Predictions saved in {base_output_dir}")
 
 def load_get_data(path, data_type='peak', promoter_only=False, repeats=600):
     """

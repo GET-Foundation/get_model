@@ -288,16 +288,16 @@ Sampling step: {self.sampling_step}
             # TODO: revert this
             # celltype_list = [
             #     cell for cell in celltype_list if cell not in leave_out_celltypes]
-            # print(f"Train cell types list: {celltype_list}")
-            # print(f"Train data types list: {datatypes}")
+            # logging.debug(f"Train cell types list: {celltype_list}")
+            # logging.debug(f"Train data types list: {datatypes}")
 
             celltype_list = (
                 leave_out_celltypes if leave_out_celltypes != [""] else celltype_list
             )
-            print(
+            logging.debug(
                 f"Using validation cell type for training!!! cell types list: {celltype_list}"
             )
-            print(
+            logging.debug(
                 f"Using validation cell type for training!!! data types list: {datatypes}"
             )
 
@@ -305,8 +305,8 @@ Sampling step: {self.sampling_step}
             celltype_list = (
                 leave_out_celltypes if leave_out_celltypes != [""] else celltype_list
             )
-            print(f"Validation cell types list: {celltype_list}")
-            print(f"Validation data types list: {datatypes}")
+            logging.debug(f"Validation cell types list: {celltype_list}")
+            logging.debug(f"Validation data types list: {datatypes}")
 
         file_id_list = []
         datatype_dict = {}
@@ -333,7 +333,7 @@ Sampling step: {self.sampling_step}
         if not is_train:
             file_id_list = sorted(file_id_list)
 
-        print(f"File ID list: {file_id_list}")
+        logging.debug(f"File ID list: {file_id_list}")
         return file_id_list, cell_dict, datatype_dict
 
     @staticmethod
@@ -424,7 +424,7 @@ Sampling step: {self.sampling_step}
         for file_id in file_id_list:
             cell_label = cell_dict[file_id]
             data_type = datatype_dict[file_id]
-            print(file_id, data_path, data_type)
+            logging.debug(file_id, data_path, data_type)
             paths_dict = self._generate_paths(
                 file_id, data_path, data_type, quantitative_atac=quantitative_atac
             )
@@ -435,15 +435,15 @@ Sampling step: {self.sampling_step}
 
             try:
                 peak_data = load_npz(paths_dict["peak_npz"])
-                print(f"Feature shape: {peak_data.shape}")
+                logging.debug(f"Feature shape: {peak_data.shape}")
             except FileNotFoundError:
-                print(f"File not found - FILE ID: {file_id}")
+                logging.debug(f"File not found - FILE ID: {file_id}")
                 continue
 
             if not is_pretrain:
                 target_data = np.load(paths_dict["target_npy"])
                 tssidx_data = np.load(paths_dict["tssidx_npy"])
-                print(f"Target shape: {target_data.shape}")
+                logging.debug(f"Target shape: {target_data.shape}")
                 atac_cutoff = (
                     1 - (peak_data[:, 282] > EXPRESSION_ATAC_CUTOFF).toarray().flatten()
                 )
@@ -472,7 +472,7 @@ Sampling step: {self.sampling_step}
                         start_index:end_index, :
                     ]
                     if celltype_annot_i.shape[0] < num_region_per_sample:
-                        print("Not enough regions in the last batch")
+                        logging.debug("Not enough regions in the last batch")
                         continue
                     # if celltype_annot_i.iloc[-1].End - celltype_annot_i.iloc[0].Start > 5000000:
                     #     end_index = celltype_annot_i[celltype_annot_i.End -
@@ -707,7 +707,7 @@ class InferenceRegionDataset(RegionDataset):
         for file_id in file_id_list:
             cell_label = cell_dict[file_id]
             data_type = datatype_dict[file_id]
-            print(file_id, data_path, data_type)
+            logging.debug(file_id, data_path, data_type)
             paths_dict = self._generate_paths(
                 file_id, data_path, data_type, quantitative_atac=quantitative_atac
             )
@@ -718,9 +718,9 @@ class InferenceRegionDataset(RegionDataset):
 
             try:
                 peak_data = load_npz(paths_dict["peak_npz"])
-                print(f"Feature shape: {peak_data.shape}")
+                logging.debug(f"Feature shape: {peak_data.shape}")
             except FileNotFoundError:
-                print(f"File not found - FILE ID: {file_id}")
+                logging.debug(f"File not found - FILE ID: {file_id}")
                 continue
 
             if os.path.exists(paths_dict["exp_feather"]):
@@ -736,7 +736,7 @@ class InferenceRegionDataset(RegionDataset):
             if not is_pretrain:
                 target_data = np.load(paths_dict["target_npy"])
                 tssidx_data = np.load(paths_dict["tssidx_npy"])
-                print(f"Target shape: {target_data.shape}")
+                logging.debug(f"Target shape: {target_data.shape}")
                 atac_cutoff = (
                     1
                     - (peak_data[:, 282] >= EXPRESSION_ATAC_CUTOFF).toarray().flatten()
@@ -754,7 +754,7 @@ class InferenceRegionDataset(RegionDataset):
             exp_df = exp_df.query(
                 "gene_name.isin(@self.gene_list) & Chromosome.isin(@input_chromosomes)"
             )
-            print(exp_df)
+            logging.debug(exp_df)
             # instead of loop over chromosome, loop over gene
             for gene, gene_df in exp_df.groupby("gene_name"):
                 gene_name = gene_df["gene_name"].values[0]
@@ -772,7 +772,7 @@ class InferenceRegionDataset(RegionDataset):
                 if start_idx < 0 or end_idx >= peak_data.shape[0]:
                     continue
                 celltype_annot_i = celltype_peak_annot.iloc[start_idx:end_idx, :]
-                print(celltype_peak_annot.iloc[tss_peak])
+                logging.debug(celltype_peak_annot.iloc[tss_peak])
                 peak_coord = celltype_annot_i[["Start", "End"]].values
                 if celltype_annot_i.shape[0] < num_region_per_sample:
                     continue
@@ -1126,7 +1126,7 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
             input_chromosomes = _chromosome_splitter(
                 all_chromosomes, self.leave_out_chromosomes, self.is_train
             )
-            print(region_motif.gene_idx_info.drop_duplicates(ignore_index=True))
+            logging.debug(region_motif.gene_idx_info.drop_duplicates(ignore_index=True))
             # Loop over genes and their TSS sites
             for gene, gene_df in region_motif.gene_idx_info.drop_duplicates(ignore_index=True).query("gene_name.isin(@self.gene_list)").groupby("gene_name"):
                 gene_name = gene_df["gene_name"].values[0]

@@ -1,0 +1,121 @@
+run:
+  project_name: finetune_tutorial
+  run_name: interpret
+  use_wandb: true
+type: region
+stage: predict
+assembly: hg38
+eval_tss: true
+log_image: true
+model:
+  _target_: get_model.model.model.GETRegionFinetuneATAC
+  cfg:
+    num_regions: 200
+    num_motif: 283
+    embed_dim: 768
+    num_layers: 12
+    num_heads: 12
+    dropout: 0.1
+    output_dim: 1
+    flash_attn: false
+    pool_method: mean
+    region_embed:
+      num_regions: ${model.cfg.num_regions}
+      num_features: ${model.cfg.num_motif}
+      embed_dim: ${model.cfg.embed_dim}
+    encoder:
+      num_heads: ${model.cfg.num_heads}
+      embed_dim: ${model.cfg.embed_dim}
+      num_layers: ${model.cfg.num_layers}
+      drop_path_rate: ${model.cfg.dropout}
+      drop_rate: 0
+      attn_drop_rate: 0
+      use_mean_pooling: false
+      flash_attn: ${model.cfg.flash_attn}
+    head_exp:
+      embed_dim: ${model.cfg.embed_dim}
+      output_dim: 1
+      use_atac: false
+    mask_token:
+      embed_dim: ${model.cfg.embed_dim}
+      std: 0.02
+    loss:
+      components:
+        atpm:
+          _target_: torch.nn.PoissonNLLLoss
+          reduction: mean
+          log_input: false
+      weights:
+        atpm: 1.0
+    metrics:
+      components:
+        atpm:
+        - pearson
+        - spearman
+        - r2
+machine:
+  codebase: /Users/xf2217/Repos/get_model/
+  data_path: /Users/xf2217/Repos/get_model/
+  output_dir: /Users/xf2217/Downloads
+  num_devices: 1
+  num_workers: 4
+  batch_size: 1
+  fasta_path: ???
+dataset:
+  zarr_path: ./output.zarr
+  celltypes: astrocyte
+  transform: null
+  quantitative_atac: true
+  sampling_step: 100
+  num_region_per_sample: 200
+  leave_out_chromosomes: chr10,chr11
+  leave_out_celltypes: null
+  mask_ratio: 0.0
+training:
+  save_ckpt_freq: 1
+  epochs: 5
+  warmup_epochs: 1
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: false
+  log_every_n_steps: 25
+  val_check_interval: 1.0
+  add_lr_monitor: false
+optimizer:
+  lr: 0.0001
+  min_lr: 0.0001
+  weight_decay: 0.05
+  opt: adamw
+  opt_eps: 1.0e-08
+  opt_betas:
+  - 0.9
+  - 0.999
+finetune:
+  resume_ckpt: /Users/xf2217/Downloads/finetune_tutorial/predict_atac_with_pretrain/checkpoints/best.ckpt
+  pretrain_checkpoint: false
+  checkpoint: null
+  strict: false
+  model_key: model
+  use_lora: false
+  lora_checkpoint: null
+  rename_config:
+    blocks.: encoder.blocks.
+    fc_norm.: encoder.norm.
+    encoder.head.: head_mask.
+    encoder.region_embed: region_embed
+    region_embed.proj.: region_embed.embed.
+    encoder.cls_token: cls_token
+    head.: head_exp.head.
+  layers_with_lora:
+  - region_embed
+  - encoder
+  - head_exp
+  patterns_to_freeze: []
+  patterns_to_drop: []
+  additional_checkpoints: []
+task:
+  test_mode: interpret
+  gene_list: MYC,SOX10,SOX2,RET
+  layer_names:
+  - region_embed
+  mutations: null

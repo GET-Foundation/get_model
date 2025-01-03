@@ -2,17 +2,17 @@ import logging
 from functools import partial
 
 import lightning as L
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
 import torch.utils.data
 import wandb
-import zarr
 from hydra.utils import instantiate
 from matplotlib import pyplot as plt
 from minlora import LoRAParametrization
 from minlora.model import add_lora_by_name
-from omegaconf import MISSING, DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from get_model.config.config import *
 from get_model.dataset.zarr_dataset import (
@@ -82,6 +82,7 @@ class RegionDataModule(L.LightningDataModule):
             num_workers=self.cfg.machine.num_workers,
             drop_last=True,
             shuffle=True,
+            persistent_workers=True,
         )
 
     def val_dataloader(self):
@@ -90,6 +91,7 @@ class RegionDataModule(L.LightningDataModule):
             batch_size=self.cfg.machine.batch_size,
             num_workers=self.cfg.machine.num_workers,
             drop_last=True,
+            persistent_workers=True,
         )
 
     def test_dataloader(self):
@@ -98,6 +100,7 @@ class RegionDataModule(L.LightningDataModule):
             batch_size=self.cfg.machine.batch_size,
             num_workers=self.cfg.machine.num_workers,
             drop_last=True,
+            persistent_workers=True,
         )
 
     def predict_dataloader(self):
@@ -106,6 +109,7 @@ class RegionDataModule(L.LightningDataModule):
             batch_size=self.cfg.machine.batch_size,
             num_workers=self.cfg.machine.num_workers,
             drop_last=False,
+            persistent_workers=True,
         )
 
 
@@ -115,7 +119,7 @@ class RegionLitModel(LitModel):
 
     def validation_step(self, batch, batch_idx):
         loss, pred, obs = self._shared_step(batch, batch_idx, stage="val")
-        # print(pred['exp'].detach().cpu().numpy().flatten().max(),
+        # logging.debug(pred['exp'].detach().cpu().numpy().flatten().max(),
         #       obs['exp'].detach().cpu().numpy().flatten().max())
 
         if self.cfg.eval_tss and "exp" in pred:
@@ -138,16 +142,16 @@ class RegionLitModel(LitModel):
             if obs["hic"].flatten().shape[0] > 1000:
                 try:
                     idx = np.random.choice(
-                    obs["hic"].flatten().shape[0], 1000, replace=False
+                        obs["hic"].flatten().shape[0], 1000, replace=False
                     )
                     obs["hic"] = obs["hic"].flatten()[idx]
                     pred["hic"] = pred["hic"].flatten()[idx]
                 except Exception as e:
-                    print(obs["hic"].shape)
-                    print(pred["hic"].shape)
+                    logging.debug(obs["hic"].shape)
+                    logging.debug(pred["hic"].shape)
             else:
-                obs['hic'] = torch.randn(1000).to(obs['hic'].device)
-                pred['hic'] = torch.randn(1000).to(pred['hic'].device)
+                obs["hic"] = torch.randn(1000).to(obs["hic"].device)
+                pred["hic"] = torch.randn(1000).to(pred["hic"].device)
         metrics = self.metrics(pred, obs)
         if batch_idx == 0 and self.cfg.log_image:
             # log one example as scatter plot
@@ -215,6 +219,7 @@ class RegionLitModel(LitModel):
                 mode="a",
                 header=False,
             )
+            return result_df
         elif self.cfg.task.test_mode == "perturb":
             # TODO: need to figure out if batching is working
             preds = self.perturb_step(batch, batch_idx)
@@ -259,8 +264,9 @@ class RegionLitModel(LitModel):
                 mode="a",
                 header=False,
             )
+            return results_df
             # except Exception as    e:
-            # print(e)
+            # logging.debug(e)
 
         elif self.cfg.task.test_mode == "interpret":
             focus = []
@@ -285,7 +291,12 @@ class RegionLitModel(LitModel):
             for i, chromosome in enumerate(chromosomes):
                 if len(chromosome) < 30:
                     chromosomes[i] = chromosome + " " * (30 - len(chromosome))
-
+            for key in preds:
+                if len(preds[key].shape) == 2:
+                    preds[key] = preds[key].unsqueeze(0)
+            for key in obs:
+                if len(obs[key].shape) == 2:
+                    obs[key] = obs[key].unsqueeze(0)
             result = {
                 "preds": preds,
                 "obs": obs,
@@ -298,6 +309,7 @@ class RegionLitModel(LitModel):
                 "avaliable_genes": gene_names,
             }
             self.accumulated_results.append(result)
+            return result
 
     def get_model(self):
         model = instantiate(self.cfg.model)
@@ -388,7 +400,7 @@ class RegionLitModel(LitModel):
         model.freeze_layers(
             patterns_to_freeze=self.cfg.finetune.patterns_to_freeze, invert_match=False
         )
-        print("Model = %s" % str(model))
+        logging.debug("Model = %s" % str(model))
         return model
 
     def on_validation_epoch_end(self):
@@ -404,8 +416,8 @@ class RegionZarrDataModule(RegionDataModule):
 
     def build_inference_dataset(self, is_train=False, gene_list=None, gencode_obj=None):
         if gencode_obj is None:
-            gencode_obj = get_gencode_obj(self.cfg.assembly, self.cfg.machine.data_path)
-        print(gencode_obj)
+            gencode_obj = get_gencode_obj(self.cfg.assembly)
+        logging.debug(gencode_obj)
         return InferenceRegionMotifDataset(
             **self.cfg.dataset,
             assembly=self.cfg.assembly,
@@ -417,7 +429,7 @@ class RegionZarrDataModule(RegionDataModule):
 
 def run(cfg: DictConfig):
     model = RegionLitModel(cfg)
-    print(OmegaConf.to_yaml(cfg))
+    logging.debug(OmegaConf.to_yaml(cfg))
     dm = RegionDataModule(cfg)
     model.dm = dm
 
@@ -426,7 +438,7 @@ def run(cfg: DictConfig):
 
 def run_zarr(cfg: DictConfig):
     model = RegionLitModel(cfg)
-    print(OmegaConf.to_yaml(cfg))
+    logging.debug(OmegaConf.to_yaml(cfg))
     dm = RegionZarrDataModule(cfg)
     model.dm = dm
 

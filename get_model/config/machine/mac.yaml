@@ -1,0 +1,6 @@
+data_path: "/Users/xf2217/Repos/get_model/"
+codebase: "/Users/xf2217/Repos/get_model/"
+output_dir: "/Users/xf2217/Downloads"
+num_devices: 1
+num_workers: 4
+batch_size: 4

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import logging
 from typing import Any, Generic, Optional, TypeVar
 
 import hydra
@@ -28,7 +29,7 @@ def load_config(config_name, config_path="./"):
 
 
 def pretty_print_config(cfg):
-    print(OmegaConf.to_yaml(cfg))
+    logging.info(OmegaConf.to_yaml(cfg))
 
 
 @dataclass
