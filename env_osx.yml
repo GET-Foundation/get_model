@@ -1,0 +1,16 @@
+name: get
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - scanpy
+  - snapatac2
+  - bedtools
+  - htslib
+  - wget
+  - gawk
+  - pip
+  - pip:
+      - git+https://github.com/fuxialexander/get_model.git@region_model_cleaned
