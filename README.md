@@ -27,7 +27,7 @@ This repository contains the official implementation of the model described in o
 - [Moitf -> ATAC prediction](tutorials/predict_atac.ipynb) (just for demo, optional)
 - [Continue pretrain](tutorials/pretrain_pbmc.ipynb) (just for demo, optional)
 
-Note that `Moitf -> ATAC prediction` tutorial has been tested on a Macbook Pro M4 Pro with MPS accelaration. It seems that the speed for training and validation iteration is close to a RTX3090; 
+Note that `Motif -> ATAC prediction` tutorial has been tested on a Macbook Pro M4 Pro with MPS accelaration. It seems that the speed for training and validation iteration is close to a RTX3090; 
 However, some ops used in the metric calculation (Pearson/Spearman/R^2) was not accelarated, making the speed a bit inferior. 
 
 
