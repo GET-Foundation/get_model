@@ -39,7 +39,6 @@ pip install git+https://github.com/GET-Foundation/get_model.git@master
 ## Installation-Conda
 
 You can use conda/mamba for environment setup. The `env.yml` will install the following packages:
-```
 - get_model: main model package
   - [gcell](https://github.com/GET-Foundation/gcell): the analysis interface and demo backend
   - [genomespy](https://github.com/fuxialexander/genomespy): an interactive genome browser within jupyter notebook
@@ -50,7 +49,6 @@ You can use conda/mamba for environment setup. The `env.yml` will install the fo
 - r-pcalg: for causal discovery of motif-motif interaction
 - scanpy: for single cell analysis (optional, required just for tutorial).
 - snapatac2: for scATAC-seq analysis (optional, required just for tutorial).  
-```
 
 If you don't want all of them, you can install just the get_model package with pip.
 Note that if you have problem installing the conda/mamba environment, edit (temporarily) your CONDARC to remove `channel_priority: strict` 
