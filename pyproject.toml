@@ -22,23 +22,56 @@ classifiers = [
 
 dependencies = [
     "einops",
+    "gcell @ git+ssh://git@github.com/fuxialexander/gcell.git@main",
+    "genomespy",
     "hydra-core",
     "lightning",
     "matplotlib",
+    "minlora @ git+https://github.com/cccntu/minLoRA.git@main",
     "numpy",
     "omegaconf",
     "pandas",
     "pyranges @ git+https://github.com/pyranges/pyranges@master",
-    "minlora @ git+https://github.com/cccntu/minLoRA.git@main",
     "scipy",
     "seaborn",
     "timm",
     "torch",
     "torchmetrics",
     "tqdm",
-    "gcell @ git+ssh://git@github.com/fuxialexander/gcell.git@main",
     "wandb",
     "zarr",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0", 
+    "pytest-mock>=3.10.0",
+    "pytest-asyncio>=0.21.0",
+    "sphinx>=7.0.0",
+    "sphinx-rtd-theme>=1.3.0",
+    "myst-parser>=2.0.0",
+    "sphinx-autodoc-typehints>=1.25.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+    "setuptools_scm",
+    "towncrier",
+    "ipykernel",
+    "jupyter",
+    "nbsphinx",
+    "nbformat",
+    "snapatac2",
+    "scanpy",
+    "scikit-misc",
+]
+tutorial = [
+    "ipykernel",
+    "jupyter",
+    "nbsphinx",
+    "nbformat",
+    "snapatac2",
+    "scanpy",
+    "scikit-misc",
 ]
 
 [project.urls]
@@ -49,16 +82,115 @@ Repository = "https://github.com/fuxialexander/get_model"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-where = ["."]  # Start looking for packages inside the root folder
+where = ["./"]  # Start looking for packages inside the get_model folder
 exclude = ["test*"]  # Exclude test packages
 include = ["get_model*"]  # Only include packages starting with "get_model"
 
 [tool.setuptools.package-data]
 "get_model" = ["config/**/*.yaml", "**/*.yaml", "**/*.json", "config/*.yaml"]
 
+[tool.hatch.build.targets.wheel]
+packages = ["get_model"]
+
+[tool.hatch.envs.default.scripts]
+test = "pytest {args:tests}"
+test-cov = "pytest --cov {args:tests}"
+docs = "sphinx-build -b html docs/source docs/build/html"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "get_model/_version.py"  # Update this path if the version file is inside get_model
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.pytest.ini_options]
-pythonpath = "./get_model"
 addopts = [
     "--import-mode=importlib",
+    "--strict-markers",
+    "--doctest-modules",
 ]
-log_cli = 1
+testpaths = ["./tests"]
+xfail_strict = true
+filterwarnings = [
+    "error:The specified parameters:FutureWarning",
+    "ignore:FigureCanvasAgg is non-interactive:UserWarning",
+]
+
+[tool.coverage.run]
+data_file = "test-data/coverage"
+source_pkgs = ["gcell"]
+omit = ["tests/*"]
+
+[tool.coverage.xml]
+output = "test-data/coverage.xml"
+
+[tool.coverage.paths]
+source = [".", "**/site-packages"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    '@(numba\.|nb\.)njit.*',
+]
+
+[tool.ruff]
+src = ["./"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+    "E",       # Error detected by Pycodestyle
+    "F",       # Errors detected by Pyflakes
+    "W",       # Warning detected by Pycodestyle
+    "UP",      # pyupgrade
+    "I",       # isort
+    "TCH",     # manage type checking blocks
+    "TID251",  # Banned imports
+    "ICN",     # Follow import conventions
+    "PTH",     # Pathlib instead of os.path
+    "PYI",     # Typing
+    "PLR0917", # Ban APIs with too many positional parameters
+    "PT",      # Pytest style
+    "SIM",     # Simplify control flow
+]
+ignore = [
+    "E501",  # line too long
+    "E402",  # module level import not at top of file
+    "F841",  # Unused variable
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["get_model"]
+
+[tool.towncrier]
+package = "get_model"
+directory = "docs/release-notes"
+filename = "docs/release-notes/{version}.md"
+single_file = false
+package_dir = "./"
+issue_format = "{{pr}}`{issue}`"
+title_format = "(v{version})=\n### {version} {{small}}`{project_date}`"
+
+[tool.towncrier.fragment.bugfix]
+name = "Bug fixes"
+
+[tool.towncrier.fragment.doc]
+name = "Documentation"
+
+[tool.towncrier.fragment.feature]
+name = "Features"
+
+[tool.towncrier.fragment.misc]
+name = "Miscellaneous improvements"
+
+[tool.towncrier.fragment.performance]
+name = "Performance"
+
+[tool.towncrier.fragment.breaking]
+name = "Breaking changes"
+
+[tool.towncrier.fragment.dev]
+name = "Development Process"

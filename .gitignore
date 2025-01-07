@@ -34,11 +34,8 @@ test/abc
 *pdf
 *png
 *bw
-*tar
-*bw
 *tsv
 experiments
-
 tutorials/*.zarr
 tutorials/*.csv
 tutorials/*.bed
@@ -46,3 +43,6 @@ tutorials/*.gz
 tutorials/*.gz.tbi
 tutorials/*.h5
 tutorials/*.h5ad
+get_model/_version.py
+tutorials/.genomespy_shared
+tutorials/*.html

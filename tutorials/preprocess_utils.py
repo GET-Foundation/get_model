@@ -7,10 +7,13 @@ import subprocess
 import numpy as np
 import pandas as pd
 import zarr
-from pyranges import PyRanges as pr
-from pyranges import read_gtf
-
 from gcell.rna.gencode import Gencode
+from pyranges import PyRanges as pr
+
+# required softwares:
+# bedtools
+# tabix
+# wget
 
 def download_motif(motif_url, index_url, motif_dir="data"):
     """

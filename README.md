@@ -1,13 +1,15 @@
-# GET: Gene Expression Transformer
+# GET: General Expression Transformer
 
-GET: a foundation model of transcription across human cell types
+A foundation model of transcription across human cell types.
 
-We are still in the process to polish the codebase... so expect rough edges when you use it and it's adviced that you are familiar with Python, Bash, and Torch as well as ChatGPT Prompting before getting started. We are sorry for the inconvenience and are working day-and-night to update it.
+This repository contains the official implementation of the model described in our paper: https://www.nature.com/articles/s41586-024-08391-z.
+
 
 ## Table of Contents
 
-- [GET: Gene Expression Transformer](#get-gene-expression-transformer)
+- [GET: General Expression Transformer](#get-general-expression-transformer)
   - [Table of Contents](#table-of-contents)
+  - [Tutorials](#tutorials)
   - [Installation](#installation)
   - [Quick Start](#quick-start)
   - [Model Architecture](#model-architecture)
@@ -18,6 +20,16 @@ We are still in the process to polish the codebase... so expect rough edges when
   - [License](#license)
   - [Citation](#citation)
   - [Contact](#contact)
+
+## Tutorials
+- [Data processing](tutorials/prepare_pbmc.ipynb)
+- [Finetune & Interpretation](tutorials/finetune_pbmc.ipynb) 
+- [Moitf -> ATAC prediction](tutorials/predict_atac.ipynb) (just for demo, optional)
+- [Continue pretrain](tutorials/pretrain_pbmc.ipynb) (just for demo, optional)
+
+Note that `Moitf -> ATAC prediction` tutorial has been tested on a Macbook Pro M4 Pro with MPS accelaration. It seems that the speed for training and validation iteration is close to a RTX3090; 
+However, some ops used in the metric calculation (Pearson/Spearman/R^2) was not accelarated, making the speed a bit inferior. 
+
 
 ## Installation
 

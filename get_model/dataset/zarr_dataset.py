@@ -4,15 +4,13 @@ import os.path
 import warnings
 from dataclasses import dataclass
 from posixpath import basename
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import torch
 import zarr
 from gcell.rna.gencode import Gencode
-from pyranges import PyRanges as pr
-from scipy.sparse import coo_matrix, csr_matrix, load_npz, vstack
+from scipy.sparse import coo_matrix, csr_matrix, load_npz
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
@@ -27,8 +25,9 @@ EXPRESSION_ATAC_CUTOFF = (
 # Suppress all deprecated warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+
 def _chromosome_splitter(
-    all_chromosomes: list, leave_out_chromosomes: str | list |None, is_train=True
+    all_chromosomes: list, leave_out_chromosomes: str | list | None, is_train=True
 ):
     input_chromosomes = all_chromosomes.copy()
     if leave_out_chromosomes is None:
@@ -117,14 +116,15 @@ def get_hic_from_idx(hic, csv, start=None, end=None, resolution=5000, method="oe
         dst = np.log10(numpy_matrix[hic_idx, :][:, hic_idx] + 1)
         return dst
 
+
 def get_gencode_obj(genome_seq_zarr: dict | str):
     """
     Get Gencode object for genome sequence.
     """
     # TODO: make this more flexible
     version_mapping = {
-        'hg38': 44,
-        'mm10': 'm36',
+        "hg38": 44,
+        "mm10": "m36",
     }
     if isinstance(genome_seq_zarr, dict):
         gencode_obj = {}
@@ -134,6 +134,7 @@ def get_gencode_obj(genome_seq_zarr: dict | str):
         assembly = basename(genome_seq_zarr).split(".")[0]
         gencode_obj = {assembly: Gencode(assembly, version=version_mapping[assembly])}
     return gencode_obj
+
 
 class RegionDataset(Dataset):
     """
@@ -901,9 +902,7 @@ class RegionMotif:
             lambda x: int(x.split(":")[1].split("-")[0])
         )
         df["End"] = df["peak_names"].apply(lambda x: int(x.split(":")[1].split("-")[1]))
-        self._peaks = (
-            df.reset_index(drop=True).reset_index()
-        )
+        self._peaks = df.reset_index(drop=True).reset_index()
 
     def _load_celltype_data(self):
         self.atpm = self.dataset[f"atpm/{self.celltype}"][:]
@@ -914,12 +913,15 @@ class RegionMotif:
             self.data = self.data[atpm_nonzero_idx]
             self._peaks = self._peaks.iloc[atpm_nonzero_idx]
 
-        if f"expression_positive/{self.celltype}" in self.dataset:  
-            self.expression_positive = self.dataset[f"expression_positive/{self.celltype}"][:]
-            self.expression_negative = self.dataset[f"expression_negative/{self.celltype}"][:]
+        if f"expression_positive/{self.celltype}" in self.dataset:
+            self.expression_positive = self.dataset[
+                f"expression_positive/{self.celltype}"
+            ][:]
+            self.expression_negative = self.dataset[
+                f"expression_negative/{self.celltype}"
+            ][:]
 
             self.tss = self.dataset[f"tss/{self.celltype}"][:]
-
 
             gene_idx_info_index = self.dataset["gene_idx_info_index"][:]
             gene_idx_info_name = self.dataset["gene_idx_info_name"][:]
@@ -931,17 +933,27 @@ class RegionMotif:
                 self.tss = self.tss[atpm_nonzero_idx]
                 gene_idx_info_drop_zero_atpm = []
                 idx_to_iloc = {v: i for i, v in enumerate(gene_idx_info_index)}
-                for idx_non_zero_atpm, idx in enumerate(atpm_nonzero_idx): 
+                for idx_non_zero_atpm, idx in enumerate(atpm_nonzero_idx):
                     if idx in idx_to_iloc:
-                        gene_idx_info_drop_zero_atpm.append((idx_non_zero_atpm, gene_idx_info_name[idx_to_iloc[idx]], gene_idx_info_strand[idx_to_iloc[idx]]))
-                self.gene_idx_info = pd.DataFrame(gene_idx_info_drop_zero_atpm, columns=["index", "gene_name", "strand"])
+                        gene_idx_info_drop_zero_atpm.append(
+                            (
+                                idx_non_zero_atpm,
+                                gene_idx_info_name[idx_to_iloc[idx]],
+                                gene_idx_info_strand[idx_to_iloc[idx]],
+                            )
+                        )
+                self.gene_idx_info = pd.DataFrame(
+                    gene_idx_info_drop_zero_atpm,
+                    columns=["index", "gene_name", "strand"],
+                )
             else:
                 self.gene_idx_info = pd.DataFrame(
-                {
-                "index": gene_idx_info_index,
-                "gene_name": gene_idx_info_name,
-                "strand": gene_idx_info_strand,
-                })
+                    {
+                        "index": gene_idx_info_index,
+                        "gene_name": gene_idx_info_name,
+                        "strand": gene_idx_info_strand,
+                    }
+                )
             self.expression_positive[self.atpm < EXPRESSION_ATAC_CUTOFF] = 0
             self.expression_negative[self.atpm < EXPRESSION_ATAC_CUTOFF] = 0
 
@@ -1001,8 +1013,12 @@ class RegionMotifDataset(Dataset):
         self.quantitative_atac = quantitative_atac
         self.sampling_step = sampling_step
         self.num_region_per_sample = num_region_per_sample
-        self.leave_out_chromosomes = leave_out_chromosomes if leave_out_chromosomes else []
-        self.leave_out_celltypes = leave_out_celltypes.split(",") if leave_out_celltypes else []
+        self.leave_out_chromosomes = (
+            leave_out_chromosomes if leave_out_chromosomes else []
+        )
+        self.leave_out_celltypes = (
+            leave_out_celltypes.split(",") if leave_out_celltypes else []
+        )
         self.is_train = is_train
         self.mask_ratio = mask_ratio
         self.drop_zero_atpm = drop_zero_atpm
@@ -1166,7 +1182,11 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
             )
             logging.debug(region_motif.gene_idx_info.drop_duplicates(ignore_index=True))
             # Loop over genes and their TSS sites
-            for gene, gene_df in region_motif.gene_idx_info.drop_duplicates(ignore_index=True).query("gene_name.isin(@self.gene_list)").groupby("gene_name"):
+            for gene, gene_df in (
+                region_motif.gene_idx_info.drop_duplicates(ignore_index=True)
+                .query("gene_name.isin(@self.gene_list)")
+                .groupby("gene_name")
+            ):
                 gene_name = gene_df["gene_name"].values[0]
                 strand = gene_df["strand"].values[0]
                 strand = 0 if strand == "+" else 1
@@ -1176,24 +1196,29 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
                 for tss_idx in tss_peaks:
                     start_idx = tss_idx - self.num_region_per_sample // 2
                     end_idx = tss_idx + self.num_region_per_sample // 2
-                    
+
                     if start_idx < 0 or end_idx >= region_motif.peaks.shape[0]:
                         continue
 
-                    peak_coord = region_motif.peaks.iloc[start_idx:end_idx][["Start", "End"]].values
-                    
+                    peak_coord = region_motif.peaks.iloc[start_idx:end_idx][
+                        ["Start", "End"]
+                    ].values
+
                     # Store all necessary information for each TSS
-                    self.sample_indices.append({
-                        "celltype": celltype,
-                        "start_idx": start_idx,
-                        "end_idx": end_idx,
-                        "gene_name": gene_name,
-                        "strand": strand,
-                        "tss_idx": tss_idx,
-                        "tss_peaks": tss_peaks - start_idx,  # Convert to relative positions
-                        "chromosome": chrom,
-                        "peak_coord": peak_coord
-                    })
+                    self.sample_indices.append(
+                        {
+                            "celltype": celltype,
+                            "start_idx": start_idx,
+                            "end_idx": end_idx,
+                            "gene_name": gene_name,
+                            "strand": strand,
+                            "tss_idx": tss_idx,
+                            "tss_peaks": tss_peaks
+                            - start_idx,  # Convert to relative positions
+                            "chromosome": chrom,
+                            "peak_coord": peak_coord,
+                        }
+                    )
 
     def __getitem__(self, index):
         sample_info = self.sample_indices[index]
@@ -1231,7 +1256,9 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
             mask = tss
 
         if self.transform:
-            region_motif_i, mask, target_i = self.transform(region_motif_i, mask, target_i)
+            region_motif_i, mask, target_i = self.transform(
+                region_motif_i, mask, target_i
+            )
 
         # Filter and pad TSS peaks
         valid_tss_peaks = sample_info["tss_peaks"]
@@ -1242,7 +1269,7 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
             valid_tss_peaks,
             (0, self.num_region_per_sample - len(valid_tss_peaks)),
             mode="constant",
-            constant_values=-1
+            constant_values=-1,
         )
 
         return {
@@ -1257,4 +1284,3 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
             "exp_label": target_i.toarray().astype(np.float32),
             "celltype": celltype,
         }
-

@@ -6,7 +6,9 @@ import pandas as pd
 from pyranges import PyRanges as pr
 
 
-def generate_paths(file_id: int, data_path: str, data_type: str, quantitative_atac: bool = False) -> dict:
+def generate_paths(
+    file_id: int, data_path: str, data_type: str, quantitative_atac: bool = False
+) -> dict:
     """
     Generate a dictionary of paths based on the given parameters.
 
@@ -25,22 +27,16 @@ def generate_paths(file_id: int, data_path: str, data_type: str, quantitative_at
     """
     paths_dict = {}
     if quantitative_atac:
-        peak_npz_path = os.path.join(
-            data_path, data_type, str(file_id) + ".watac.npz")
+        peak_npz_path = os.path.join(data_path, data_type, str(file_id) + ".watac.npz")
     else:
-        peak_npz_path = os.path.join(
-            data_path, data_type, str(file_id) + ".natac.npz")
+        peak_npz_path = os.path.join(data_path, data_type, str(file_id) + ".natac.npz")
 
     if not os.path.exists(peak_npz_path):
-        raise FileNotFoundError(
-            "Peak file not found: {}".format(peak_npz_path))
+        raise FileNotFoundError("Peak file not found: {}".format(peak_npz_path))
 
-    target_npy_path = os.path.join(
-        data_path, data_type, str(file_id) + ".exp.npy")
-    tssidx_npy_path = os.path.join(
-        data_path, data_type, str(file_id) + ".tss.npy")
-    seq_path = os.path.join(data_path, data_type,
-                            str(file_id) + ".seq.zarr.zip")
+    target_npy_path = os.path.join(data_path, data_type, str(file_id) + ".exp.npy")
+    tssidx_npy_path = os.path.join(data_path, data_type, str(file_id) + ".tss.npy")
+    seq_path = os.path.join(data_path, data_type, str(file_id) + ".seq.zarr.zip")
     celltype_annot = os.path.join(data_path, data_type, str(file_id) + ".csv")
 
     paths_dict = {
@@ -49,7 +45,7 @@ def generate_paths(file_id: int, data_path: str, data_type: str, quantitative_at
         "target_npy": target_npy_path,
         "tssidx_npy": tssidx_npy_path,
         "seq_npz": seq_path,
-        "celltype_annot_csv": celltype_annot
+        "celltype_annot_csv": celltype_annot,
     }
     return paths_dict
 
@@ -72,7 +68,8 @@ def get_ctcf_pos(celltype_annot: pd.DataFrame, ctcf: pd.DataFrame) -> np.ndarray
         assert len(ctcf_pos) == celltype_annot.shape[0]
     except AssertionError:
         logging.debug(
-            f"ctcf_pos length {len(ctcf_pos)} not equal to celltype_annot length {celltype_annot.shape[0]}")
+            f"ctcf_pos length {len(ctcf_pos)} not equal to celltype_annot length {celltype_annot.shape[0]}"
+        )
     return np.array(ctcf_pos)
 
 
