@@ -20,8 +20,8 @@ from hydra.core.global_hydra import GlobalHydra
 np.bool = np.bool_
 
 import lightning as L
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
-from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.plugins import MixedPrecision
 from omegaconf import OmegaConf
 
@@ -237,13 +237,16 @@ def recursive_detach(tensors):
         return tensors
 
 
-def recursive_numpy(tensors):
+def recursive_numpy(tensors, dtype=None):
     if isinstance(tensors, dict):
-        return {k: recursive_numpy(v) for k, v in tensors.items()}
+        return {k: recursive_numpy(v, dtype) for k, v in tensors.items()}
     elif isinstance(tensors, list):
-        return [recursive_numpy(v) for v in tensors]
+        return [recursive_numpy(v, dtype) for v in tensors]
     elif isinstance(tensors, torch.Tensor):
-        return tensors.detach().cpu().float().numpy()
+        if dtype is None:
+            return tensors.detach().cpu().float().numpy()
+        else:
+            return tensors.detach().cpu().float().numpy().astype(dtype)
     else:
         return tensors
 
@@ -261,12 +264,18 @@ def recursive_concat_numpy(list_of_dict):
             for i in range(len(list_of_dict[0]))
         ]
     elif isinstance(list_of_dict[0], np.ndarray):
+        # Handle string arrays (like gene names and chromosomes) differently
+        if list_of_dict[0].dtype.kind in ['U', 'S', 'O']:
+            # Flatten the array if it's multi-dimensional
+            flattened_arrays = [arr.flatten() if arr.ndim > 1 else arr for arr in list_of_dict]
+            return np.concatenate(flattened_arrays)
         return np.concatenate(list_of_dict, axis=0)
     else:
         return list_of_dict
 
 
 def recursive_save_to_zarr(zarr_group, dict_data, **kwargs):
+    from numcodecs import Blosc
     for k, v in dict_data.items():
         if isinstance(v, dict):
             subgroup = zarr_group.require_group(k)
@@ -274,7 +283,11 @@ def recursive_save_to_zarr(zarr_group, dict_data, **kwargs):
         else:
             # if group not exist, create it
             if k not in zarr_group:
-                zarr_group.create_dataset(k, data=v, **kwargs)
+                # respect the dtype of the data
+                if isinstance(v, np.ndarray):
+                    zarr_group.create_dataset(k, data=v, dtype=v.dtype, compressor=Blosc(cname='zstd', clevel=3, shuffle=1), **kwargs)
+                else:
+                    zarr_group.create_dataset(k, data=v, compressor=Blosc(cname='zstd', clevel=3, shuffle=1), **kwargs)
             else:  # append to existing group
                 # pad to the same shape
                 if (
@@ -322,3 +335,11 @@ def cosine_scheduler(
 
     assert len(schedule) == epochs * niter_per_ep
     return schedule
+
+def recursive_print_shape(zarr_path, prefix=''):
+    z = zarr.open(zarr_path)
+    for key, value in z.items():
+        if isinstance(value, zarr.core.Array):
+            print(f"{prefix}/{key}: {value.shape}")
+        else:
+            recursive_print_shape(value, f"{prefix}/{key}")

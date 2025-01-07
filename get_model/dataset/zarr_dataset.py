@@ -870,8 +870,10 @@ class RegionMotifConfig:
     root: str
     data: str
     celltype: str
+    normalize: bool = True
     motif_scaler: float = 1.0
     leave_out_motifs: Optional[str] = None
+    drop_zero_atpm: bool = True
 
 
 class RegionMotif:
@@ -884,7 +886,8 @@ class RegionMotif:
         self.motif_scaler = cfg.motif_scaler
         self.leave_out_motifs = cfg.leave_out_motifs
         self.celltype = cfg.celltype
-
+        self.normalize = cfg.normalize
+        self.drop_zero_atpm = cfg.drop_zero_atpm
         if self.leave_out_motifs:
             self.leave_out_motifs = [int(m) for m in self.leave_out_motifs.split(",")]
 
@@ -904,23 +907,43 @@ class RegionMotif:
 
     def _load_celltype_data(self):
         self.atpm = self.dataset[f"atpm/{self.celltype}"][:]
-        self.expression_positive = self.dataset[f"expression_positive/{self.celltype}"][
-            :
-        ]
-        self.expression_negative = self.dataset[f"expression_negative/{self.celltype}"][
-            :
-        ]
-        self.tss = self.dataset[f"tss/{self.celltype}"][:]
-        gene_idx_info_index = self.dataset["gene_idx_info_index"][:]
-        gene_idx_info_name = self.dataset["gene_idx_info_name"][:]
-        gene_idx_info_strand = self.dataset["gene_idx_info_strand"][:]
-        self.gene_idx_info = pd.DataFrame(
-            {
+        if self.drop_zero_atpm:
+            atpm_nonzero_idx = np.nonzero(self.atpm)[0]
+            self.atpm = self.atpm[atpm_nonzero_idx]
+            self.peak_names = self.peak_names[atpm_nonzero_idx]
+            self.data = self.data[atpm_nonzero_idx]
+            self._peaks = self._peaks.iloc[atpm_nonzero_idx]
+
+        if f"expression_positive/{self.celltype}" in self.dataset:  
+            self.expression_positive = self.dataset[f"expression_positive/{self.celltype}"][:]
+            self.expression_negative = self.dataset[f"expression_negative/{self.celltype}"][:]
+
+            self.tss = self.dataset[f"tss/{self.celltype}"][:]
+
+
+            gene_idx_info_index = self.dataset["gene_idx_info_index"][:]
+            gene_idx_info_name = self.dataset["gene_idx_info_name"][:]
+            gene_idx_info_strand = self.dataset["gene_idx_info_strand"][:]
+
+            if self.drop_zero_atpm:
+                self.expression_positive = self.expression_positive[atpm_nonzero_idx]
+                self.expression_negative = self.expression_negative[atpm_nonzero_idx]
+                self.tss = self.tss[atpm_nonzero_idx]
+                gene_idx_info_drop_zero_atpm = []
+                idx_to_iloc = {v: i for i, v in enumerate(gene_idx_info_index)}
+                for idx_non_zero_atpm, idx in enumerate(atpm_nonzero_idx): 
+                    if idx in idx_to_iloc:
+                        gene_idx_info_drop_zero_atpm.append((idx_non_zero_atpm, gene_idx_info_name[idx_to_iloc[idx]], gene_idx_info_strand[idx_to_iloc[idx]]))
+                self.gene_idx_info = pd.DataFrame(gene_idx_info_drop_zero_atpm, columns=["index", "gene_name", "strand"])
+            else:
+                self.gene_idx_info = pd.DataFrame(
+                {
                 "index": gene_idx_info_index,
                 "gene_name": gene_idx_info_name,
                 "strand": gene_idx_info_strand,
-            }
-        )
+                })
+            self.expression_positive[self.atpm < EXPRESSION_ATAC_CUTOFF] = 0
+            self.expression_negative[self.atpm < EXPRESSION_ATAC_CUTOFF] = 0
 
     @property
     def peaks(self):
@@ -934,11 +957,24 @@ class RegionMotif:
     def num_motifs(self):
         return len(self.motif_names)
 
-    def normalize_data(self):
+    @property
+    def normalized_data(self):
+        if not self.normalize:
+            return self.data
+        if hasattr(self, "_normalized_data"):
+            return self._normalized_data
         max_values = self.data.max(axis=0)
         normalized_data = self.data / (max_values * self.motif_scaler)
         normalized_data[normalized_data > 1] = 1
+        self._normalized_data = normalized_data
         return normalized_data
+
+    @property
+    def normalizing_factor(self):
+        if not self.normalize:
+            return 1
+        max_values = self.data.max(axis=0)
+        return max_values * self.motif_scaler
 
     def __repr__(self):
         return f"RegionMotif(num_peaks={self.num_peaks}, num_motifs={self.num_motifs}, celltype={self.celltype})"
@@ -957,6 +993,7 @@ class RegionMotifDataset(Dataset):
         leave_out_celltypes: str | None = None,
         is_train: bool = True,
         mask_ratio: float = 0.0,
+        drop_zero_atpm: bool = True,
     ):
         self.zarr_path = zarr_path
         self.celltypes = celltypes.split(",")
@@ -968,7 +1005,7 @@ class RegionMotifDataset(Dataset):
         self.leave_out_celltypes = leave_out_celltypes.split(",") if leave_out_celltypes else []
         self.is_train = is_train
         self.mask_ratio = mask_ratio
-
+        self.drop_zero_atpm = drop_zero_atpm
         self.region_motifs = self._load_region_motifs()
         self.sample_indices = []
         self.setup()
@@ -992,6 +1029,7 @@ class RegionMotifDataset(Dataset):
                 root=os.path.dirname(self.zarr_path),
                 data=os.path.basename(self.zarr_path),
                 celltype=celltype,
+                drop_zero_atpm=self.drop_zero_atpm,
             )
             region_motifs[celltype] = RegionMotif(cfg)
         return region_motifs
@@ -1032,7 +1070,7 @@ class RegionMotifDataset(Dataset):
         celltype, start_index, end_index = self.sample_indices[index]
         region_motif = self.region_motifs[celltype]
 
-        region_motif_i = region_motif.normalize_data()[start_index:end_index]
+        region_motif_i = region_motif.normalized_data[start_index:end_index]
         peaks_i = region_motif.peaks.iloc[start_index:end_index]
 
         expression_positive = region_motif.expression_positive[start_index:end_index]
@@ -1165,7 +1203,7 @@ class InferenceRegionMotifDataset(RegionMotifDataset):
         region_motif = self.region_motifs[celltype]
 
         # Get the data for this region
-        region_motif_i = region_motif.normalize_data()[start_idx:end_idx]
+        region_motif_i = region_motif.normalized_data[start_idx:end_idx]
         expression_positive = region_motif.expression_positive[start_idx:end_idx]
         expression_negative = region_motif.expression_negative[start_idx:end_idx]
         tss = region_motif.tss[start_idx:end_idx]

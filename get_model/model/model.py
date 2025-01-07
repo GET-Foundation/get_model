@@ -524,7 +524,7 @@ class GETRegionPretrain(BaseGETModel):
         x = x * (1 - w) + mask_token * w
         x = torch.cat((cls_tokens, x), dim=1)
         x, _ = self.encoder(x)
-        x = x[:, 1:][mask.squeeze()].reshape(B, -1, C)
+        x = x[:, 1:][mask.squeeze()].reshape( -1, C)
         x_masked = self.head_mask(x)
         return x_masked, region_motif, mask
 
@@ -532,7 +532,7 @@ class GETRegionPretrain(BaseGETModel):
         x_masked, x_original, loss_mask = output
         B, _, C = x_original.shape
         pred = {'masked': x_masked}
-        obs = {'masked': x_original[loss_mask.squeeze()].reshape(B, -1, C)}
+        obs = {'masked': x_original[loss_mask.squeeze()].reshape(-1, C)}
         return pred, obs
 
     def generate_dummy_data(self):

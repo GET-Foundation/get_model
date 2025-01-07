@@ -1,11 +1,14 @@
+import gc
 import logging
 from functools import partial
 
 import lightning as L
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
 import torch.utils.data
+import wandb
 import zarr
 from hydra.utils import instantiate
 from matplotlib import pyplot as plt
@@ -14,9 +17,9 @@ from minlora.model import add_lora_by_name
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-import wandb
 from get_model.config.config import *
 from get_model.dataset.collate import get_perturb_collate_fn, get_rev_collate_fn
+
 try:
     from get_model.dataset.zarr_dataset import (
         InferenceDataset,
@@ -31,6 +34,7 @@ from get_model.model.model import *
 from get_model.model.modules import *
 from get_model.optim import LayerDecayValueAssigner, create_optimizer
 from get_model.utils import (
+    cosine_scheduler,
     extract_state_dict,
     load_checkpoint,
     load_state_dict,
@@ -40,7 +44,6 @@ from get_model.utils import (
     recursive_save_to_zarr,
     rename_state_dict,
     setup_trainer,
-    cosine_scheduler,
 )
 
 logging.disable(logging.WARN)
@@ -287,12 +290,14 @@ class LitModel(L.LightningModule):
         elif self.cfg.task.test_mode == "interpret":
             # assume focus is the center peaks in the input sample
             with torch.enable_grad():
-                return self.interpret_step(
+                result = self.interpret_step(
                     batch,
                     batch_idx,
                     layer_names=self.cfg.task.layer_names,
                     focus=self.cfg.dataset.n_peaks_upper_bound // 2,
                 )
+                self.accumulated_results.append(result)
+                
         elif self.cfg.task.test_mode == "perturb_interpret":
             with torch.enable_grad():
                 return self.perturb_interpret_step(batch, batch_idx)
@@ -343,35 +348,21 @@ class LitModel(L.LightningModule):
             "embeddings_mut": embeddings_mut,
         }
 
-    def interpret_step(
-        self,
-        batch,
-        batch_idx,
-        layer_names: List[str] = None,
-        focus: int | np.ndarray = None,
-    ):
-
+    def interpret_step(self, batch, batch_idx, layer_names: List[str] = None, focus: int | np.ndarray = None):
         target_tensors = {}
         hooks = []
         input = self.model.get_input(batch)
         assert focus is not None, "Please provide a focus position for interpretation"
-        assert (
-            layer_names is not None
-        ), "Please provide a list of layer names for interpretation"
-        for layer_input_name in layer_names:
-            assert (
-                layer_input_name in self.model.get_layer_names()
-            ), f"{layer_input_name} is not valid, valid layers are: {self.model.get_layer_names()}"
-
-        # Register hooks to capture the target tensors
+        assert layer_names is not None, "Please provide a list of layer names for interpretation"
+        
+        # Register hooks to capture target tensors
         def capture_target_tensor(name):
             def hook(module, input, output):
-                # Retain the gradient of the target tensor
                 output.retain_grad()
                 target_tensors[name] = output
-
             return hook
 
+        # Setup hooks and input tensors
         if layer_names is None or len(layer_names) == 0:
             target_tensors["input"] = input
             for key, tensor in input.items():
@@ -385,70 +376,97 @@ class LitModel(L.LightningModule):
                 hook = layer.register_forward_hook(capture_target_tensor(layer_name))
                 hooks.append(hook)
 
-        # Forward pass
+        # Initial forward pass
         output = self(input)
         pred_original, obs_original = self.model.before_loss(output, batch)
-        # Remove the hooks after the forward pass
-        # for hook in hooks:
-        #     hook.remove()
-        # Compute the jacobian of the output with respect to the target tensor
+
+        # Compute jacobians for each target and strand
         jacobians = {}
         for target_name, target in obs_original.items():
             jacobians[target_name] = {}
-            for i in range(target.shape[-1]):
+            for i in range(target.shape[-1]):  # Loop over strands
+                # Fresh forward pass for each strand
+                self.zero_grad(set_to_none=True)
                 output = self(input)
                 pred, obs = self.model.before_loss(output, batch)
-                jacobians[target_name][str(i)] = {}
-                mask = torch.zeros_like(target).to(self.device)
+                
+                # Create mask for current strand
+                mask = torch.zeros_like(pred[target_name]).to(self.device)
                 if isinstance(focus, int):
                     mask[:, focus, i] = 1
                 else:
-                    assert (
-                        len(focus) == mask.shape[0]
-                    ), "The length of focus should match the number of samples in batch"
+                    assert len(focus) == mask.shape[0]
                     for j in range(mask.shape[0]):
                         mask[j, focus[j], i] = 1
+                
+                # Backward pass
                 pred[target_name].backward(mask)
+                
+                # Store gradients
+                jacobians[target_name][str(i)] = {}
                 for layer_name, layer in target_tensors.items():
                     if isinstance(layer, torch.Tensor):
-                        if layer.grad is None:
-                            continue
-                        jacobians[target_name][str(i)][layer_name] = (
-                            layer.grad.detach().cpu().numpy()
-                        )
-                        layer.grad.zero_()
+                        if layer.grad is not None:
+                            jacobians[target_name][str(i)][layer_name] = layer.grad.detach().cpu().numpy()
                     elif isinstance(layer, dict):
+                        jacobians[target_name][str(i)][layer_name] = {}
                         for layer_input_name, layer_input in layer.items():
-                            if layer_input.grad is None:
-                                continue
-                            jacobians[target_name][str(i)][layer_name] = (
-                                layer_input.grad.detach().cpu().numpy()
-                            )
-                            layer_input.grad.zero_()
+                            if layer_input.grad is not None:
+                                jacobians[target_name][str(i)][layer_name][layer_input_name] = \
+                                    layer_input.grad.detach().cpu().numpy()
+
+        # Clean up hooks
+        for hook in hooks:
+            hook.remove()
+
+        # Prepare return values
         pred = recursive_numpy(recursive_detach(pred_original))
         obs = recursive_numpy(recursive_detach(obs_original))
-        jacobians = recursive_numpy(jacobians)
-        target_tensors = recursive_numpy(target_tensors)
+        jacobians = recursive_numpy(jacobians, dtype=np.float16)
+        target_tensors = recursive_numpy(target_tensors, dtype=np.float16)
+        
         return pred, obs, jacobians, target_tensors
+
+    def _save_accumulated_results(self):
+        """Helper method to save accumulated results to zarr and clear the list"""
+        if not self.accumulated_results:
+            return
+            
+        zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.run.project_name}/{self.cfg.run.run_name}/{self.cfg.dataset.leave_out_celltypes}.zarr"
+        print(f"Saving batch of results to {zarr_path}")
+
+        from numcodecs import VLenUTF8
+
+        object_codec = VLenUTF8()
+        z = zarr.open(zarr_path, mode="a")
+
+        # Concatenate all accumulated results
+        accumulated_results = recursive_concat_numpy(self.accumulated_results)
+        
+        # Ensure gene names and chromosomes are properly formatted as string arrays
+        if 'available_genes' in accumulated_results:
+            accumulated_results['available_genes'] = np.array(accumulated_results['available_genes'], dtype='U100')
+        if 'chromosome' in accumulated_results:
+            accumulated_results['chromosome'] = np.array(accumulated_results['chromosome'], dtype='U30')
+
+        recursive_save_to_zarr(
+            z, accumulated_results, object_codec=object_codec, overwrite=False
+        )
+
+        # Clear accumulated results and force garbage collection
+        self.accumulated_results = []
+        gc.collect()
 
     def on_predict_epoch_end(self):
         if self.cfg.task.test_mode == "interpret":
-            # Save accumulated results to zarr
-            zarr_path = f"{self.cfg.machine.output_dir}/{self.cfg.run.project_name}/{self.cfg.run.run_name}/interpret.zarr"
-            print(f"Saving to {zarr_path}")
-            from numcodecs import VLenUTF8
+            # Save any remaining accumulated results
+            self._save_accumulated_results()
 
-            object_codec = VLenUTF8()
-            z = zarr.open(zarr_path, mode="a")
-
-            accumulated_results = recursive_concat_numpy(self.accumulated_results)
-            recursive_save_to_zarr(
-                z, accumulated_results, object_codec=object_codec, overwrite=True
-            )
-
-            # Clear accumulated results
-            self.accumulated_results = []
-
+    def on_predict_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
+        if self.cfg.task.test_mode == "interpret":
+            if len(self.accumulated_results) >= 1000:
+                self._save_accumulated_results()
+            
     def configure_optimizers(self):
         if hasattr(self.model.cfg, "encoder"):
             num_layers = self.model.cfg.encoder.num_layers
@@ -789,3 +807,6 @@ def run_ppif_task(trainer: L.Trainer, lm: LitModel, output_key="atpm"):
         "ppif_r2": r2,
         "ppif_slope": slope,
     }
+
+
+

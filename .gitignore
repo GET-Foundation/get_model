@@ -40,3 +40,9 @@ test/abc
 experiments
 
 tutorials/*.zarr
+tutorials/*.csv
+tutorials/*.bed
+tutorials/*.gz
+tutorials/*.gz.tbi
+tutorials/*.h5
+tutorials/*.h5ad

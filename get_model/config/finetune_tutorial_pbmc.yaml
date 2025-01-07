@@ -1,0 +1,63 @@
+defaults:
+  - base_region_zarr_config
+  - model/GETRegionFinetune@_here_
+  - finetune/v1_finetune@finetune
+  - machine/pc
+  - _self_
+
+assembly: "hg38"
+
+dataset:
+    zarr_path: ./pbmc10k_multiome.zarr # set the path to the data zarr file you want to use
+    celltypes: 'cd4_naive,cd8_naive,cd4_tcm,cd14_mono' # set the celltypes you want to finetune
+    num_region_per_sample: 200
+    transform: null
+    leave_out_celltypes: null
+    leave_out_chromosomes: null # set the chromosomes you want to leave out, if null, all chromosomes will be used for finetuning
+    quantitative_atac: true # set to true if you want to use quantitative ATAC data, if false, the ATAC-seq signal will all be set to 1
+    sampling_step: 100
+    mask_ratio: 0.0
+
+training:
+  save_ckpt_freq: 1
+  epochs: 50
+  warmup_epochs: 1
+  accumulate_grad_batches: 1
+  clip_grad: null
+  use_fp16: false
+
+optimizer:
+  lr: 0.0001
+  min_lr: 0.0001
+  weight_decay: 0.05
+  opt: "adamw"
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.999]
+
+run:
+  project_name: "finetune_pbmc10k_multiome" # set a project name you want to use
+  run_name: "training_from_finetune_lora_cd4_tcm_no_chr_split" # set a run name you want to use for this particular run
+  use_wandb: true # set to true if you want to use wandb for logging
+
+task:
+  layer_names: ['region_embed'] # set the layers you want to apply LoRA to
+  test_mode: "interpret" # set the test mode you want to use, "interpret" to get the jacobians
+  gene_list: 'MYC,SOX10,SOX2,RET' # set the genes you want to predict/interpret; if null, all genes will be used
+
+
+finetune:
+  pretrain_checkpoint: false
+  strict: true
+  use_lora: true # set to true if you want to use LoRA finetuning
+  checkpoint: "/home/xf2217/Projects/get_checkpoints/Astrocytes/checkpoint-best.pth"
+  layers_with_lora: ['region_embed', 'encoder'] # set the layers you want to apply LoRA to
+  patterns_to_freeze: []
+
+eval_tss: true
+log_image: true
+
+hydra:
+  job:
+    name: ${run.project_name}_${run.run_name}
+  run:
+    dir: ${machine.output_dir}/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}/

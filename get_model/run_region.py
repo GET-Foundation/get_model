@@ -1,3 +1,4 @@
+import gc
 import logging
 from functools import partial
 
@@ -269,47 +270,38 @@ class RegionLitModel(LitModel):
             # logging.debug(e)
 
         elif self.cfg.task.test_mode == "interpret":
-            focus = []
-            # for i in range(len(batch["gene_name"])):
-            #     goi_idx = batch["all_tss_peak"][i].cpu().numpy()
-            #     goi_idx = goi_idx[goi_idx > 0]
-            #     focus.append(goi_idx)
-            focus = 100
-            torch.set_grad_enabled(True)
-            preds, obs, jacobians, embeddings = self.interpret_step(
-                batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=focus
-            )
-            # pred = np.array([pred['exp'][i][:, batch['strand'][i].cpu().numpy(
-            # )][batch['all_tss_peak'][i].cpu().numpy()].mean() for i in range(len(batch['gene_name']))])
-            # obs = np.array([obs['exp'][i][:, batch['strand'][i].cpu().numpy(
-            # )][batch['all_tss_peak'][i].cpu().numpy()].mean() for i in range(len(batch['gene_name']))])
-            gene_names = recursive_numpy(recursive_detach(batch["gene_name"]))
-            for i, gene_name in enumerate(gene_names):
-                if len(gene_name) < 100:
-                    gene_names[i] = gene_name + " " * (100 - len(gene_name))
-            chromosomes = recursive_numpy(recursive_detach(batch["chromosome"]))
-            for i, chromosome in enumerate(chromosomes):
-                if len(chromosome) < 30:
-                    chromosomes[i] = chromosome + " " * (30 - len(chromosome))
-            for key in preds:
-                if len(preds[key].shape) == 2:
-                    preds[key] = preds[key].unsqueeze(0)
-            for key in obs:
-                if len(obs[key].shape) == 2:
-                    obs[key] = obs[key].unsqueeze(0)
-            result = {
-                "preds": preds,
-                "obs": obs,
-                "jacobians": jacobians,
-                "input": embeddings["input"]["region_motif"],
-                "chromosome": chromosomes,
-                "peak_coord": recursive_numpy(recursive_detach(batch["peak_coord"])),
-                "strand": recursive_numpy(recursive_detach(batch["strand"])),
-                "focus": recursive_numpy(recursive_detach(batch["all_tss_peak"])),
-                "avaliable_genes": gene_names,
-            }
-            self.accumulated_results.append(result)
-            return result
+            with torch.enable_grad():
+                focus = 100  # Fixed focus point
+                preds, obs, jacobians, embeddings = self.interpret_step(
+                    batch, batch_idx, layer_names=self.cfg.task.layer_names, focus=focus
+                )
+                
+                # Create padded arrays and reshape to match other dimensions
+                gene_names = np.array([
+                    name.ljust(100) if len(name) < 100 else name[:100] 
+                    for name in batch["gene_name"]
+                ], dtype='U100')
+                gene_names = gene_names.reshape(-1)  # Flatten from (1000, 8) to (8000,)
+                
+                chromosomes = np.array([
+                    chrom.ljust(30) if len(chrom) < 30 else chrom[:30]
+                    for chrom in batch["chromosome"]
+                ], dtype='U30')
+                chromosomes = chromosomes.reshape(-1)  # Flatten from (1000, 8) to (8000,)
+
+                result = {
+                    "preds": preds,
+                    "obs": obs,
+                    "jacobians": jacobians,
+                    "input": embeddings["input"]["region_motif"],
+                    "chromosome": chromosomes,
+                    "peak_coord": recursive_numpy(recursive_detach(batch["peak_coord"])),
+                    "strand": recursive_numpy(recursive_detach(batch["strand"])),
+                    "focus": recursive_numpy(recursive_detach(batch["all_tss_peak"])),
+                    "available_genes": gene_names,
+                }
+                self.accumulated_results.append(result)
+                return
 
     def get_model(self):
         model = instantiate(self.cfg.model)
