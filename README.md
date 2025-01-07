@@ -33,7 +33,7 @@ However, some ops used in the metric calculation (Pearson/Spearman/R^2) was not 
 ## Installation-Pip
 If you just need the model and analysis package. You can install with pip. However, note that the R package `pcalg` is required for the causal analysis and will not be available if you don't install it manually.
 ```bash
-pip install git+https://github.com/GET-Foundation/get_model.git@main
+pip install git+https://github.com/GET-Foundation/get_model.git@master
 ```
 
 ## Installation-Conda
