@@ -4,6 +4,8 @@ A foundation model of transcription across human cell types.
 
 This repository contains the official implementation of the model described in our paper: https://www.nature.com/articles/s41586-024-08391-z.
 
+[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-Models-yellow)](https://huggingface.co/get-foundation)
+[![Docker Pulls](https://img.shields.io/docker/pulls/fuxialexander/get_model)](https://hub.docker.com/r/fuxialexander/get_model)
 
 ## Table of Contents
 
