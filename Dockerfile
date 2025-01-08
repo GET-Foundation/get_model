@@ -51,4 +51,3 @@ RUN wget "https://api2.cursor.sh/updates/download-latest?os=cli-alpine-x64" -O "
 
 ENV PATH="/opt/conda/bin/:$PATH:/usr/bin:/usr/local/bin"
 
-ENTRYPOINT ["/bin/bash"]

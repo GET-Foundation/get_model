@@ -79,7 +79,7 @@ docker pull fuxialexander/get_model:latest
 ```
 This start a bash shell in the container by default
 ```bash
-docker run -it -v /home/xf2217:/home/xf2217 fuxialexander/get_model 
+docker run --entrypoint /bin/bash -it -v /home/xf2217:/home/xf2217 fuxialexander/get_model 
 ```
 
 You can also start a jupyter notebook server in the container and access it from your host machine on port 8888
