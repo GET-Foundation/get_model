@@ -22,7 +22,7 @@ classifiers = [
 
 dependencies = [
     "einops",
-    "gcell @ git+https://github.com/fuxialexander/gcell.git@main",
+    "gcell @ git+https://github.com/GET-Foundation/gcell.git@main",
     "genomespy",
     "hydra-core",
     "lightning",
