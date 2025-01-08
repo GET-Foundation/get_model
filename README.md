@@ -12,6 +12,7 @@ This repository contains the official implementation of the model described in o
 - [GET: General Expression Transformer](#get-general-expression-transformer)
   - [Table of Contents](#table-of-contents)
   - [Tutorials](#tutorials)
+  - [Data](#data)
   - [Installation-Pip](#installation-pip)
   - [Installation-Conda](#installation-conda)
   - [Installation-Docker/Singularity](#installation-dockersingularity)
@@ -29,8 +30,14 @@ This repository contains the official implementation of the model described in o
 - [Moitf -> ATAC prediction](tutorials/predict_atac.ipynb) (just for demo, optional)
 - [Continue pretrain](tutorials/pretrain_pbmc.ipynb) (just for demo, optional)
 
+
 Note that `Motif -> ATAC prediction` tutorial has been tested on a Macbook Pro M4 Pro with MPS accelaration. It seems that the speed for training and validation iteration is close to a RTX3090; 
 However, some ops used in the metric calculation (Pearson/Spearman/R^2) was not accelarated, making the speed a bit inferior. 
+
+## Data
+- Preprocessed tutorial data is available at https://zenodo.org/records/14614947; 
+- Pretrain data can be found in s3://2023-get-xf2217/get_demo/pretrain_human_bingren_shendure_apr2023/ (although it's in a deprecated format, which should be load with `get_model.dataset.zarr_dataset.RegionDataset` rather than the new `get_model.dataset.zarr_dataset.RegionMotifDataset`. The information they stored is the same. We just switched to `zarr` for future-proof.)
+- Inference results and checkpoints (used in the [demo](https://huggingface.co/spaces/get-foundation/getdemo) can be found in `s3://2023-get-xf2217/get_demo/`
 
 ## Installation-Pip
 If you just need the model and analysis package. You can install with pip. However, note that the R package `pcalg` is required for the causal analysis and will not be available if you don't install it manually.
