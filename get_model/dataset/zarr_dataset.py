@@ -19,7 +19,7 @@ logging.basicConfig(
 )
 
 EXPRESSION_ATAC_CUTOFF = (
-    0.05  # TODO turn this into a config parameter. also in collate for v3 GET
+    0.001  # TODO turn this into a config parameter. also in collate for v3 GET
 )
 
 # Suppress all deprecated warnings
