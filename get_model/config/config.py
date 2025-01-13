@@ -1,12 +1,12 @@
-from dataclasses import dataclass, field
 import logging
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Generic, Optional, TypeVar
 
 import hydra
 from hydra.core.config_store import ConfigStore
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import MISSING, OmegaConf
-
 
 T = TypeVar("T")
 
@@ -28,6 +28,13 @@ def load_config(config_name, config_path="./"):
     return cfg
 
 
+def export_config(cfg, yaml_file):
+    OmegaConf.save(cfg, yaml_file)
+
+def load_config_from_yaml(yaml_file):
+    cfg = OmegaConf.load(yaml_file)
+    return cfg
+
 def pretty_print_config(cfg):
     logging.info(OmegaConf.to_yaml(cfg))
 
@@ -41,6 +48,7 @@ class ModelConfig(Generic[T]):
         _target_: The target path for the model class.
         cfg: The configuration for the model.
     """
+
     _target_: str = field(
         default_factory=lambda: get_target_from_class_name(T.__name__)
     )
@@ -82,6 +90,7 @@ class DatasetConfig:
         dataset_size: Size of the dataset.
         eval_dataset_size: Size of the evaluation dataset.
     """
+
     zarr_dirs: list = MISSING
 
     # peaks
@@ -150,6 +159,7 @@ class RegionDatasetConfig:
         sampling_step: Step size for sampling.
         mask_ratio: Ratio for masking.
     """
+
     root: str = "/home/xf2217/Projects/new_finetune_data_all"
     metadata_path: str = "cell_type_align.txt"
     num_region_per_sample: int = 900
@@ -163,11 +173,13 @@ class RegionDatasetConfig:
     sampling_step: int = 100
     mask_ratio: float = 0
 
+
 @dataclass
 class RegionMotifDatasetConfig:
     """
     Configuration for the region motif dataset.
     """
+
     zarr_path: str = MISSING
     celltypes: str = MISSING
     transform: Optional[Any] = None
@@ -177,6 +189,7 @@ class RegionMotifDatasetConfig:
     leave_out_chromosomes: str | None = None
     leave_out_celltypes: str | None = None
     mask_ratio: float = 0.0
+
 
 @dataclass
 class OptimizerConfig:
@@ -191,6 +204,7 @@ class OptimizerConfig:
         opt_eps: Epsilon for optimizer.
         opt_betas: Beta values for optimizer.
     """
+
     lr: float = 0.001
     min_lr: float = 0.0001
     weight_decay: float = 0.05
@@ -214,6 +228,7 @@ class TrainingConfig:
         log_every_n_steps: Number of steps to log.
         val_check_interval: Validation check interval.
     """
+
     save_ckpt_freq: int = 10
     epochs: int = 100
     warmup_epochs: int = 5
@@ -234,9 +249,11 @@ class RunConfig:
         project_name: Name of the project.
         run_name: Name of the run.
     """
+
     project_name: str = MISSING
     run_name: str = MISSING
     use_wandb: bool = True
+
 
 @dataclass
 class WandbConfig:
@@ -248,6 +265,7 @@ class WandbConfig:
         project_name: Name of the project.
         run_name: Name of the run.
     """
+
     project_name: str = MISSING
     run_name: str = MISSING
     use_wandb: bool = True
@@ -272,6 +290,7 @@ class FinetuneConfig:
         patterns_to_drop: Patterns to drop.
         additional_checkpoints: Additional checkpoints.
     """
+
     resume_ckpt: str | None = None
     pretrain_checkpoint: bool = False
     checkpoint: str | None = None
@@ -302,6 +321,7 @@ class MachineConfig:
         batch_size: Batch size.
         fasta_path: Path to FASTA file.
     """
+
     codebase: str = MISSING
     data_path: str = MISSING
     output_dir: str = MISSING
@@ -322,6 +342,7 @@ class TaskConfig:
         layer_names: Names of layers.
         mutations: Mutation method.
     """
+
     test_mode: str = "predict"
     gene_list: str | None = None
     layer_names: list = field(default_factory=lambda: ["atac_attention"])
@@ -347,6 +368,7 @@ class Config:
         finetune: Fine-tuning configuration.
         task: Task configuration.
     """
+
     run: RunConfig = field(default_factory=RunConfig)
     type: str = "nucleotide"
     log_image: bool = False
@@ -359,7 +381,6 @@ class Config:
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
     task: TaskConfig = field(default_factory=TaskConfig)
-
 
 
 @dataclass
@@ -382,6 +403,7 @@ class RegionConfig:
         finetune: Fine-tuning configuration.
         task: Task configuration.
     """
+
     run: RunConfig = field(default_factory=RunConfig)
     type: str = "region"
     stage: str = "fit"
@@ -395,6 +417,7 @@ class RegionConfig:
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
     task: TaskConfig = field(default_factory=TaskConfig)
+
 
 @dataclass
 class RegionZarrConfig:
@@ -416,6 +439,7 @@ class RegionZarrConfig:
         finetune: Fine-tuning configuration.
         task: Task configuration.
     """
+
     run: RunConfig = field(default_factory=RunConfig)
     type: str = "region"
     stage: str = "fit"
@@ -431,7 +455,6 @@ class RegionZarrConfig:
     task: TaskConfig = field(default_factory=TaskConfig)
 
 
-
 cs = ConfigStore.instance()
 cs.store(name="base_config", node=Config)
 
@@ -440,4 +463,3 @@ csr.store(name="base_region_config", node=RegionConfig)
 
 csz = ConfigStore.instance()
 csz.store(name="base_region_zarr_config", node=RegionZarrConfig)
-

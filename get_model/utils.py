@@ -33,7 +33,6 @@ def setup_wandb(cfg):
         save_dir=os.path.join(
             cfg.machine.output_dir, cfg.run.project_name, cfg.run.run_name
         ),
-        entity="get-v3",
     )
     wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
     return wandb_logger

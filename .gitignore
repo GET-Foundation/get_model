@@ -23,6 +23,7 @@ test/data
 run_pretrain_get_xf.unnorm.sh
 test/*.npy
 test/*results*.csv
+benchmark
 data/ukbb_variants.hg19.tsv.bgz
 data/resources_core.tar.gz
 outputs/
@@ -46,3 +47,4 @@ tutorials/*.h5ad
 get_model/_version.py
 tutorials/.genomespy_shared
 tutorials/*.html
+benchmark/test.zarr/.zarray
