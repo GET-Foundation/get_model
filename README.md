@@ -26,7 +26,9 @@ This repository contains the official implementation of the model described in o
   - [Contact](#contact)
 
 ## News
-- There was a bug in data preparation pipeline for PBMC10x data, leading to random performance in predcit ATAC performance. The reason is peak was expected to be sorted by `chr1,chr2,chr3` while the count matrix was not sorted correctly. This has been fixed and we have updated the `predict_atac.ipynb` and `prepare_pbmc.ipynb`. Sorry for the inconvenience. The `finetune_pbmc.ipynb` and `pretrain_pbmc.ipynb` is pending an update. We will notify here once we updated it.
+- There was a bug in data preparation pipeline for PBMC10x data, leading to random performance in predcit ATAC performance. The reason is peak was expected to be sorted by `chr1,chr2,chr3` while the count matrix was not sorted correctly. This has been fixed and we have updated the `predict_atac.ipynb` and `prepare_pbmc.ipynb`. Sorry for the inconvenience. The `finetune_pbmc.ipynb` and `pretrain_pbmc.ipynb` is pending an update. We will notify here once we updated it. 
+- As as sanity check to prevent this kind of processing bug when you are dealing with your own data. I recommend you to run `predict_atac.ipynb` to train a motif->ATAC model from scratch. If the data has been properly processed and has decent (e.g. > 3M) depth, the performance should
+  rapidly (<10 epochs) reach ~0.7 Pearson when trained on one cell type and leave out chr10,chr11.
 - `export_config` and `load_config_from_yaml` helper functions has been added to `get_model.config.config` for export and load back your customized config as yaml file.
 
 ## Tutorials
