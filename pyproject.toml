@@ -39,7 +39,7 @@ dependencies = [
     "torchmetrics",
     "tqdm",
     "wandb",
-    "zarr",
+    "zarr<3",
 ]
 
 [project.optional-dependencies]

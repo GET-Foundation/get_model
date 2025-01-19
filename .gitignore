@@ -38,6 +38,7 @@ test/abc
 *tsv
 experiments
 tutorials/*.zarr
+tutorials/*.yaml
 tutorials/*.csv
 tutorials/*.bed
 tutorials/*.gz
@@ -47,4 +48,8 @@ tutorials/*.h5ad
 get_model/_version.py
 tutorials/.genomespy_shared
 tutorials/*.html
-benchmark/test.zarr/.zarray
+tutorials/*.zarr
+benchmark/test.zarr
+tutorials/preprocess_recall_peak/*
+tutorials/preprocess_recall_peak/*.zarr
+tutorials/preprocess_recall_peak/pbmc10k_multiome.zarr
