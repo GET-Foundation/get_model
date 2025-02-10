@@ -509,7 +509,7 @@ class LitModel(L.LightningModule):
         # set lr scheduler to schedule
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer,
-            lr_lambda=lambda step: self.schedule[step - 1] / self.cfg.optimizer.lr,
+            lr_lambda=lambda epoch: self.schedule[epoch*num_training_steps_per_epoch] / self.cfg.optimizer.lr,
         )
         return [optimizer], [lr_scheduler]
 
