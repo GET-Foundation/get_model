@@ -19,7 +19,7 @@ logging.basicConfig(
 )
 
 EXPRESSION_ATAC_CUTOFF = (
-    0.001  # TODO turn this into a config parameter. also in collate for v3 GET
+    0.05  # TODO turn this into a config parameter. also in collate for v3 GET
 )
 
 # Suppress all deprecated warnings
@@ -992,11 +992,12 @@ class RegionMotif:
         return f"RegionMotif(num_peaks={self.num_peaks}, num_motifs={self.num_motifs}, celltype={self.celltype})"
 
 
+
 class RegionMotifDataset(Dataset):
     def __init__(
         self,
         zarr_path: str,
-        celltypes: str,
+        celltypes: str | None = None,
         transform=None,
         quantitative_atac: bool = False,
         sampling_step: int = 50,
@@ -1007,8 +1008,29 @@ class RegionMotifDataset(Dataset):
         mask_ratio: float = 0.0,
         drop_zero_atpm: bool = True,
     ):
+        # try split by comma
+        if isinstance(zarr_path, str):
+            zarr_path = zarr_path.split(",")
         self.zarr_path = zarr_path
-        self.celltypes = celltypes.split(",")
+
+        # Get available celltypes from zarr paths by checking atpm group
+        self.available_celltypes = []
+        for zarr_path in self.zarr_path:
+            zarr_root = zarr.open(zarr_path, mode='r')
+            if 'atpm' in zarr_root:
+                self.available_celltypes.extend(list(zarr_root['atpm'].keys()))
+        self.available_celltypes = list(set(self.available_celltypes))
+
+        # Filter celltypes if specified
+        if celltypes is not None:
+            requested_celltypes = celltypes.split(",")
+            self.celltypes = [ct for ct in requested_celltypes if ct in self.available_celltypes]
+            if len(self.celltypes) < len(requested_celltypes):
+                missing = set(requested_celltypes) - set(self.celltypes)
+                logging.warning(f"Some requested celltypes were not found in the zarr files: {missing}")
+        else:
+            self.celltypes = self.available_celltypes
+
         self.transform = transform
         self.quantitative_atac = quantitative_atac
         self.sampling_step = sampling_step
@@ -1041,9 +1063,21 @@ class RegionMotifDataset(Dataset):
                 and celltype not in self.leave_out_celltypes
             ):
                 continue
+            
+            # Find which zarr file contains this celltype
+            zarr_path = None
+            for path in self.zarr_path:
+                if celltype in zarr.open(path, mode='r')['atpm'].keys():
+                    zarr_path = path
+                    break
+                    
+            if zarr_path is None:
+                logging.warning(f"Could not find zarr file containing celltype {celltype}")
+                continue
+                    
             cfg = RegionMotifConfig(
-                root=os.path.dirname(self.zarr_path),
-                data=os.path.basename(self.zarr_path),
+                root=os.path.dirname(zarr_path),
+                data=os.path.basename(zarr_path),
                 celltype=celltype,
                 drop_zero_atpm=self.drop_zero_atpm,
             )
@@ -1088,10 +1122,17 @@ class RegionMotifDataset(Dataset):
 
         region_motif_i = region_motif.normalized_data[start_index:end_index]
         peaks_i = region_motif.peaks.iloc[start_index:end_index]
-
-        expression_positive = region_motif.expression_positive[start_index:end_index]
-        expression_negative = region_motif.expression_negative[start_index:end_index]
-        tss = region_motif.tss[start_index:end_index]
+        if hasattr(region_motif, "expression_positive"):
+            expression_positive = region_motif.expression_positive[start_index:end_index]
+            expression_negative = region_motif.expression_negative[start_index:end_index]
+            tss = region_motif.tss[start_index:end_index]
+        else:
+            logging.warning(
+                f"No expression data for {celltype}. Using zeros as placeholder. Don't do expression finetune using this dataset."
+            )
+            expression_positive = np.zeros(region_motif_i.shape[0])
+            expression_negative = np.zeros(region_motif_i.shape[0])
+            tss = np.zeros(region_motif_i.shape[0])
         atpm = region_motif.atpm[start_index:end_index]
 
         if not self.quantitative_atac:
@@ -1142,7 +1183,6 @@ class RegionMotifDataset(Dataset):
         return self.__getitem__(
             self.sample_indices.index((celltype, start_index, end_index))
         )
-
 
 class InferenceRegionMotifDataset(RegionMotifDataset):
     def __init__(self, assembly, gencode_obj, gene_list=None, **kwargs):
