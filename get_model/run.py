@@ -512,7 +512,7 @@ class LitModel(L.LightningModule):
             # (Lightning calls scheduler.step() after each batch if interval="step")
             # if self.schedule[step_index] is the actual LR value, we divide by initial lr
             # because LambdaLR multiplies the optimizer’s base LR by this factor
-            return self.schedule[step_index] / self.cfg.optimizer.lr
+            return self.schedule[step_index-1] / self.cfg.optimizer.lr
 
         # Create the LambdaLR
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
