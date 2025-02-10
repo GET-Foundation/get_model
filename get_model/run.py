@@ -505,13 +505,30 @@ class LitModel(L.LightningModule):
             start_warmup_value=self.cfg.optimizer.min_lr,
             warmup_steps=-1,
         )
+        # Suppose self.schedule is a per-step LR array of length = total training steps.
+        # We define a function that picks the LR from self.schedule by the current "step".
+        def lr_lambda(step_index):
+            # step_index will go from 0 ... (max_steps - 1)
+            # (Lightning calls scheduler.step() after each batch if interval="step")
+            # if self.schedule[step_index] is the actual LR value, we divide by initial lr
+            # because LambdaLR multiplies the optimizer’s base LR by this factor
+            return self.schedule[step_index] / self.cfg.optimizer.lr
 
-        # set lr scheduler to schedule
+        # Create the LambdaLR
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer,
-            lr_lambda=lambda epoch: self.schedule[epoch*num_training_steps_per_epoch] / self.cfg.optimizer.lr,
+            lr_lambda=lr_lambda,
         )
-        return [optimizer], [lr_scheduler]
+
+        # Let Lightning know: this scheduler is stepped each batch
+        scheduler_config = {
+            "scheduler": lr_scheduler,
+            "interval": "step",  # call scheduler.step() every batch
+            "frequency": 1,
+        }
+
+        return [optimizer], [scheduler_config]
+
 
     # def on_before_optimizer_step(self, optimizer):
     #     # Compute the 2-norm for each layer
