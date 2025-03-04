@@ -42,7 +42,7 @@ Note that `Motif -> ATAC prediction` tutorial has been tested on a Macbook Pro M
 However, some ops used in the metric calculation (Pearson/Spearman/R^2) was not accelarated, making the speed a bit inferior. 
 
 ## Data
-- Preprocessed tutorial data is available at https://zenodo.org/records/14614947; 
+- Preprocessed tutorial data is available at [astrocyte](https://zenodo.org/records/14614947/files/astrocyte.zarr.tar?download=1) and [pbmc](https://zenodo.org/records/14915449/files/pbmc10k_multiome.zarr.tar?download=1); 
 - Pretrain data can be found in s3://2023-get-xf2217/get_demo/pretrain_human_bingren_shendure_apr2023/ (although it's in a deprecated format, which should be load with `get_model.dataset.zarr_dataset.RegionDataset` rather than the new `get_model.dataset.zarr_dataset.RegionMotifDataset`. The information they stored is the same. We just switched to `zarr` for future-proof.)
 - Inference results and checkpoints (used in the [demo](https://huggingface.co/spaces/get-foundation/getdemo) can be found in `s3://2023-get-xf2217/get_demo/`
 

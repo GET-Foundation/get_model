@@ -8,13 +8,13 @@ defaults:
 assembly: "hg38"
 
 dataset:
-    zarr_path: /home/xf2217/Projects/get_model/tutorials/output.zarr
+    zarr_path: /home/xf2217/Projects/get_model.worktrees/refactor_with_hydra/tutorials/astrocytes.zarr
     celltypes: astrocyte
     num_region_per_sample: 200
     transform: null
     leave_out_celltypes: null
     leave_out_chromosomes: 'chr11'
-    quantitative_atac: true
+    quantitative_atac: false
     sampling_step: 100
     mask_ratio: 0.0
 
