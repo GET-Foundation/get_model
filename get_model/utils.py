@@ -294,10 +294,14 @@ def recursive_save_to_zarr(zarr_group, dict_data, **kwargs):
                     and isinstance(zarr_group[k], zarr.core.Array)
                     and zarr_group[k].shape[1:] != v.shape[1:]
                 ):
-                    new_shape = [v.shape[0]] + list(zarr_group[k].shape[1:])
-                    new_data = np.zeros(new_shape, dtype=v.dtype)
-                    new_data[:, : v.shape[1]] = v
-                    zarr_group[k].append(new_data)
+                    # Handle 1D arrays differently
+                    if v.ndim == 1:
+                        zarr_group[k].append(v)
+                    else:
+                        new_shape = [v.shape[0]] + list(zarr_group[k].shape[1:])
+                        new_data = np.zeros(new_shape, dtype=v.dtype)
+                        new_data[:, : v.shape[1]] = v
+                        zarr_group[k].append(new_data)
                 else:
                     zarr_group[k].append(v)
 

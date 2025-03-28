@@ -358,8 +358,13 @@ class LitModel(L.LightningModule):
         # Register hooks to capture target tensors
         def capture_target_tensor(name):
             def hook(module, input, output):
+                if isinstance(output, tuple):
+                    output = output[0] # get the first element of the tuple, usually x rather than (x, attn)
                 output.retain_grad()
-                target_tensors[name] = output
+                if 'encoder' in name:
+                    target_tensors[name] = output[:, 1+focus, :]
+                else:
+                    target_tensors[name] = output[:, focus, :]
             return hook
 
         # Setup hooks and input tensors
@@ -372,7 +377,7 @@ class LitModel(L.LightningModule):
             for key, tensor in input.items():
                 tensor.requires_grad = True
             for layer_name in layer_names:
-                layer = self.model.get_layer(layer_name)
+                layer = self.model.get_submodule(layer_name)
                 hook = layer.register_forward_hook(capture_target_tensor(layer_name))
                 hooks.append(hook)
 
@@ -405,6 +410,8 @@ class LitModel(L.LightningModule):
                 # Store gradients
                 jacobians[target_name][str(i)] = {}
                 for layer_name, layer in target_tensors.items():
+                    if layer_name != 'input':
+                        continue
                     if isinstance(layer, torch.Tensor):
                         if layer.grad is not None:
                             jacobians[target_name][str(i)][layer_name] = layer.grad.detach().cpu().numpy()
@@ -424,7 +431,6 @@ class LitModel(L.LightningModule):
         obs = recursive_numpy(recursive_detach(obs_original))
         jacobians = recursive_numpy(jacobians, dtype=np.float16)
         target_tensors = recursive_numpy(target_tensors, dtype=np.float16)
-        
         return pred, obs, jacobians, target_tensors
 
     def _save_accumulated_results(self):
@@ -439,9 +445,10 @@ class LitModel(L.LightningModule):
 
         object_codec = VLenUTF8()
         z = zarr.open(zarr_path, mode="a")
-
+        print(self.accumulated_results[0].keys())
         # Concatenate all accumulated results
         accumulated_results = recursive_concat_numpy(self.accumulated_results)
+        print(accumulated_results.keys())
         
         # Ensure gene names and chromosomes are properly formatted as string arrays
         if 'available_genes' in accumulated_results:
@@ -464,7 +471,7 @@ class LitModel(L.LightningModule):
 
     def on_predict_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
         if self.cfg.task.test_mode == "interpret":
-            if len(self.accumulated_results) >= 1000:
+            if len(self.accumulated_results) >= 100:
                 self._save_accumulated_results()
             
     def configure_optimizers(self):

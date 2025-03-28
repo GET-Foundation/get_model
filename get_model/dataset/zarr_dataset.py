@@ -124,7 +124,7 @@ def get_gencode_obj(genome_seq_zarr: dict | str):
     # TODO: make this more flexible
     version_mapping = {
         "hg38": 44,
-        "mm10": "m36",
+        "mm10": "M36",
     }
     if isinstance(genome_seq_zarr, dict):
         gencode_obj = {}

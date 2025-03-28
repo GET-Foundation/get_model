@@ -294,6 +294,7 @@ class RegionLitModel(LitModel):
                     "obs": obs,
                     "jacobians": jacobians,
                     "input": embeddings["input"]["region_motif"],
+                    "embeddings": embeddings,
                     "chromosome": chromosomes,
                     "peak_coord": recursive_numpy(recursive_detach(batch["peak_coord"])),
                     "strand": recursive_numpy(recursive_detach(batch["strand"])),
