@@ -75,6 +75,7 @@ def setup_trainer(cfg):
         mode="min",
         save_top_k=1,
         save_last=True,
+        every_n_epochs=cfg.training.save_every_n_epochs,
         filename="best",
         dirpath=os.path.join(
             cfg.machine.output_dir,

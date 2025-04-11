@@ -227,6 +227,7 @@ class TrainingConfig:
         use_fp16: Whether to use FP16.
         log_every_n_steps: Number of steps to log.
         val_check_interval: Validation check interval.
+        save_every_n_epochs: Save checkpoint every n epochs, default is not saving.
     """
 
     save_ckpt_freq: int = 10
@@ -238,7 +239,7 @@ class TrainingConfig:
     log_every_n_steps: int = 25
     val_check_interval: float = 0.5
     add_lr_monitor: bool = False
-
+    save_every_n_epochs: int | None = None
 
 @dataclass
 class RunConfig:
