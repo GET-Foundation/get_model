@@ -70,10 +70,11 @@ def setup_trainer(cfg):
         )
     )
     # Create both regular and finetuned checkpoints
+    save_top_k = -1 if cfg.training.save_every_n_epochs is not None else 1
     regular_checkpoint = ModelCheckpoint(
         monitor="val_loss",
         mode="min",
-        save_top_k=1,
+        save_top_k=save_top_k,
         save_last=True,
         every_n_epochs=cfg.training.save_every_n_epochs,
         filename="best",
