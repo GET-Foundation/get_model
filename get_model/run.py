@@ -361,7 +361,9 @@ class LitModel(L.LightningModule):
                 if isinstance(output, tuple):
                     output = output[0] # get the first element of the tuple, usually x rather than (x, attn)
                 output.retain_grad()
-                if 'encoder' in name:
+                if name == "region_embed":
+                    target_tensors[name] = output
+                elif 'encoder' in name: # in encoder, a cls token is added in the first position
                     target_tensors[name] = output[:, 1+focus, :]
                 else:
                     target_tensors[name] = output[:, focus, :]
@@ -410,8 +412,6 @@ class LitModel(L.LightningModule):
                 # Store gradients
                 jacobians[target_name][str(i)] = {}
                 for layer_name, layer in target_tensors.items():
-                    if layer_name != 'input':
-                        continue
                     if isinstance(layer, torch.Tensor):
                         if layer.grad is not None:
                             jacobians[target_name][str(i)][layer_name] = layer.grad.detach().cpu().numpy()
