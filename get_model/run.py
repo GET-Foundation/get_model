@@ -733,8 +733,9 @@ class GETDataModule(L.LightningDataModule):
         )
 
 
-def run_shared(cfg, model, dm):
-    trainer = setup_trainer(cfg)
+def run_shared(cfg, model, dm, trainer=None):
+    if trainer is None:
+        trainer = setup_trainer(cfg)
 
     if cfg.stage == "fit":
         trainer.fit(model, dm, ckpt_path=cfg.finetune.resume_ckpt)
