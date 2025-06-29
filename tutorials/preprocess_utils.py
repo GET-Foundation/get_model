@@ -186,11 +186,7 @@ def create_peak_motif(peak_motif_bed, output_zarr, peak_bed, assembly="hg38"):
         lambda x: f'{x["Chromosome"]}:{x["Start"]}-{x["End"]}', axis=1
     )
     peak_motif_pivoted = peak_motif_pivoted.drop(columns=["Chromosome", "Start", "End"])
-    human_motif_cluster = np.loadtxt('./human_motif_cluster_id', dtype=str)
-    for motif in human_motif_cluster:
-        if motif not in peak_motif_pivoted.columns:
-            peak_motif_pivoted[motif] = np.nan
-    peak_motif_pivoted = peak_motif_pivoted[human_motif_cluster].copy().fillna(0)
+
     # Read the original peak bed file
     original_peaks = pd.read_csv(
         peak_bed, sep="\t", header=None, names=["Chromosome", "Start", "End", "Score"]
@@ -204,19 +200,18 @@ def create_peak_motif(peak_motif_bed, output_zarr, peak_bed, assembly="hg38"):
     # Merge the pivoted data with the original peaks
     merged_data = pd.merge(original_peaks, peak_motif_pivoted, on="Name", how="left")
 
-    # Fill NaN values with 0 for motif columns
-    motif_columns = [
-        col
-        for col in merged_data.columns
-        if col not in ["Chromosome", "Start", "End", "Score", "Name"]
-    ]
-    merged_data[motif_columns] = merged_data[motif_columns].fillna(0)
+    human_motif_cluster = np.loadtxt('./human_motif_cluster_id', dtype=str)
+    for motif in human_motif_cluster:
+        if motif not in merged_data.columns:
+            merged_data[motif] = np.nan
+    merged_data = merged_data[human_motif_cluster].copy().fillna(0)
+    
     # Prepare data for zarr storage
     name_values = list(merged_data["Name"].values)
-    motif_values = motif_columns
+    motif_values = human_motif_cluster
 
     # Create sparse matrix
-    motif_data_matrix = merged_data[motif_columns].values
+    motif_data_matrix = merged_data[human_motif_cluster].values
     # Open zarr store and save data
     from numcodecs import Blosc
 
