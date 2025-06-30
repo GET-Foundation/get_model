@@ -199,16 +199,13 @@ def create_peak_motif(peak_motif_bed, output_zarr, peak_bed, assembly="hg38"):
 
     # Merge the pivoted data with the original peaks
     merged_data = pd.merge(original_peaks, peak_motif_pivoted, on="Name", how="left")
+    name_values = list(merged_data["Name"].values)
 
     human_motif_cluster = np.loadtxt('./human_motif_cluster_id', dtype=str)
     for motif in human_motif_cluster:
         if motif not in merged_data.columns:
             merged_data[motif] = np.nan
     merged_data = merged_data[human_motif_cluster].copy().fillna(0)
-    
-    # Prepare data for zarr storage
-    name_values = list(merged_data["Name"].values)
-    motif_values = human_motif_cluster
 
     # Create sparse matrix
     motif_data_matrix = merged_data[human_motif_cluster].values
@@ -225,7 +222,7 @@ def create_peak_motif(peak_motif_bed, output_zarr, peak_bed, assembly="hg38"):
         shape=motif_data_matrix.shape,
     )
     z.create_dataset("peak_names", data=name_values)
-    z.create_dataset("motif_names", data=motif_values)
+    z.create_dataset("motif_names", data=human_motif_cluster)
 
     print(f"Peak motif data saved to {output_zarr}")
 
