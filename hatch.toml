@@ -1,6 +1,8 @@
 [envs.default]
 installer = "uv"
 features = ["dev"]
+#set python version to 3.12
+python = "3.12"
 
 [envs.docs]
 features = ["doc"]

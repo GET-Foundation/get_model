@@ -20,14 +20,14 @@ def extract_finetuned_weights(state_dict):
 
 def load_lora_weights(state_dict, path, model_key="state_dict"):
     """Load LoRA weights from a checkpoint file into the state_dict."""
-    lora_state_dict = torch.load(path)
+    lora_state_dict = torch.load(path, weights_only=False)
     state_dict.update(lora_state_dict[model_key])
     return state_dict
 
 
 def load_finetuned_weights(state_dict, path, model_key="state_dict"):
     """Load finetuned weights from a checkpoint file into the state_dict."""
-    finetuned_state_dict = torch.load(path)
+    finetuned_state_dict = torch.load(path, weights_only=False)
     state_dict.update(finetuned_state_dict[model_key])
     return state_dict
 
@@ -113,25 +113,25 @@ def main():
     args = parser.parse_args()
 
     if args.command == "extract_lora":
-        state_dict = torch.load(args.input_ckpt)["state_dict"]
+        state_dict = torch.load(args.input_ckpt, weights_only=False)["state_dict"]
         lora_weights = extract_lora_weights(state_dict)
         torch.save(lora_weights, args.output_path)
     elif args.command == "extract_finetuned":
-        state_dict = torch.load(args.input_ckpt)["state_dict"]
+        state_dict = torch.load(args.input_ckpt, weights_only=False)["state_dict"]
         finetuned_weights = extract_finetuned_weights(state_dict)
         torch.save(finetuned_weights, args.output_path)
     elif args.command == "load_lora":
-        state_dict = torch.load(args.input_ckpt)["state_dict"]
+        state_dict = torch.load(args.input_ckpt, weights_only=False)["state_dict"]
         state_dict = load_lora_weights(state_dict, args.lora_ckpt, args.model_key)
         torch.save(state_dict, args.output_path)
     elif args.command == "load_finetuned":
-        state_dict = torch.load(args.input_ckpt)["state_dict"]
+        state_dict = torch.load(args.input_ckpt, weights_only=False)["state_dict"]
         state_dict = load_finetuned_weights(
             state_dict, args.finetuned_ckpt, args.model_key
         )
         torch.save(state_dict, args.output_path)
     elif args.command == "merge_lora":
-        model = torch.load(args.model_ckpt)
+        model = torch.load(args.model_ckpt, weights_only=False)
         merge_lora(model)
         torch.save(model.state_dict(), args.output_path)
 

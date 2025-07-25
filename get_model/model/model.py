@@ -1211,7 +1211,7 @@ class GETChrombpNet(GETChrombpNetBias):
         if self.with_bias:
             self.bias_model = cfg.bias_model
             if cfg.bias_ckpt is not None:
-                checkpoint = torch.load(cfg.bias_ckpt, map_location="cpu")
+                checkpoint = torch.load(cfg.bias_ckpt, map_location="cpu", weights_only=False)
                 if 'model' in checkpoint:
                     checkpoint = checkpoint['model']
                 if 'state_dict' in checkpoint:
