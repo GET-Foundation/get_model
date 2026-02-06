@@ -39,7 +39,8 @@ dependencies = [
     "torchmetrics",
     "tqdm",
     "wandb",
-    "zarr<3",
+    "zarr>=3",
+    "numcodecs>=0.15.1",
 ]
 
 [project.optional-dependencies]
