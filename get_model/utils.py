@@ -296,7 +296,7 @@ def recursive_save_to_zarr(zarr_group, dict_data, **kwargs):
                 # pad to the same shape
                 if (
                     isinstance(v, np.ndarray)
-                    and isinstance(zarr_group[k], zarr.core.Array)
+                    and isinstance(zarr_group[k], zarr.Array)
                     and zarr_group[k].shape[1:] != v.shape[1:]
                 ):
                     # Handle 1D arrays differently
@@ -347,7 +347,7 @@ def cosine_scheduler(
 def recursive_print_shape(zarr_path, prefix=''):
     z = zarr.open(zarr_path)
     for key, value in z.items():
-        if isinstance(value, zarr.core.Array):
+        if isinstance(value, zarr.Array):
             print(f"{prefix}/{key}: {value.shape}")
         else:
             recursive_print_shape(value, f"{prefix}/{key}")
